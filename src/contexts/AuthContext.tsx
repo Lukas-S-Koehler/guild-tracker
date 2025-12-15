@@ -45,7 +45,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const { data: userGuilds, error } = await supabase
             .rpc('get_user_guilds');
 
-          if (!error && userGuilds) {
+          if (error) {
+            console.error('Error fetching guilds:', error);
+            // Set empty guilds array so user sees "no guilds" message
+            setGuilds([]);
+          } else if (userGuilds && Array.isArray(userGuilds)) {
             setGuilds(userGuilds);
 
             // Try to restore current guild from localStorage
@@ -54,10 +58,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
             // Set current guild to saved guild or first available guild
             setCurrentGuildState(savedGuild || userGuilds[0] || null);
+          } else {
+            setGuilds([]);
           }
         }
       } catch (error) {
         console.error('Error loading user:', error);
+        setGuilds([]);
       } finally {
         setLoading(false);
       }
@@ -71,12 +78,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (session?.user) {
         // Reload guilds when user signs in
-        const { data: userGuilds } = await supabase.rpc('get_user_guilds');
-        if (userGuilds) {
+        const { data: userGuilds, error } = await supabase.rpc('get_user_guilds');
+        if (error) {
+          console.error('Error fetching guilds on auth change:', error);
+          setGuilds([]);
+        } else if (userGuilds && Array.isArray(userGuilds)) {
           setGuilds(userGuilds);
           if (!currentGuild && userGuilds.length > 0) {
             setCurrentGuildState(userGuilds[0]);
           }
+        } else {
+          setGuilds([]);
         }
       } else {
         // Clear guilds when user signs out
