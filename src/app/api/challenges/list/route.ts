@@ -1,29 +1,34 @@
 // app/api/challenges/list/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase';
+import { createServerClient } from '@/lib/supabase';
+import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 
 export async function GET(req: NextRequest) {
-  const supabase = createClient();
+  // Verify authentication (members can view challenges)
+  const auth = await verifyAuth(req, 'MEMBER');
+  if (isErrorResponse(auth)) return auth;
+
+  const supabase = createServerClient();
 
   try {
-    // Get guild_id from config
-    const { data: config, error: configError } = await supabase
-      .from('guild_config')
-      .select('guild_id')
-      .limit(1)
-      .single();
+    const { searchParams } = new URL(req.url);
+    const date = searchParams.get('date');
 
-    if (configError || !config?.guild_id) {
-      return NextResponse.json({ error: 'Guild not configured' }, { status: 400 });
-    }
-
-    // Query challenges for this guild, newest first
-    const { data: challenges, error: challengesError } = await supabase
+    // Query challenges for the authenticated guild (RLS will also filter)
+    let query = supabase
       .from('challenges')
       .select('id, challenge_date, total_cost, items')
-      .eq('guild_id', config.guild_id)
-      .order('created_at', { ascending: false })
-      .limit(50);
+      .eq('guild_id', auth.guildId)
+      .order('created_at', { ascending: false });
+
+    // If date is provided, filter for that specific date
+    if (date) {
+      query = query.eq('challenge_date', date);
+    } else {
+      query = query.limit(50);
+    }
+
+    const { data: challenges, error: challengesError } = await query;
 
     if (challengesError) {
       console.error('Error fetching challenges:', challengesError);

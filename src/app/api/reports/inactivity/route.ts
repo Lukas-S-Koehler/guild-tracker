@@ -1,67 +1,41 @@
-import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase';
-import { getToday, getInactivityCategory } from '@/lib/utils';
+import { NextRequest, NextResponse } from 'next/server';
+import { createServerClient } from '@/lib/supabase';
+import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 
-export async function GET() {
-  const supabase = createClient();
+export async function GET(req: NextRequest) {
+  // Verify authentication (members can view reports)
+  const auth = await verifyAuth(req, 'MEMBER');
+  if (isErrorResponse(auth)) return auth;
 
-  // Get all members
-  const { data: members, error: membersError } = await supabase
-    .from('members')
-    .select('id, ign');
+  const supabase = createServerClient();
 
-  if (membersError) {
-    return NextResponse.json({ error: membersError.message }, { status: 500 });
+  // Use the inactivity_view which already calculates everything
+  const { data: inactiveMembers, error } = await supabase
+    .from('inactivity_view')
+    .select('*')
+    .order('days_inactive', { ascending: false });
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Get all logs where requirement was met
-  const { data: logs, error: logsError } = await supabase
-    .from('daily_logs')
-    .select('member_id, log_date')
-    .eq('met_requirement', true)
-    .order('log_date', { ascending: false });
-
-  if (logsError) {
-    return NextResponse.json({ error: logsError.message }, { status: 500 });
-  }
-
-  // Find last active date for each member
-  const lastActiveMap = new Map<string, string>();
-  logs?.forEach((log) => {
-    if (!lastActiveMap.has(log.member_id)) {
-      lastActiveMap.set(log.member_id, log.log_date);
-    }
-  });
-
-  const today = new Date(getToday());
-
-  // Calculate inactivity
-  const report = members
-    ?.map((member) => {
-      const lastActiveDate = lastActiveMap.get(member.id);
-
-      let daysInactive: number;
-
-      if (!lastActiveDate) {
-        daysInactive = -1; // Never active
-      } else {
-        const lastActive = new Date(lastActiveDate);
-        daysInactive = Math.floor(
-          (today.getTime() - lastActive.getTime()) / (1000 * 60 * 60 * 24)
-        );
+  // Filter out invalid entries and format the response
+  const report = inactiveMembers
+    ?.filter((m) => {
+      // Filter out invalid entries
+      if (!m.ign || m.ign.toLowerCase().includes('raw activity') || m.ign.toLowerCase().includes('log')) {
+        return false;
       }
-
-      const category = getInactivityCategory(daysInactive);
-
-      return {
-        id: member.id,
-        ign: member.ign,
-        last_active_date: lastActiveDate || null,
-        days_inactive: daysInactive,
-        category,
-      };
+      // Only show inactive members (not active today)
+      return m.inactivity_category !== 'active';
     })
-    .filter((m) => m.category !== 'active')
+    .map((m) => ({
+      id: m.id,
+      ign: m.ign,
+      last_active_date: m.last_active_date,
+      days_inactive: m.days_inactive,
+      category: m.inactivity_category,
+    }))
     .sort((a, b) => {
       // Sort by severity (never first, then by days)
       if (a.category === 'never') return -1;

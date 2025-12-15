@@ -5,6 +5,7 @@
 CREATE TABLE IF NOT EXISTS guild_config (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   guild_name TEXT,
+  guild_id TEXT,
   api_key TEXT NOT NULL,
   donation_requirement INTEGER DEFAULT 5000,
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -42,20 +43,38 @@ CREATE TABLE IF NOT EXISTS market_cache (
   cached_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Challenges (daily guild challenges)
+CREATE TABLE IF NOT EXISTS challenges (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  guild_id TEXT NOT NULL,
+  challenge_date DATE NOT NULL,
+  raw_input TEXT,
+  items JSONB NOT NULL DEFAULT '[]'::jsonb,
+  total_cost INTEGER DEFAULT 0,
+  is_completed BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(guild_id, challenge_date)
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_members_ign ON members(ign);
 CREATE INDEX IF NOT EXISTS idx_daily_logs_date ON daily_logs(log_date);
 CREATE INDEX IF NOT EXISTS idx_daily_logs_member ON daily_logs(member_id);
 CREATE INDEX IF NOT EXISTS idx_market_cache_name ON market_cache(item_name);
+CREATE INDEX IF NOT EXISTS idx_challenges_date ON challenges(challenge_date);
+CREATE INDEX IF NOT EXISTS idx_challenges_guild ON challenges(guild_id);
 
 -- Enable Row Level Security
 ALTER TABLE guild_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE daily_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE market_cache ENABLE ROW LEVEL SECURITY;
+ALTER TABLE challenges ENABLE ROW LEVEL SECURITY;
 
 -- Create policies (allow all for simplicity - adjust for production)
 CREATE POLICY "Allow all on guild_config" ON guild_config FOR ALL USING (true);
 CREATE POLICY "Allow all on members" ON members FOR ALL USING (true);
 CREATE POLICY "Allow all on daily_logs" ON daily_logs FOR ALL USING (true);
 CREATE POLICY "Allow all on market_cache" ON market_cache FOR ALL USING (true);
+CREATE POLICY "Allow all on challenges" ON challenges FOR ALL USING (true);

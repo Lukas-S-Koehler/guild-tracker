@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase';
+import { createServerClient } from '@/lib/supabase';
+import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 
 export async function POST(req: NextRequest) {
-  const supabase = createClient();
+  // Verify authentication (officers and leaders can save challenges)
+  const auth = await verifyAuth(req, 'OFFICER');
+  if (isErrorResponse(auth)) return auth;
+
+  const supabase = createServerClient();
 
   try {
     const body = await req.json();
@@ -15,28 +20,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 🔑 Fetch guild_id from config table
-    const { data: config, error: configError } = await supabase
-      .from('guild_config')
-      .select('guild_id')
-      .limit(1)
-      .single();
-
-    if (configError || !config?.guild_id) {
-      return NextResponse.json(
-        { error: 'Guild ID not configured. Please run Setup first.' },
-        { status: 400 }
-      );
-    }
-
-    // 📝 Insert into challenges table
+    // 📝 Insert into challenges table using authenticated guild
     const { error: insertError, data } = await supabase
       .from('challenges')
       .insert({
         raw_input,
         items, // jsonb
         total_cost,
-        guild_id: config.guild_id,
+        guild_id: auth.guildId,
         challenge_date: new Date().toISOString().split('T')[0], // YYYY-MM-DD
         is_completed: false,
       })

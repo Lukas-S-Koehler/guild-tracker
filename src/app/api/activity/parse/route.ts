@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase';
+import { createServerClient } from '@/lib/supabase';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { parseActivityLog, getUniqueItems } from '@/lib/parsers';
 import type { ProcessedMember } from '@/types';
 
 export async function POST(req: NextRequest) {
-  const supabase = createClient();
+  const supabase = createServerClient();
   const body = await req.json();
   const { raw_log } = body;
 

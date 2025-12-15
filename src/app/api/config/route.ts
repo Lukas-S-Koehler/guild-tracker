@@ -1,17 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase';
+import { createServerClient } from '@/lib/supabase';
+import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 
 const DEFAULT_DONATION_REQUIREMENT = 5000;
 
 // GET CONFIG
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // Verify authentication (members can view config)
+  const auth = await verifyAuth(req, 'MEMBER');
+  if (isErrorResponse(auth)) return auth;
+
   try {
-    const supabase = createClient();
+    const supabase = createServerClient();
 
     const { data, error } = await supabase
       .from('guild_config')
       .select('id, guild_name, guild_id, api_key, settings')
-      .limit(1)
+      .eq('guild_id', auth.guildId)
       .single();
 
     if (error && error.code !== 'PGRST116') {
@@ -42,8 +47,12 @@ export async function GET() {
 
 // SAVE CONFIG
 export async function POST(req: NextRequest) {
+  // Verify authentication (only leaders can update config)
+  const auth = await verifyAuth(req, 'LEADER');
+  if (isErrorResponse(auth)) return auth;
+
   try {
-    const supabase = createClient();
+    const supabase = createServerClient();
     const body = await req.json();
 
     const { guild_name, guild_id, api_key, donation_requirement } = body;
@@ -55,11 +64,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Ensure user can only update their own guild
+    if (guild_id !== auth.guildId) {
+      return NextResponse.json(
+        { error: 'You can only update your own guild config' },
+        { status: 403 }
+      );
+    }
+
     const { data: existing } = await supabase
       .from('guild_config')
       .select('id, settings')
       .eq('guild_id', guild_id)
-      .limit(1)
       .single();
 
     const newSettings = {

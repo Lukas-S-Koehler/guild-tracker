@@ -80,7 +80,7 @@ export default function ReportsPage() {
             <div>
               <CardTitle>Inactive Members</CardTitle>
               <CardDescription>
-                Based on daily tracker data (5,000+ gold = active)
+                Based on daily tracker data (excludes Leaders & Deputies)
               </CardDescription>
             </div>
             <Button variant="outline" onClick={handleCopy} disabled={loading || entries.length === 0}>
@@ -144,7 +144,11 @@ export default function ReportsPage() {
 
       <div className="text-sm text-muted-foreground p-4 bg-muted rounded-lg">
         <p className="font-medium mb-1">📋 Activity Requirement</p>
-        <p>A member is considered active if they donated 5,000+ gold on a given day.</p>
+        <p>A member is considered active if they meet either requirement:</p>
+        <ul className="list-disc list-inside mt-1 space-y-1">
+          <li>Donated 5,000+ gold in a day, OR</li>
+          <li>Donated 50% or more of the daily challenge requirement</li>
+        </ul>
       </div>
     </div>
   );

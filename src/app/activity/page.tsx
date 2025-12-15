@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -20,6 +20,37 @@ export default function ActivityPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [donationReq, setDonationReq] = useState(5000);
+  const [challengeTotal, setChallengeTotal] = useState(0);
+
+  // Fetch config and challenge info on mount and when date changes
+  useEffect(() => {
+    const fetchRequirements = async () => {
+      try {
+        // Fetch donation requirement from config
+        const configRes = await fetch('/api/config');
+        if (configRes.ok) {
+          const configData = await configRes.json();
+          setDonationReq(configData.donation_requirement || 5000);
+        }
+
+        // Fetch challenge for selected date
+        const challengeRes = await fetch(`/api/challenges/list?date=${logDate}`);
+        if (challengeRes.ok) {
+          const challenges = await challengeRes.json();
+          if (challenges && challenges.length > 0) {
+            setChallengeTotal(challenges[0].total_cost || 0);
+          } else {
+            setChallengeTotal(0);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch requirements:', err);
+      }
+    };
+
+    fetchRequirements();
+  }, [logDate]);
 
   const handleProcess = async () => {
     if (!rawLog.trim()) {
@@ -192,6 +223,18 @@ Contributed 100 Iron Ore
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {(donationReq > 0 || challengeTotal > 0) && (
+              <div className="mb-4 p-3 bg-muted rounded-lg text-sm">
+                <p className="font-medium mb-1">Activity Requirements:</p>
+                <ul className="space-y-1 text-muted-foreground">
+                  <li>• {formatGold(donationReq)} donated (base requirement)</li>
+                  {challengeTotal > 0 && (
+                    <li>• {formatGold(Math.floor(challengeTotal / 2))} donated (50% of {formatGold(challengeTotal)} challenge)</li>
+                  )}
+                </ul>
+                <p className="mt-2 text-xs">Members meeting either requirement will be marked as active.</p>
+              </div>
+            )}
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -204,7 +247,11 @@ Contributed 100 Iron Ore
                 </thead>
                 <tbody>
                   {results.map((member, i) => {
-                    const meetsReq = member.gold >= 5000; // TODO: get from config
+                    const metsDonationReq = member.gold >= donationReq;
+                    const halfChallengeReq = Math.floor(challengeTotal / 2);
+                    const metsChallengeReq = halfChallengeReq > 0 && member.gold >= halfChallengeReq;
+                    const meetsReq = metsDonationReq || metsChallengeReq;
+
                     return (
                       <tr key={i} className="border-b last:border-0">
                         <td className="py-2 font-medium">{member.ign}</td>

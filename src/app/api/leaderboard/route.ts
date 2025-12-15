@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase';
+import { createServerClient } from '@/lib/supabase';
+import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 import { getWeekStart, getMonthStart } from '@/lib/utils';
 
 export async function GET(req: NextRequest) {
-  const supabase = createClient();
+  // Verify authentication (members can view leaderboard)
+  const auth = await verifyAuth(req, 'MEMBER');
+  if (isErrorResponse(auth)) return auth;
+
+  const supabase = createServerClient();
   const { searchParams } = new URL(req.url);
 
   const period = searchParams.get('period') || 'week';
