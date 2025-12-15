@@ -17,6 +17,7 @@ export default function SetupPage() {
 
   const [config, setConfig] = useState({
     guild_name: '',
+    guild_id: '',
     api_key: '',
     donation_requirement: 5000,
   });
@@ -27,13 +28,12 @@ export default function SetupPage() {
         const res = await fetch('/api/config');
         const data = await res.json();
 
-        if (data.api_key) {
-          setConfig({
-            guild_name: data.guild_name || '',
-            api_key: data.api_key,
-            donation_requirement: data.donation_requirement || 5000,
-          });
-        }
+        setConfig({
+          guild_name: data.guild_name || '',
+          guild_id: data.guild_id || '',
+          api_key: data.api_key || '',
+          donation_requirement: data.donation_requirement || 5000,
+        });
       } catch (err) {
         console.error('Failed to fetch config:', err);
       } finally {
@@ -48,9 +48,8 @@ export default function SetupPage() {
     setError(null);
     setSuccess(null);
 
-    // 🚨 Validation Updated: Check api_key and guild_name
-    if (!config.api_key || !config.guild_name) {
-      setError('API key and Guild Name are required');
+    if (!config.api_key || !config.guild_name || !config.guild_id) {
+      setError('API key, Guild Name, and Guild ID are required');
       setSaving(false);
       return;
     }
@@ -62,16 +61,8 @@ export default function SetupPage() {
         body: JSON.stringify(config),
       });
 
-      if (!res.ok) {
-        // Attempt to parse JSON error message
-        let data;
-        try {
-            data = await res.json();
-        } catch {
-            throw new Error(`Server returned status ${res.status}, but response was not valid JSON.`);
-        }
-        throw new Error(data.error || 'Failed to save');
-      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save');
 
       setSuccess('Configuration saved!');
       setTimeout(() => router.push('/'), 1500);
@@ -97,12 +88,14 @@ export default function SetupPage() {
         <p className="text-muted-foreground">Configure your guild tracker settings</p>
       </div>
 
+      {/* Guild Settings */}
       <Card>
         <CardHeader>
           <CardTitle>Guild Settings</CardTitle>
           <CardDescription>Basic configuration for your guild</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+
           <div className="space-y-2">
             <Label htmlFor="guild_name">Guild Name</Label>
             <Input
@@ -112,6 +105,20 @@ export default function SetupPage() {
               onChange={(e) => setConfig({ ...config, guild_name: e.target.value })}
             />
           </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="guild_id">Guild ID (numeric)</Label>
+            <Input
+              id="guild_id"
+              placeholder="1234"
+              value={config.guild_id}
+              onChange={(e) => setConfig({ ...config, guild_id: e.target.value })}
+            />
+            <p className="text-xs text-muted-foreground">
+              Find this in the IdleMMO guild URL: https://idle-mmo.com/guild/<b>1234</b>
+            </p>
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="donation_req">Donation Requirement (gold)</Label>
             <Input
@@ -119,19 +126,20 @@ export default function SetupPage() {
               type="number"
               min="0"
               value={config.donation_requirement}
-              onChange={(e) => setConfig({ ...config, donation_requirement: parseInt(e.target.value) || 0 })}
+              onChange={(e) =>
+                setConfig({ ...config, donation_requirement: parseInt(e.target.value) || 0 })
+              }
             />
-            <p className="text-xs text-muted-foreground">
-              Members donating this much gold will be marked as meeting the requirement
-            </p>
           </div>
+
         </CardContent>
       </Card>
 
+      {/* API Key */}
       <Card>
         <CardHeader>
           <CardTitle>IdleMMO API Key</CardTitle>
-          <CardDescription>Required for fetching market prices</CardDescription>
+          <CardDescription>Required for guild syncing</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
@@ -143,9 +151,6 @@ export default function SetupPage() {
               value={config.api_key}
               onChange={(e) => setConfig({ ...config, api_key: e.target.value })}
             />
-            <p className="text-xs text-muted-foreground">
-              Get your API key from IdleMMO settings. Used only for market price lookups.
-            </p>
           </div>
         </CardContent>
       </Card>

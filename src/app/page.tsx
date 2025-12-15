@@ -185,9 +185,14 @@ export default function DashboardPage() {
             <Link href="/leaderboard">🏆 Leaderboard</Link>
           </Button>
           <Button asChild variant="outline">
+            <Link href="/members">👥 Members</Link>
+          </Button>
+
+          <Button asChild variant="outline">
             <Link href="/reports">📊 Inactivity Report</Link>
           </Button>
         </CardContent>
+      
       </Card>
     </div>
   );

@@ -24,36 +24,47 @@ export default function ChallengesPage() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const handleCalculate = async () => {
-    if (!rawInput.trim()) {
-      setError('Please paste challenge data');
-      return;
-    }
+const handleCalculate = async () => {
+  if (!rawInput.trim()) {
+    setError('Please paste challenge data');
+    return;
+  }
 
-    setProcessing(true);
-    setError(null);
-    setItems(null);
+  setProcessing(true);
+  setError(null);
+  setItems(null);
 
-    try {
-      const res = await fetch('/api/challenges/parse', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ raw_input: rawInput }),
-      });
+  try {
+    const res = await fetch('/api/challenges/parse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ raw_input: rawInput }),
+    });
 
-      const data = await res.json();
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to process');
 
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to process');
-      }
+    setItems(data.items);
 
-      setItems(data.items);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to process');
-    } finally {
-      setProcessing(false);
-    }
-  };
+    // 👉 Save challenge automatically
+    const totalCost = data.items.reduce((sum: number, i: any) => sum + i.total, 0);
+    await fetch('/api/challenges/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        raw_input: rawInput,
+        items: data.items,
+        total_cost: totalCost,
+      }),
+    });
+  } catch (err) {
+    setError(err instanceof Error ? err.message : 'Failed to process');
+  } finally {
+    setProcessing(false);
+  }
+};
+
+
 
   const handleCopy = async () => {
     if (!items) return;
