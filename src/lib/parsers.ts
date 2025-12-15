@@ -11,68 +11,74 @@ import type { ParsedActivity } from '@/types';
  * 2h
  */
 export function parseActivityLog(text: string): Record<string, ParsedActivity> {
-  const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+  const rawLines = text.split(/\r?\n/);
+  const lines = rawLines.map(l => l.trim()).filter(l => l !== '');
   const members: Record<string, ParsedActivity> = {};
 
   let currentMember: string | null = null;
+  const raidRe = /participated in a raid/i;
+  const contributedRe = /contributed\s+([\d,]+)\s+(.+)/i;
+  const timeRe = /^\d+[smhdw]$/i;
 
   for (let i = 0; i < lines.length; i++) {
     let line = lines[i];
 
-    // Remove Discord/Markdown formatting (__text__ or **text**)
+    // strip markdown formatting
     line = line.replace(/__|[*]{1,2}/g, '').trim();
 
-    // Skip empty lines and timestamps (1d, 2h, 21h, 2m, etc.)
-    if (!line || /^\d+[hHdDmMsS]+$/.test(line)) {
-      continue;
-    }
+    // skip pure timestamps
+    if (!line || timeRe.test(line)) continue;
 
-    // Check if this is a member name line (starts with *)
-    // The original line would have been "* Username"
-    const originalLine = lines[i];
-    if (originalLine.startsWith('*') || originalLine.startsWith('* ')) {
-      // Extract username - remove the * and any formatting
-      currentMember = line.replace(/^\*\s*/, '').trim();
-      
-      if (currentMember && !members[currentMember]) {
-        members[currentMember] = {
-          ign: currentMember,
-          raids: 0,
-          donations: []
-        };
+    // If the original raw line started with '*' treat as username
+    const raw = rawLines[i] ?? '';
+    const looksLikeStarUser = raw.trim().startsWith('*');
+
+    // Heuristic: if line is followed by an action, treat it as username
+    const next = (lines[i + 1] ?? '').trim();
+    const nextIsAction = raidRe.test(next) || contributedRe.test(next);
+
+    if (looksLikeStarUser || nextIsAction) {
+      // username line
+      const ign = line.replace(/^\*\s*/, '').trim();
+      currentMember = ign;
+      if (ign && !members[ign]) {
+        members[ign] = { ign, raids: 0, donations: [] };
       }
       continue;
     }
 
-    // Check if this is a raid
-    if (line.toLowerCase().includes('participated in a raid')) {
-      if (currentMember && members[currentMember]) {
-        members[currentMember].raids++;
-      }
+    // If we reach here and currentMember is null, try to infer: if line itself is an action, skip
+    if (!currentMember) {
+      // If this line itself is an action but no username above, skip
+      if (raidRe.test(line) || contributedRe.test(line)) continue;
+      // Otherwise treat as a username fallback
+      currentMember = line;
+      if (!members[currentMember]) members[currentMember] = { ign: currentMember, raids: 0, donations: [] };
       continue;
     }
 
-    // Check if this is a donation (Contributed X ItemName)
-    const donationMatch = line.match(/contributed\s+(\d+)\s+(.+)/i);
-    if (donationMatch && currentMember && members[currentMember]) {
-      const quantity = parseInt(donationMatch[1]);
-      let itemName = donationMatch[2].trim();
-
-      // Remove any remaining formatting
-      itemName = itemName.replace(/__|[*]{1,2}/g, '').trim();
-
-      members[currentMember].donations.push({
-        item: itemName,
-        quantity: quantity
-      });
+    // handle raid
+    if (raidRe.test(line)) {
+      members[currentMember].raids++;
       continue;
     }
 
-    // Ignore "Joined the guild", "Kicked from the guild", etc.
+    // handle contribution
+    const m = line.match(contributedRe);
+    if (m) {
+      const qty = parseInt(m[1].replace(/,/g, ''), 10) || 0;
+      let item = m[2].trim();
+      item = item.replace(/__|[*]{1,2}/g, '').trim();
+      members[currentMember].donations.push({ item, quantity: qty });
+      continue;
+    }
+
+    // ignore other lines (joined/left/kicked)
   }
 
   return members;
 }
+
 
 /**
  * Get unique item names from parsed activity data

@@ -7,7 +7,6 @@ import type { ProcessedMember } from '@/types';
 export async function POST(req: NextRequest) {
   const supabase = createClient();
   const body = await req.json();
-
   const { raw_log } = body;
 
   if (!raw_log || !raw_log.trim()) {
@@ -15,18 +14,23 @@ export async function POST(req: NextRequest) {
   }
 
   // Get API key
-  const { data: config } = await supabase
+  const { data: config, error: configError } = await supabase
     .from('guild_config')
     .select('api_key')
     .limit(1)
     .single();
+
+  if (configError) {
+    console.error('Error fetching guild_config:', configError);
+    return NextResponse.json({ error: 'Failed to load configuration' }, { status: 500 });
+  }
 
   if (!config?.api_key) {
     return NextResponse.json({ error: 'API key not configured. Go to Setup first.' }, { status: 400 });
   }
 
   try {
-    // Parse the activity log
+    // Parse the activity log into a map: { ign: { raids, donations: [{item,quantity}] } }
     const parsed = parseActivityLog(raw_log);
     const memberNames = Object.keys(parsed);
 
@@ -34,59 +38,78 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No valid activity found in log' }, { status: 400 });
     }
 
-    // Get unique items that need price lookups
-    const uniqueItems = getUniqueItems(parsed);
+    // Get unique items that need price lookups (normalize to lowercase)
+    const uniqueItemsRaw = getUniqueItems(parsed); // e.g., ['Yew Log', "Siren's Scales"]
+    const uniqueItems = Array.from(new Set(uniqueItemsRaw.map((s: string) => s.toLowerCase())));
 
-    // Check cache first
-    const { data: cached } = await supabase
-      .from('market_cache')
-      .select('item_name, price')
-      .in('item_name', uniqueItems.map(i => i.toLowerCase()));
+    // Prepare price map and check cache only if we have items
+    const pricesByLower: Record<string, number> = {};
 
-    const cachedPrices: Record<string, number> = {};
-    cached?.forEach(c => {
-      cachedPrices[c.item_name.toLowerCase()] = c.price;
-    });
+    if (uniqueItems.length > 0) {
+      // Query cache for lowercase item names
+      const { data: cached, error: cacheError } = await supabase
+        .from('market_cache')
+        .select('item_name, price')
+        .in('item_name', uniqueItems);
+
+      if (cacheError) {
+        console.warn('market_cache query error:', cacheError);
+      } else {
+        cached?.forEach((c: any) => {
+          if (c?.item_name) {
+            pricesByLower[c.item_name.toLowerCase()] = c.price;
+          }
+        });
+      }
+    }
 
     // Fetch prices for items not in cache
     const api = new IdleMMOApi(config.api_key);
-    const prices: Record<string, number> = { ...cachedPrices };
 
-    for (const itemName of uniqueItems) {
-      if (cachedPrices[itemName.toLowerCase()] !== undefined) {
-        prices[itemName] = cachedPrices[itemName.toLowerCase()];
-        continue;
-      }
+    for (const lowerName of uniqueItems) {
+      if (pricesByLower[lowerName] !== undefined) continue;
 
-      const { price, itemId } = await api.getItemPrice(itemName);
-      prices[itemName] = price;
+      try {
+        // Use the original-cased name for API if you have it; otherwise pass lowerName
+        // Here we call API with the lowerName; adjust if your API expects original casing
+        const { price, itemId } = await api.getItemPrice(lowerName);
+        pricesByLower[lowerName] = price ?? 0;
 
-      // Cache the price
-      if (price > 0) {
-        await supabase.from('market_cache').upsert({
-          item_name: itemName.toLowerCase(),
-          item_id: itemId,
-          price,
-          cached_at: new Date().toISOString(),
-        }, { onConflict: 'item_name' });
+        // Cache the price (store item_name lowercase)
+        if (price > 0) {
+          await supabase.from('market_cache').upsert({
+            item_name: lowerName,
+            item_id: itemId ?? null,
+            price,
+            cached_at: new Date().toISOString(),
+          }, { onConflict: 'item_name' });
+        }
+      } catch (apiErr) {
+        console.warn(`Price lookup failed for "${lowerName}":`, apiErr);
+        pricesByLower[lowerName] = 0;
       }
     }
 
     // Calculate totals per member
     const members: ProcessedMember[] = memberNames.map(ign => {
       const data = parsed[ign];
-      const donations = data.donations.map(d => ({
-        item: d.item,
-        quantity: d.quantity,
-        price: prices[d.item] || 0,
-        total: d.quantity * (prices[d.item] || 0),
-      }));
+      const donations = data.donations.map((d: { item: string; quantity: number }) => {
+        const lower = d.item.toLowerCase();
+        const price = pricesByLower[lower] ?? 0;
+        const total = d.quantity * price;
+        return {
+          item: d.item,
+          quantity: d.quantity,
+          price,
+          total,
+        };
+      });
 
-      const totalGold = donations.reduce((sum, d) => sum + d.total, 0);
+      const totalGold = donations.reduce((sum: number, d: any) => sum + (d.total || 0), 0);
 
       return {
         ign,
-        raids: data.raids,
+        raids: data.raids || 0,
         gold: totalGold,
         donations,
       };

@@ -1,12 +1,18 @@
 'use client';
 
 import { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import Link from 'next/link';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { Loader2, AlertTriangle, Copy, Check } from 'lucide-react';
+import { Loader2, AlertTriangle, Copy, Check, Settings } from 'lucide-react';
 import { formatGold, copyToClipboard } from '@/lib/utils';
 
 interface ChallengeItem {
@@ -17,62 +23,71 @@ interface ChallengeItem {
   isExpensive: boolean;
 }
 
-export default function ChallengesPage() {
+export default function ChallengeInputPage() {
   const [rawInput, setRawInput] = useState('');
   const [processing, setProcessing] = useState(false);
   const [items, setItems] = useState<ChallengeItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-const handleCalculate = async () => {
-  if (!rawInput.trim()) {
-    setError('Please paste challenge data');
-    return;
-  }
+  const handleCalculate = async () => {
+    if (!rawInput.trim()) {
+      setError('Please paste challenge data');
+      return;
+    }
 
-  setProcessing(true);
-  setError(null);
-  setItems(null);
+    setProcessing(true);
+    setError(null);
+    setItems(null);
 
-  try {
-    const res = await fetch('/api/challenges/parse', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ raw_input: rawInput }),
-    });
+    try {
+      const res = await fetch('/api/challenges/parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ raw_input: rawInput }),
+      });
 
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to process');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to process');
 
-    setItems(data.items);
+      setItems(data.items);
 
-    // 👉 Save challenge automatically
-    const totalCost = data.items.reduce((sum: number, i: any) => sum + i.total, 0);
-    await fetch('/api/challenges/save', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        raw_input: rawInput,
-        items: data.items,
-        total_cost: totalCost,
-      }),
-    });
-  } catch (err) {
-    setError(err instanceof Error ? err.message : 'Failed to process');
-  } finally {
-    setProcessing(false);
-  }
-};
+      // Save challenge automatically (server attaches guild_id)
+      const totalCost = data.items.reduce((sum: number, i: any) => sum + i.total, 0);
+      const saveRes = await fetch('/api/challenges/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          raw_input: rawInput,
+          items: data.items,
+          total_cost: totalCost,
+        }),
+      });
 
-
+      if (!saveRes.ok) {
+        const txt = await saveRes.text();
+        console.warn('Save failed:', txt);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to process');
+    } finally {
+      setProcessing(false);
+    }
+  };
 
   const handleCopy = async () => {
     if (!items) return;
 
     const totalCost = items.reduce((sum, i) => sum + i.total, 0);
-    const text = items
-      .map(i => `${i.name} x${i.quantity.toLocaleString()} - ${formatGold(i.total)}${i.isExpensive ? ' ⚠️' : ''}`)
-      .join('\n') + `\n\n**Total: ${formatGold(totalCost)}**`;
+    const text =
+      items
+        .map(
+          (i) =>
+            `${i.name} x${i.quantity.toLocaleString()} - ${formatGold(i.total)}${
+              i.isExpensive ? ' ⚠️' : ''
+            }`
+        )
+        .join('\n') + `\n\n**Total: ${formatGold(totalCost)}**`;
 
     const ok = await copyToClipboard(text);
     if (ok) {
@@ -82,23 +97,34 @@ const handleCalculate = async () => {
   };
 
   const totalCost = items?.reduce((sum, i) => sum + i.total, 0) || 0;
-  const expensiveCount = items?.filter(i => i.isExpensive).length || 0;
+  const expensiveCount = items?.filter((i) => i.isExpensive).length || 0;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">📋 Challenge Calculator</h1>
-        <p className="text-muted-foreground">
-          Calculate total challenge cost and identify expensive items
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">📋 Challenge Calculator</h1>
+          <p className="text-muted-foreground">Paste challenge items to calculate cost</p>
+        </div>
+        <div>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/challenges/list">
+              View Saved Challenges
+            </Link>
+          </Button>
+          <Button asChild variant="outline" size="sm" className="ml-2">
+            <Link href="/setup">
+              <Settings className="h-4 w-4 mr-2" />
+              Settings
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>Challenge Input</CardTitle>
-          <CardDescription>
-            Paste challenge data (quantity on one line, item name on next)
-          </CardDescription>
+          <CardDescription>Quantity on one line, item name on the next</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
@@ -143,25 +169,27 @@ Copper Ore21h`}
       {items && items.length > 0 && (
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between w-full">
               <div>
                 <CardTitle>Challenge Items</CardTitle>
                 <CardDescription className="flex items-center gap-2 mt-1">
                   {items.length} items
                   {expensiveCount > 0 && (
-                    <Badge variant="destructive">
-                      <AlertTriangle className="h-3 w-3 mr-1" />
-                      {expensiveCount} expensive
-                    </Badge>
+                    <span className="ml-2 inline-flex items-center rounded bg-red-100 text-red-600 px-2 py-0.5 text-xs">
+                      ⚠️ {expensiveCount} expensive
+                    </span>
                   )}
                 </CardDescription>
               </div>
-              <Button variant="outline" size="sm" onClick={handleCopy}>
-                {copied ? <Check className="h-4 w-4 mr-1" /> : <Copy className="h-4 w-4 mr-1" />}
-                {copied ? 'Copied!' : 'Copy'}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={handleCopy}>
+                  {copied ? <Check className="h-4 w-4 mr-1" /> : <Copy className="h-4 w-4 mr-1" />}
+                  {copied ? 'Copied!' : 'Copy'}
+                </Button>
+              </div>
             </div>
           </CardHeader>
+
           <CardContent>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -175,17 +203,11 @@ Copper Ore21h`}
                 </thead>
                 <tbody>
                   {items.map((item, i) => (
-                    <tr
-                      key={i}
-                      className={`border-b last:border-0 ${item.isExpensive ? 'text-red-500' : ''}`}
-                    >
+                    <tr key={i} className={`border-b last:border-0 ${item.isExpensive ? 'text-red-600' : ''}`}>
                       <td className="py-2">{item.name}</td>
                       <td className="py-2 text-right">{item.quantity.toLocaleString()}</td>
                       <td className="py-2 text-right">{formatGold(item.price)}</td>
-                      <td className="py-2 text-right font-medium">
-                        {formatGold(item.total)}
-                        {item.isExpensive && ' ⚠️'}
-                      </td>
+                      <td className="py-2 text-right font-medium">{formatGold(item.total)}{item.isExpensive && ' ⚠️'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -199,9 +221,9 @@ Copper Ore21h`}
             </div>
 
             {expensiveCount > 0 && (
-              <div className="mt-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
-                <p className="text-sm text-yellow-500">
-                  ⚠️ <strong>{expensiveCount} items</strong> cost over 15,000g each. Consider refreshing these!
+              <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <p className="text-sm text-yellow-700">
+                  ⚠️ <strong>{expensiveCount} items</strong> cost over 15,000g each.
                 </p>
               </div>
             )}
