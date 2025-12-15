@@ -7,9 +7,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Loader2, Check, AlertCircle } from 'lucide-react';
+import ProtectedRoute from '@/components/ProtectedRoute';
+import { useApiClient } from '@/lib/api-client';
 
-export default function SetupPage() {
+function SetupPageContent() {
   const router = useRouter();
+  const api = useApiClient();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +28,7 @@ export default function SetupPage() {
   useEffect(() => {
     async function fetchConfig() {
       try {
-        const res = await fetch('/api/config');
+        const res = await api.get('/api/config');
         const data = await res.json();
 
         setConfig({
@@ -55,11 +58,7 @@ export default function SetupPage() {
     }
 
     try {
-      const res = await fetch('/api/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      });
+      const res = await api.post('/api/config', config);
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to save');
@@ -185,5 +184,13 @@ export default function SetupPage() {
         </Button>
       </div>
     </div>
+  );
+}
+
+export default function SetupPage() {
+  return (
+    <ProtectedRoute requiredRole="LEADER">
+      <SetupPageContent />
+    </ProtectedRoute>
   );
 }

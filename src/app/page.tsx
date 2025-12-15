@@ -6,6 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2, Settings, Users, Swords, Coins, ClipboardList } from 'lucide-react';
 import { formatGold, formatDate, getToday } from '@/lib/utils';
+import ProtectedRoute from '@/components/ProtectedRoute';
+import { useApiClient } from '@/lib/api-client';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface DashboardStats {
   hasConfig: boolean;
@@ -23,7 +26,9 @@ interface Challenge {
   items: { name: string; quantity: number; price: number; total: number; isExpensive?: boolean }[];
 }
 
-export default function DashboardPage() {
+function DashboardPageContent() {
+  const api = useApiClient();
+  const { hasRole } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,9 +37,9 @@ export default function DashboardPage() {
     async function fetchStats() {
       try {
         const [configRes, logsRes, challengesRes] = await Promise.all([
-          fetch('/api/config'),
-          fetch(`/api/activity?date=${getToday()}`),
-          fetch('/api/challenges/list'),
+          api.get('/api/config'),
+          api.get(`/api/activity?date=${getToday()}`),
+          api.get('/api/challenges/list'),
         ]);
 
         if (!configRes.ok) {
@@ -77,7 +82,7 @@ export default function DashboardPage() {
       }
     }
     fetchStats();
-  }, []);
+  }, [api]);
 
   if (loading) {
     return (
@@ -87,7 +92,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (!stats?.hasConfig) {
+  if (!stats?.hasConfig && hasRole('LEADER')) {
     return (
       <div className="max-w-md mx-auto mt-20">
         <Card>
@@ -115,7 +120,7 @@ export default function DashboardPage() {
       {/* Top bar */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">{stats.guildName} Dashboard</h1>
+          <h1 className="text-2xl font-bold">{stats?.guildName || 'Guild'} Dashboard</h1>
           <p className="text-muted-foreground">{formatDate(new Date())}</p>
         </div>
 
@@ -127,12 +132,14 @@ export default function DashboardPage() {
             </Link>
           </Button>
 
-          <Button asChild variant="outline">
-            <Link href="/setup" className="flex items-center">
-              <Settings className="h-4 w-4 mr-2" />
-              Settings
-            </Link>
-          </Button>
+          {hasRole('LEADER') && (
+            <Button asChild variant="outline">
+              <Link href="/setup" className="flex items-center">
+                <Settings className="h-4 w-4 mr-2" />
+                Settings
+              </Link>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -144,7 +151,7 @@ export default function DashboardPage() {
               <Users className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm text-muted-foreground">Members Today</span>
             </div>
-            <p className="text-2xl font-bold mt-1">{stats.totalMembers}</p>
+            <p className="text-2xl font-bold mt-1">{stats?.totalMembers || 0}</p>
           </CardContent>
         </Card>
 
@@ -154,7 +161,7 @@ export default function DashboardPage() {
               <span className="text-sm">✅</span>
               <span className="text-sm text-muted-foreground">Met Requirement</span>
             </div>
-            <p className="text-2xl font-bold mt-1">{stats.todayLogs}</p>
+            <p className="text-2xl font-bold mt-1">{stats?.todayLogs || 0}</p>
           </CardContent>
         </Card>
 
@@ -164,7 +171,7 @@ export default function DashboardPage() {
               <Swords className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm text-muted-foreground">Raids Today</span>
             </div>
-            <p className="text-2xl font-bold mt-1">{stats.todayRaids}</p>
+            <p className="text-2xl font-bold mt-1">{stats?.todayRaids || 0}</p>
           </CardContent>
         </Card>
 
@@ -174,7 +181,7 @@ export default function DashboardPage() {
               <Coins className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm text-muted-foreground">Gold Today</span>
             </div>
-            <p className="text-2xl font-bold mt-1">{formatGold(stats.todayGold)}</p>
+            <p className="text-2xl font-bold mt-1">{formatGold(stats?.todayGold || 0)}</p>
           </CardContent>
         </Card>
       </div>
@@ -280,5 +287,13 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <ProtectedRoute requiredRole="MEMBER">
+      <DashboardPageContent />
+    </ProtectedRoute>
   );
 }

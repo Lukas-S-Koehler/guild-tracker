@@ -52,8 +52,8 @@ Since you're migrating from a single-guild setup, you need to create an initial 
 Run this SQL in Supabase SQL Editor (replace with your actual values):
 
 ```sql
--- Get your user ID from the auth.users table
-SELECT id, email FROM auth.users;
+-- Get your user ID and display name from the auth.users table
+SELECT id, email, raw_user_meta_data->>'display_name' as display_name FROM auth.users;
 
 -- Get your guild_id from guild_config
 SELECT guild_id, guild_name FROM guild_config;
@@ -103,12 +103,14 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 ### For Guild Members
 
-1. User signs up at `/signup`
+1. User signs up at `/signup` with their display name
 2. Leader runs this SQL to add them to the guild:
 
 ```sql
--- Get the new user's ID
-SELECT id, email FROM auth.users WHERE email = 'newuser@example.com';
+-- Get the new user's ID and display name
+SELECT id, email, raw_user_meta_data->>'display_name' as display_name
+FROM auth.users
+WHERE email = 'newuser@example.com';
 
 -- Add them to your guild
 INSERT INTO guild_members (user_id, guild_id, role)

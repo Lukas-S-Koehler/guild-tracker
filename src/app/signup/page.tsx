@@ -12,6 +12,7 @@ import { Loader2 } from 'lucide-react';
 
 export default function SignupPage() {
   const [email, setEmail] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
@@ -24,6 +25,13 @@ export default function SignupPage() {
     e.preventDefault();
     setError('');
     setLoading(true);
+
+    // Validate display name
+    if (!displayName.trim()) {
+      setError('Display name is required');
+      setLoading(false);
+      return;
+    }
 
     // Validate passwords match
     if (password !== confirmPassword) {
@@ -40,7 +48,7 @@ export default function SignupPage() {
     }
 
     try {
-      const { error: signUpError } = await signUp(email, password);
+      const { error: signUpError } = await signUp(email, password, displayName);
 
       if (signUpError) {
         setError(signUpError.message);
@@ -96,6 +104,22 @@ export default function SignupPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="displayName">Display Name</Label>
+              <Input
+                id="displayName"
+                type="text"
+                placeholder="Your Name"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                required
+                disabled={loading}
+              />
+              <p className="text-xs text-muted-foreground">
+                This helps guild leaders identify you when assigning roles
+              </p>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
