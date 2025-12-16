@@ -9,10 +9,12 @@ import { Label } from '@/components/ui/label';
 import { Loader2, Check, AlertCircle } from 'lucide-react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { useApiClient } from '@/lib/api-client';
+import { useAuth } from '@/contexts/AuthContext';
 
 function SetupPageContent() {
   const router = useRouter();
   const api = useApiClient();
+  const { currentGuild } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,6 +28,9 @@ function SetupPageContent() {
   });
 
   useEffect(() => {
+    // Don't fetch config until we have a current guild
+    if (!currentGuild) return;
+
     async function fetchConfig() {
       try {
         const res = await api.get('/api/config');
@@ -44,7 +49,7 @@ function SetupPageContent() {
       }
     }
     fetchConfig();
-  }, []);
+  }, [api, currentGuild]);
 
   const handleSave = async () => {
     setSaving(true);
