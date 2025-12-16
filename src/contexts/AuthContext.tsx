@@ -35,38 +35,58 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Load user and their guilds on mount
   useEffect(() => {
+    let mounted = true;
+
     async function loadUser() {
       try {
         const { data: { user: currentUser } } = await supabase.auth.getUser();
+
+        if (!mounted) return;
         setUser(currentUser);
 
         if (currentUser) {
-          // Fetch user's guilds
-          const { data: userGuilds, error } = await supabase
-            .rpc('get_user_guilds');
+          // Fetch user's guilds with timeout
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Timeout fetching guilds')), 10000)
+          );
 
-          if (error) {
-            console.error('Error fetching guilds:', error);
-            // Set empty guilds array so user sees "no guilds" message
-            setGuilds([]);
-          } else if (userGuilds && Array.isArray(userGuilds)) {
-            setGuilds(userGuilds);
+          const guildsPromise = supabase.rpc('get_user_guilds');
 
-            // Try to restore current guild from localStorage
-            const savedGuildId = localStorage.getItem('currentGuildId');
-            const savedGuild = userGuilds.find((g: GuildMembership) => g.guild_id === savedGuildId);
+          try {
+            const { data: userGuilds, error } = await Promise.race([
+              guildsPromise,
+              timeoutPromise
+            ]) as any;
 
-            // Set current guild to saved guild or first available guild
-            setCurrentGuildState(savedGuild || userGuilds[0] || null);
-          } else {
-            setGuilds([]);
+            if (!mounted) return;
+
+            if (error) {
+              console.error('Error fetching guilds:', error);
+              console.log('Please make sure you have run the database migration: /database/multi-guild-phase1.sql');
+              setGuilds([]);
+            } else if (userGuilds && Array.isArray(userGuilds)) {
+              setGuilds(userGuilds);
+
+              // Try to restore current guild from localStorage
+              const savedGuildId = localStorage.getItem('currentGuildId');
+              const savedGuild = userGuilds.find((g: GuildMembership) => g.guild_id === savedGuildId);
+
+              // Set current guild to saved guild or first available guild
+              setCurrentGuildState(savedGuild || userGuilds[0] || null);
+            } else {
+              setGuilds([]);
+            }
+          } catch (timeoutError) {
+            console.error('Timeout or error fetching guilds:', timeoutError);
+            console.log('The get_user_guilds() function may not exist. Please run the database migration.');
+            if (mounted) setGuilds([]);
           }
         }
       } catch (error) {
         console.error('Error loading user:', error);
-        setGuilds([]);
+        if (mounted) setGuilds([]);
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     }
 
@@ -77,17 +97,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(session?.user ?? null);
 
       if (session?.user) {
-        // Reload guilds when user signs in
-        const { data: userGuilds, error } = await supabase.rpc('get_user_guilds');
-        if (error) {
-          console.error('Error fetching guilds on auth change:', error);
-          setGuilds([]);
-        } else if (userGuilds && Array.isArray(userGuilds)) {
-          setGuilds(userGuilds);
-          if (!currentGuild && userGuilds.length > 0) {
-            setCurrentGuildState(userGuilds[0]);
+        // Reload guilds when user signs in with timeout
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout')), 10000)
+        );
+        const guildsPromise = supabase.rpc('get_user_guilds');
+
+        try {
+          const { data: userGuilds, error } = await Promise.race([
+            guildsPromise,
+            timeoutPromise
+          ]) as any;
+
+          if (error) {
+            console.error('Error fetching guilds on auth change:', error);
+            setGuilds([]);
+          } else if (userGuilds && Array.isArray(userGuilds)) {
+            setGuilds(userGuilds);
+            if (!currentGuild && userGuilds.length > 0) {
+              setCurrentGuildState(userGuilds[0]);
+            }
+          } else {
+            setGuilds([]);
           }
-        } else {
+        } catch (err) {
+          console.error('Timeout fetching guilds on auth change:', err);
           setGuilds([]);
         }
       } else {
@@ -99,6 +133,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => {
+      mounted = false;
       subscription.unsubscribe();
     };
   }, []);
