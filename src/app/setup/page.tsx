@@ -6,10 +6,18 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Check, AlertCircle } from 'lucide-react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { useApiClient } from '@/lib/api-client';
 import { useAuth } from '@/contexts/AuthContext';
+
+interface Guild {
+  id: string;
+  name: string;
+  nickname: string;
+  min_level: number;
+}
 
 function SetupPageContent() {
   const router = useRouter();
@@ -19,9 +27,9 @@ function SetupPageContent() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [guilds, setGuilds] = useState<Guild[]>([]);
 
   const [config, setConfig] = useState({
-    guild_name: '',
     guild_id: '',
     api_key: '',
     donation_requirement: 5000,
@@ -31,24 +39,29 @@ function SetupPageContent() {
     // Don't fetch config until we have a current guild
     if (!currentGuild) return;
 
-    async function fetchConfig() {
+    async function fetchData() {
       try {
-        const res = await api.get('/api/config');
-        const data = await res.json();
+        const [configRes, guildsRes] = await Promise.all([
+          api.get('/api/config'),
+          api.get('/api/guilds'),
+        ]);
 
+        const configData = await configRes.json();
+        const guildsData = await guildsRes.json();
+
+        setGuilds(Array.isArray(guildsData) ? guildsData : []);
         setConfig({
-          guild_name: data.guild_name || '',
-          guild_id: data.guild_id || '',
-          api_key: data.api_key || '',
-          donation_requirement: data.donation_requirement || 5000,
+          guild_id: configData.guild_id || currentGuild?.guild_id || '',
+          api_key: configData.api_key || '',
+          donation_requirement: configData.donation_requirement || 5000,
         });
       } catch (err) {
-        console.error('Failed to fetch config:', err);
+        console.error('Failed to fetch data:', err);
       } finally {
         setLoading(false);
       }
     }
-    fetchConfig();
+    fetchData();
   }, [api, currentGuild]);
 
   const handleSave = async () => {
@@ -56,14 +69,21 @@ function SetupPageContent() {
     setError(null);
     setSuccess(null);
 
-    if (!config.api_key || !config.guild_name || !config.guild_id) {
-      setError('API key, Guild Name, and Guild ID are required');
+    if (!config.api_key || !config.guild_id) {
+      setError('Please select a guild and enter an API key');
       setSaving(false);
       return;
     }
 
     try {
-      const res = await api.post('/api/config', config);
+      // Get guild name from selected guild
+      const selectedGuild = guilds.find(g => g.id === config.guild_id);
+      const payload = {
+        ...config,
+        guild_name: selectedGuild?.name || '',
+      };
+
+      const res = await api.post('/api/config', payload);
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to save');
@@ -96,30 +116,31 @@ function SetupPageContent() {
       <Card>
         <CardHeader>
           <CardTitle>Guild Settings</CardTitle>
-          <CardDescription>Basic configuration for your guild</CardDescription>
+          <CardDescription>Select your guild and configure settings</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
 
           <div className="space-y-2">
-            <Label htmlFor="guild_name">Guild Name</Label>
-            <Input
-              id="guild_name"
-              placeholder="My Awesome Guild"
-              value={config.guild_name}
-              onChange={(e) => setConfig({ ...config, guild_name: e.target.value })}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="guild_id">Guild ID (numeric)</Label>
-            <Input
-              id="guild_id"
-              placeholder="1234"
-              value={config.guild_id}
-              onChange={(e) => setConfig({ ...config, guild_id: e.target.value })}
-            />
+            <Label htmlFor="guild_select">Select Guild</Label>
+            <Select value={config.guild_id} onValueChange={(value) => setConfig({ ...config, guild_id: value })}>
+              <SelectTrigger id="guild_select">
+                <SelectValue placeholder="Choose your guild..." />
+              </SelectTrigger>
+              <SelectContent>
+                {guilds.map((guild) => (
+                  <SelectItem key={guild.id} value={guild.id}>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold">{guild.nickname}</span>
+                      <span>-</span>
+                      <span>{guild.name}</span>
+                      <span className="text-xs text-muted-foreground">(Level {guild.min_level}+)</span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <p className="text-xs text-muted-foreground">
-              Find this in the IdleMMO guild URL: https://idle-mmo.com/guild/<b>1234</b>
+              Select the guild you want to configure. Guild ID is automatically set.
             </p>
           </div>
 
@@ -134,6 +155,9 @@ function SetupPageContent() {
                 setConfig({ ...config, donation_requirement: parseInt(e.target.value) || 0 })
               }
             />
+            <p className="text-xs text-muted-foreground">
+              Minimum daily gold donation to be considered active
+            </p>
           </div>
 
         </CardContent>
@@ -143,7 +167,7 @@ function SetupPageContent() {
       <Card>
         <CardHeader>
           <CardTitle>IdleMMO API Key</CardTitle>
-          <CardDescription>Required for guild syncing</CardDescription>
+          <CardDescription>Required for syncing members and fetching market prices</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
@@ -155,6 +179,17 @@ function SetupPageContent() {
               value={config.api_key}
               onChange={(e) => setConfig({ ...config, api_key: e.target.value })}
             />
+            <p className="text-xs text-muted-foreground">
+              Get your API key from{' '}
+              <a
+                href="https://idle-mmo.com/account/api-tokens"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-primary"
+              >
+                idle-mmo.com/account/api-tokens
+              </a>
+            </p>
           </div>
         </CardContent>
       </Card>

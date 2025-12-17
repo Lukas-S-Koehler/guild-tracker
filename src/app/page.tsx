@@ -28,13 +28,20 @@ interface Challenge {
 
 function DashboardPageContent() {
   const api = useApiClient();
-  const { hasRole } = useAuth();
+  const { hasRole, loading: authLoading, currentGuild } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Don't fetch until auth is loaded and we have a guild
+    if (authLoading || !currentGuild) {
+      setLoading(authLoading);
+      return;
+    }
+
     async function fetchStats() {
+      setLoading(true);
       try {
         const [configRes, logsRes, challengesRes] = await Promise.all([
           api.get('/api/config'),
@@ -82,7 +89,7 @@ function DashboardPageContent() {
       }
     }
     fetchStats();
-  }, [api]);
+  }, [api, authLoading, currentGuild]);
 
   if (loading) {
     return (
