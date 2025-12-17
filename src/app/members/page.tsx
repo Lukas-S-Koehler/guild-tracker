@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2, Users, Settings } from 'lucide-react';
+import { useApiClient } from '@/lib/api-client';
 
 interface GuildMember {
   idlemmo_id: string;
@@ -20,13 +21,14 @@ export default function MembersPage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const api = useApiClient();
 
   async function loadMembers() {
     try {
       setLoading(true);
 
       // Load config
-      const configRes = await fetch('/api/config', { cache: 'no-store' });
+      const configRes = await api.get('/api/config');
       const config = await configRes.json();
       console.log('CONFIG RESPONSE:', config);
 
@@ -39,7 +41,7 @@ export default function MembersPage() {
       setGuildName(config.guild_name || 'Guild');
 
       // Load members
-      const res = await fetch('/api/members/list', { cache: 'no-store' });
+      const res = await api.get('/api/members/list');
       const raw = await res.text();
       console.log('RAW /api/members/list RESPONSE:', raw);
 
@@ -95,7 +97,7 @@ export default function MembersPage() {
   async function syncMembers() {
     try {
       setSyncing(true);
-      const res = await fetch('/api/members/sync', { method: 'POST' });
+      const res = await api.post('/api/members/sync');
       console.log('SYNC RESPONSE STATUS:', res.status);
       const syncText = await res.text();
       console.log('SYNC RAW RESPONSE:', syncText);

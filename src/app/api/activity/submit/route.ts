@@ -1,10 +1,10 @@
 // app/api/activity/submit/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { createServerClient } from '@/lib/supabase-server';
 import type { ProcessedMember } from '@/types';
 
 export async function POST(req: NextRequest) {
-  const supabase = createServerClient();
+  const supabase = createServerClient(req);
   try {
     const body = await req.json();
     const { log_date, members, logged_by } = body as { log_date?: string; members?: ProcessedMember[]; logged_by?: string };

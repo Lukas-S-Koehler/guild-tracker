@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState, useMemo } from 'react';
 import { User } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase';
 
@@ -30,12 +30,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [guilds, setGuilds] = useState<GuildMembership[]>([]);
   const [currentGuild, setCurrentGuildState] = useState<GuildMembership | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isLoadingGuilds, setIsLoadingGuilds] = useState(false);
 
-  const supabase = createClient();
+  // Create Supabase client once, outside of useEffect
+  const supabase = useMemo(() => createClient(), []);
 
   // Load user and their guilds on mount
   useEffect(() => {
     let mounted = true;
+    let loadingGuildsRef = false; // Use ref to track loading state
 
     async function loadUser() {
       try {
@@ -44,15 +47,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!mounted) return;
         setUser(currentUser);
 
-        if (currentUser) {
-          // Fetch user's guilds with timeout
-          const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Timeout fetching guilds')), 10000)
-          );
-
-          const guildsPromise = supabase.rpc('get_user_guilds');
+        if (currentUser && !loadingGuildsRef) {
+          loadingGuildsRef = true;
+          setIsLoadingGuilds(true);
 
           try {
+            // Fetch user's guilds with timeout
+            const timeoutPromise = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Timeout fetching guilds')), 5000)
+            );
+
+            const guildsPromise = supabase.rpc('get_user_guilds');
+
             const { data: userGuilds, error } = await Promise.race([
               guildsPromise,
               timeoutPromise
@@ -61,10 +67,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (!mounted) return;
 
             if (error) {
-              console.error('Error fetching guilds:', error);
-              console.log('Please make sure you have run the database migration: /database/multi-guild-phase1.sql');
+              console.error('[AuthContext] Error fetching guilds:', error);
               setGuilds([]);
-            } else if (userGuilds && Array.isArray(userGuilds)) {
+            } else if (userGuilds && Array.isArray(userGuilds) && userGuilds.length > 0) {
+              console.log('[AuthContext] Found guilds:', userGuilds);
               setGuilds(userGuilds);
 
               // Try to restore current guild from localStorage
@@ -72,18 +78,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               const savedGuild = userGuilds.find((g: GuildMembership) => g.guild_id === savedGuildId);
 
               // Set current guild to saved guild or first available guild
-              setCurrentGuildState(savedGuild || userGuilds[0] || null);
+              setCurrentGuildState(savedGuild || userGuilds[0]);
             } else {
+              console.log('[AuthContext] No guilds found');
+              // No guilds found
               setGuilds([]);
+              setCurrentGuildState(null);
             }
           } catch (timeoutError) {
-            console.error('Timeout or error fetching guilds:', timeoutError);
-            console.log('The get_user_guilds() function may not exist. Please run the database migration.');
+            console.error('[AuthContext] Timeout or error fetching guilds:', timeoutError);
             if (mounted) setGuilds([]);
+          } finally {
+            if (mounted) {
+              setIsLoadingGuilds(false);
+              loadingGuildsRef = false;
+            }
           }
+        } else if (!currentUser) {
+          // Not logged in
+          setGuilds([]);
+          setCurrentGuildState(null);
         }
       } catch (error) {
-        console.error('Error loading user:', error);
+        console.error('[AuthContext] Error loading user:', error);
         if (mounted) setGuilds([]);
       } finally {
         if (mounted) setLoading(false);
@@ -94,49 +111,71 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      setUser(session?.user ?? null);
+      console.log('[AuthContext] Auth event:', event);
 
-      if (session?.user) {
-        // Reload guilds when user signs in with timeout
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Timeout')), 10000)
-        );
-        const guildsPromise = supabase.rpc('get_user_guilds');
-
-        try {
-          const { data: userGuilds, error } = await Promise.race([
-            guildsPromise,
-            timeoutPromise
-          ]) as any;
-
-          if (error) {
-            console.error('Error fetching guilds on auth change:', error);
-            setGuilds([]);
-          } else if (userGuilds && Array.isArray(userGuilds)) {
-            setGuilds(userGuilds);
-            if (!currentGuild && userGuilds.length > 0) {
-              setCurrentGuildState(userGuilds[0]);
-            }
-          } else {
-            setGuilds([]);
-          }
-        } catch (err) {
-          console.error('Timeout fetching guilds on auth change:', err);
-          setGuilds([]);
-        }
-      } else {
-        // Clear guilds when user signs out
+      // Only process specific events
+      if (event === 'SIGNED_OUT') {
+        console.log('[AuthContext] User signed out, clearing guilds');
+        setUser(null);
         setGuilds([]);
         setCurrentGuildState(null);
         localStorage.removeItem('currentGuildId');
+      } else if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user) {
+        console.log('[AuthContext] User authenticated, fetching guilds');
+        setUser(session.user);
+
+        // Fetch guilds when user signs in
+        if (!loadingGuildsRef && mounted) {
+          loadingGuildsRef = true;
+          setIsLoadingGuilds(true);
+
+          try {
+            const timeoutPromise = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Timeout fetching guilds')), 5000)
+            );
+            const guildsPromise = supabase.rpc('get_user_guilds');
+
+            const { data: userGuilds, error } = await Promise.race([
+              guildsPromise,
+              timeoutPromise
+            ]) as any;
+
+            if (!mounted) return;
+
+            if (error) {
+              console.error('[AuthContext] Error fetching guilds:', error);
+              setGuilds([]);
+            } else if (userGuilds && Array.isArray(userGuilds) && userGuilds.length > 0) {
+              console.log('[AuthContext] Found guilds:', userGuilds);
+              setGuilds(userGuilds);
+
+              const savedGuildId = localStorage.getItem('currentGuildId');
+              const savedGuild = userGuilds.find((g: GuildMembership) => g.guild_id === savedGuildId);
+              setCurrentGuildState(savedGuild || userGuilds[0]);
+            } else {
+              console.log('[AuthContext] No guilds found');
+              setGuilds([]);
+              setCurrentGuildState(null);
+            }
+          } catch (timeoutError) {
+            console.error('[AuthContext] Timeout or error fetching guilds:', timeoutError);
+            if (mounted) setGuilds([]);
+          } finally {
+            if (mounted) {
+              setIsLoadingGuilds(false);
+              loadingGuildsRef = false;
+            }
+          }
+        }
       }
+      // Ignore TOKEN_REFRESHED, USER_UPDATED, etc. to prevent loops
     });
 
     return () => {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [supabase]); // Only depend on supabase client
 
   const setCurrentGuild = (guild: GuildMembership | null) => {
     setCurrentGuildState(guild);

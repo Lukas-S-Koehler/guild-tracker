@@ -25,7 +25,11 @@ export class ApiClient {
     // Add guild context header if available
     if (contextGuildId) {
       requestHeaders.set('x-guild-id', contextGuildId);
+    } else {
+      console.warn('[ApiClient] No guild ID available for request:', url);
     }
+
+    console.log('[ApiClient] Request:', url, 'Guild ID:', contextGuildId || 'NONE');
 
     return fetch(url, {
       ...restOptions,
@@ -77,15 +81,22 @@ export const apiClient = new ApiClient();
  * const response = await api.get('/api/config');
  */
 import { useAuth } from '@/contexts/AuthContext';
+import { useMemo } from 'react';
 
 export function useApiClient() {
   const { currentGuild } = useAuth();
 
-  // Create a client instance with the current guild
-  const client = new ApiClient();
-  if (currentGuild?.guild_id) {
-    client.setGuildId(currentGuild.guild_id);
-  }
+  // Create a client instance with the current guild (memoized to prevent recreating on every render)
+  const client = useMemo(() => {
+    const newClient = new ApiClient();
+    if (currentGuild?.guild_id) {
+      console.log('[useApiClient] Setting guild ID:', currentGuild.guild_id);
+      newClient.setGuildId(currentGuild.guild_id);
+    } else {
+      console.warn('[useApiClient] No current guild available');
+    }
+    return newClient;
+  }, [currentGuild?.guild_id]);
 
   return client;
 }

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { createServerClient } from '@/lib/supabase-server';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { parseChallengeData } from '@/lib/parsers';
 
 export async function POST(req: NextRequest) {
-  const supabase = createServerClient();
+  const supabase = createServerClient(req);
   const body = await req.json();
 
   const { raw_input } = body;

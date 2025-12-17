@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { createServerClient } from '@/lib/supabase-server';
 import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 
 export async function POST(req: NextRequest) {
@@ -7,7 +7,7 @@ export async function POST(req: NextRequest) {
   const auth = await verifyAuth(req, 'OFFICER');
   if (isErrorResponse(auth)) return auth;
 
-  const supabase = createServerClient();
+  const supabase = createServerClient(req);
 
   try {
     const body = await req.json();

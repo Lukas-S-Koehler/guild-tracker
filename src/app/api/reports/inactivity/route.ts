@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { createServerClient } from '@/lib/supabase-server';
 import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 
 export async function GET(req: NextRequest) {
@@ -7,7 +7,7 @@ export async function GET(req: NextRequest) {
   const auth = await verifyAuth(req, 'MEMBER');
   if (isErrorResponse(auth)) return auth;
 
-  const supabase = createServerClient();
+  const supabase = createServerClient(req);
 
   // Use the inactivity_view which already calculates everything
   const { data: inactiveMembers, error } = await supabase

@@ -1,10 +1,10 @@
-import { NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { NextRequest, NextResponse } from 'next/server';
+import { createServerClient } from '@/lib/supabase-server';
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   console.log("=== SYNC MEMBERS START ===");
 
-  const supabase = createServerClient();
+  const supabase = createServerClient(req);
 
   // Load config
   const { data: config, error: configError } = await supabase

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { createServerClient } from '@/lib/supabase-server';
 import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 
 const DEFAULT_DONATION_REQUIREMENT = 5000;
@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   if (isErrorResponse(auth)) return auth;
 
   try {
-    const supabase = createServerClient();
+    const supabase = createServerClient(req);
 
     const { data, error } = await supabase
       .from('guild_config')
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
   if (isErrorResponse(auth)) return auth;
 
   try {
-    const supabase = createServerClient();
+    const supabase = createServerClient(req);
     const body = await req.json();
 
     const { guild_name, guild_id, api_key, donation_requirement } = body;
