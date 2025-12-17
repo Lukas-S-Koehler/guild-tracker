@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
+import { createServerClient, createAdminClient } from '@/lib/supabase-server';
 import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 
 /**
@@ -13,6 +13,7 @@ export async function GET(req: NextRequest) {
   if (isErrorResponse(auth)) return auth;
 
   const supabase = createServerClient(req);
+  const adminClient = createAdminClient(); // Use admin client for auth.admin operations
 
   try {
     // Get all guilds
@@ -37,14 +38,17 @@ export async function GET(req: NextRequest) {
     }
 
     // Get unique user IDs
-    const userIds = [...new Set(guildMembersRaw?.map(m => m.user_id) || [])];
+    const userIds = Array.from(new Set(guildMembersRaw?.map(m => m.user_id) || []));
 
-    // Fetch user details from auth.users
-    const { data: { users }, error: usersError } = await supabase.auth.admin.listUsers();
+    // Fetch user details from auth.users using ADMIN CLIENT
+    const { data: { users }, error: usersError } = await adminClient.auth.admin.listUsers();
 
     if (usersError) {
       console.error('[Admin] Error fetching users:', usersError);
+      console.error('[Admin] Error details:', usersError);
       // Continue without user details rather than failing completely
+    } else {
+      console.log('[Admin] Successfully fetched', users?.length || 0, 'users');
     }
 
     // Create user lookup map
