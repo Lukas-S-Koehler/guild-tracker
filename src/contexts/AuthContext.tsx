@@ -82,17 +82,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setIsLoadingGuilds(true);
 
           try {
-            // Fetch user's guilds with timeout (5 seconds should be plenty with optimized function)
-            const timeoutPromise = new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('Timeout fetching guilds')), 5000)
-            );
+            // Fetch user's guilds directly (more reliable than RPC)
+            console.log('[AuthContext] Fetching guilds for user:', currentUser.id);
 
-            const guildsPromise = supabase.rpc('get_user_guilds');
+            const { data: userGuilds, error } = await supabase
+              .from('guild_members')
+              .select(`
+                guild_id,
+                role,
+                joined_at,
+                guilds!inner (
+                  name
+                )
+              `)
+              .eq('user_id', currentUser.id)
+              .order('joined_at', { ascending: true });
 
-            const { data: userGuilds, error } = await Promise.race([
-              guildsPromise,
-              timeoutPromise
-            ]) as any;
+            console.log('[AuthContext] Query result:', { userGuilds, error });
 
             if (!mounted) return;
 
@@ -107,24 +113,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               setGuilds([]);
             } else if (userGuilds && Array.isArray(userGuilds) && userGuilds.length > 0) {
               console.log('[AuthContext] Found guilds:', userGuilds);
-              setGuilds(userGuilds);
+
+              // Transform the data to match GuildMembership interface
+              const transformedGuilds: GuildMembership[] = userGuilds.map((g: any) => ({
+                guild_id: g.guild_id,
+                guild_name: g.guilds.name,
+                role: g.role as 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER',
+                joined_at: g.joined_at,
+              }));
+
+              setGuilds(transformedGuilds);
 
               // Try to restore current guild from localStorage
               const savedGuildId = localStorage.getItem('currentGuildId');
-              const savedGuild = userGuilds.find((g: GuildMembership) => g.guild_id === savedGuildId);
+              const savedGuild = transformedGuilds.find((g) => g.guild_id === savedGuildId);
 
               // Set current guild to saved guild or first available guild
-              setCurrentGuildState(savedGuild || userGuilds[0]);
+              setCurrentGuildState(savedGuild || transformedGuilds[0]);
             } else {
               console.log('[AuthContext] No guilds found for user');
               // No guilds found
               setGuilds([]);
               setCurrentGuildState(null);
             }
-          } catch (timeoutError) {
-            console.error('[AuthContext] Timeout or error fetching guilds:', timeoutError);
-            console.error('[AuthContext] This usually means the get_user_guilds() function is missing or slow.');
-            console.error('[AuthContext] Please run database/04-fix-get-user-guilds-function.sql');
+          } catch (fetchError) {
+            console.error('[AuthContext] Error fetching guilds:', fetchError);
             if (mounted) setGuilds([]);
           } finally {
             if (mounted) {
@@ -168,15 +181,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setIsLoadingGuilds(true);
 
           try {
-            const timeoutPromise = new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('Timeout fetching guilds')), 5000)
-            );
-            const guildsPromise = supabase.rpc('get_user_guilds');
+            // Fetch user's guilds directly (more reliable than RPC)
+            console.log('[AuthContext] Fetching guilds for user:', session.user.id);
 
-            const { data: userGuilds, error } = await Promise.race([
-              guildsPromise,
-              timeoutPromise
-            ]) as any;
+            const { data: userGuilds, error } = await supabase
+              .from('guild_members')
+              .select(`
+                guild_id,
+                role,
+                joined_at,
+                guilds!inner (
+                  name
+                )
+              `)
+              .eq('user_id', session.user.id)
+              .order('joined_at', { ascending: true });
+
+            console.log('[AuthContext] Query result:', { userGuilds, error });
 
             if (!mounted) return;
 
@@ -191,20 +212,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               setGuilds([]);
             } else if (userGuilds && Array.isArray(userGuilds) && userGuilds.length > 0) {
               console.log('[AuthContext] Found guilds:', userGuilds);
-              setGuilds(userGuilds);
+
+              // Transform the data to match GuildMembership interface
+              const transformedGuilds: GuildMembership[] = userGuilds.map((g: any) => ({
+                guild_id: g.guild_id,
+                guild_name: g.guilds.name,
+                role: g.role as 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER',
+                joined_at: g.joined_at,
+              }));
+
+              setGuilds(transformedGuilds);
 
               const savedGuildId = localStorage.getItem('currentGuildId');
-              const savedGuild = userGuilds.find((g: GuildMembership) => g.guild_id === savedGuildId);
-              setCurrentGuildState(savedGuild || userGuilds[0]);
+              const savedGuild = transformedGuilds.find((g) => g.guild_id === savedGuildId);
+              setCurrentGuildState(savedGuild || transformedGuilds[0]);
             } else {
               console.log('[AuthContext] No guilds found for user');
               setGuilds([]);
               setCurrentGuildState(null);
             }
-          } catch (timeoutError) {
-            console.error('[AuthContext] Timeout or error fetching guilds:', timeoutError);
-            console.error('[AuthContext] This usually means the get_user_guilds() function is missing or slow.');
-            console.error('[AuthContext] Please run database/04-fix-get-user-guilds-function.sql');
+          } catch (fetchError) {
+            console.error('[AuthContext] Error fetching guilds:', fetchError);
             if (mounted) setGuilds([]);
           } finally {
             if (mounted) {
