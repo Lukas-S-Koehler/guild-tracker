@@ -18,7 +18,7 @@ interface GuildMember {
   user_id: string;
   email: string;
   display_name: string;
-  role: 'MEMBER' | 'OFFICER' | 'LEADER';
+  role: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER';
   joined_at: string;
 }
 
@@ -30,6 +30,7 @@ interface Guild {
   display_order: number;
   members: GuildMember[];
   leader?: GuildMember;
+  deputy?: GuildMember;
   officers: GuildMember[];
   member_count: number;
 }
@@ -45,7 +46,7 @@ function AdminPageContent() {
   // Add user form state
   const [addingToGuild, setAddingToGuild] = useState<string | null>(null);
   const [newUserEmail, setNewUserEmail] = useState('');
-  const [newUserRole, setNewUserRole] = useState<'MEMBER' | 'OFFICER' | 'LEADER'>('MEMBER');
+  const [newUserRole, setNewUserRole] = useState<'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER'>('MEMBER');
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -107,7 +108,7 @@ function AdminPageContent() {
     }
   };
 
-  const handleUpdateRole = async (guildId: string, userId: string, newRole: 'MEMBER' | 'OFFICER' | 'LEADER') => {
+  const handleUpdateRole = async (guildId: string, userId: string, newRole: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER') => {
     setError(null);
     setSuccess(null);
 
@@ -157,6 +158,7 @@ function AdminPageContent() {
   const getRoleIcon = (role: string) => {
     switch (role) {
       case 'LEADER': return <Crown className="h-4 w-4 text-yellow-500" />;
+      case 'DEPUTY': return <Shield className="h-4 w-4 text-purple-500" />;
       case 'OFFICER': return <Shield className="h-4 w-4 text-blue-500" />;
       default: return <Users className="h-4 w-4 text-gray-500" />;
     }
@@ -237,6 +239,19 @@ function AdminPageContent() {
                     )}
                   </div>
 
+                  {/* Deputy */}
+                  <div className="text-right">
+                    <p className="text-xs text-muted-foreground">Deputy</p>
+                    {guild.deputy ? (
+                      <p className="text-sm font-medium flex items-center gap-1 justify-end">
+                        <Shield className="h-3 w-3 text-purple-500" />
+                        {guild.deputy.display_name}
+                      </p>
+                    ) : (
+                      <p className="text-sm text-muted-foreground italic">None</p>
+                    )}
+                  </div>
+
                   {/* Officers */}
                   <div className="text-right">
                     <p className="text-xs text-muted-foreground">Officers</p>
@@ -282,6 +297,7 @@ function AdminPageContent() {
                         <SelectContent>
                           <SelectItem value="MEMBER">Member</SelectItem>
                           <SelectItem value="OFFICER">Officer</SelectItem>
+                          <SelectItem value="DEPUTY">Deputy</SelectItem>
                           <SelectItem value="LEADER">Leader</SelectItem>
                         </SelectContent>
                       </Select>
@@ -347,13 +363,19 @@ function AdminPageContent() {
                               </SelectItem>
                               <SelectItem value="OFFICER">
                                 <div className="flex items-center gap-2">
-                                  <Shield className="h-4 w-4" />
+                                  <Shield className="h-4 w-4 text-blue-500" />
                                   Officer
+                                </div>
+                              </SelectItem>
+                              <SelectItem value="DEPUTY">
+                                <div className="flex items-center gap-2">
+                                  <Shield className="h-4 w-4 text-purple-500" />
+                                  Deputy
                                 </div>
                               </SelectItem>
                               <SelectItem value="LEADER">
                                 <div className="flex items-center gap-2">
-                                  <Crown className="h-4 w-4" />
+                                  <Crown className="h-4 w-4 text-yellow-500" />
                                   Leader
                                 </div>
                               </SelectItem>
@@ -389,7 +411,16 @@ function AdminPageContent() {
             <div>
               <p className="font-medium">Leader</p>
               <p className="text-sm text-muted-foreground">
-                Full access - can manage settings, members, and all guild features
+                Full access - can manage settings, members, leadership, and all guild features
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-2">
+            <Shield className="h-5 w-5 text-purple-500 mt-0.5" />
+            <div>
+              <p className="font-medium">Deputy</p>
+              <p className="text-sm text-muted-foreground">
+                Can process activity logs, manage challenges, configure settings, and view reports (cannot manage leadership)
               </p>
             </div>
           </div>

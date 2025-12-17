@@ -10,55 +10,51 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Check, AlertCircle } from 'lucide-react';
+import { Loader2, Check, AlertCircle, Key } from 'lucide-react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { useApiClient } from '@/lib/api-client';
 import { useAuth } from '@/contexts/AuthContext';
 
-interface Guild {
-  id: string;
-  name: string;
-  nickname: string;
-  min_level: number;
-}
-
 function SetupPageContent() {
   const router = useRouter();
   const api = useApiClient();
-  const { currentGuild } = useAuth();
+  const { currentGuild, hasRole } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [guilds, setGuilds] = useState<Guild[]>([]);
 
-  const [config, setConfig] = useState({
-    guild_id: '',
-    api_key: '',
-    donation_requirement: 5000,
-  });
+  // Member API key state
+  const [apiKey, setApiKey] = useState('');
+  const [hasExistingKey, setHasExistingKey] = useState(false);
+
+  // Guild config state (LEADER/DEPUTY only)
+  const [donationReq, setDonationReq] = useState(5000);
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  const isLeaderOrDeputy = hasRole('DEPUTY');
 
   useEffect(() => {
-    // Don't fetch config until we have a current guild
+    // Don't fetch until we have a current guild
     if (!currentGuild) return;
 
     async function fetchData() {
       try {
-        const [configRes, guildsRes] = await Promise.all([
-          api.get('/api/config'),
-          api.get('/api/guilds'),
-        ]);
+        // Fetch member's API key
+        const keyRes = await api.get('/api/member-keys');
+        const keyData = await keyRes.json();
 
-        const configData = await configRes.json();
-        const guildsData = await guildsRes.json();
+        if (keyData.has_key) {
+          setApiKey(keyData.api_key);
+          setHasExistingKey(true);
+        }
 
-        setGuilds(Array.isArray(guildsData) ? guildsData : []);
-        setConfig({
-          guild_id: configData.guild_id || currentGuild?.guild_id || '',
-          api_key: configData.api_key || '',
-          donation_requirement: configData.donation_requirement || 5000,
-        });
+        // Fetch guild config (for donation requirement) if LEADER/DEPUTY
+        if (isLeaderOrDeputy) {
+          const configRes = await api.get('/api/config');
+          const configData = await configRes.json();
+          setDonationReq(configData.donation_requirement || 5000);
+        }
       } catch (err) {
         console.error('Failed to fetch data:', err);
       } finally {
@@ -66,38 +62,61 @@ function SetupPageContent() {
       }
     }
     fetchData();
-  }, [api, currentGuild]);
+  }, [api, currentGuild, isLeaderOrDeputy]);
 
-  const handleSave = async () => {
+  const handleSaveApiKey = async () => {
     setSaving(true);
     setError(null);
     setSuccess(null);
 
-    if (!config.api_key || !config.guild_id) {
-      setError('Please select a guild and enter an API key');
+    if (!apiKey) {
+      setError('Please enter an API key');
       setSaving(false);
       return;
     }
 
     try {
-      // Get guild name from selected guild
-      const selectedGuild = guilds.find(g => g.id === config.guild_id);
-      const payload = {
-        ...config,
-        guild_name: selectedGuild?.name || '',
-      };
-
-      const res = await api.post('/api/config', payload);
-
+      const res = await api.post('/api/member-keys', { api_key: apiKey });
       const data = await res.json();
+
       if (!res.ok) throw new Error(data.error || 'Failed to save');
 
-      setSuccess('Configuration saved!');
-      setTimeout(() => router.push('/'), 1500);
+      setSuccess('API key saved successfully!');
+      setHasExistingKey(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveGuildConfig = async () => {
+    setSavingConfig(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      // Get current config to preserve other fields
+      const configRes = await api.get('/api/config');
+      const configData = await configRes.json();
+
+      const payload = {
+        guild_name: configData.guild_name || currentGuild?.guild_name || '',
+        guild_id: currentGuild?.guild_id || '',
+        api_key: configData.api_key || 'placeholder', // Keep existing or use placeholder
+        donation_requirement: donationReq,
+      };
+
+      const res = await api.post('/api/config', payload);
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.error || 'Failed to save');
+
+      setSuccess('Guild settings saved successfully!');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSavingConfig(false);
     }
   };
 
@@ -110,68 +129,24 @@ function SetupPageContent() {
   }
 
   return (
-    <div className="max-w-xl mx-auto space-y-6">
+    <div className="max-w-2xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Setup</h1>
-        <p className="text-muted-foreground">Configure your guild tracker settings</p>
+        <h1 className="text-2xl font-bold">Settings</h1>
+        <p className="text-muted-foreground">
+          Configure your personal API key{isLeaderOrDeputy ? ' and guild settings' : ''}
+        </p>
       </div>
 
-      {/* Guild Settings */}
+      {/* Personal API Key */}
       <Card>
         <CardHeader>
-          <CardTitle>Guild Settings</CardTitle>
-          <CardDescription>Select your guild and configure settings</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-
-          <div className="space-y-2">
-            <Label htmlFor="guild_select">Select Guild</Label>
-            <Select value={config.guild_id} onValueChange={(value) => setConfig({ ...config, guild_id: value })}>
-              <SelectTrigger id="guild_select">
-                <SelectValue placeholder="Choose your guild..." />
-              </SelectTrigger>
-              <SelectContent>
-                {guilds.map((guild) => (
-                  <SelectItem key={guild.id} value={guild.id}>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-bold">{guild.nickname}</span>
-                      <span>-</span>
-                      <span>{guild.name}</span>
-                      <span className="text-xs text-muted-foreground">(Level {guild.min_level}+)</span>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              Select the guild you want to configure. Guild ID is automatically set.
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="donation_req">Donation Requirement (gold)</Label>
-            <Input
-              id="donation_req"
-              type="number"
-              min="0"
-              value={config.donation_requirement}
-              onChange={(e) =>
-                setConfig({ ...config, donation_requirement: parseInt(e.target.value) || 0 })
-              }
-            />
-            <p className="text-xs text-muted-foreground">
-              Minimum daily gold donation to be considered active
-            </p>
-          </div>
-
-        </CardContent>
-      </Card>
-
-      {/* API Key */}
-      <Card>
-        <CardHeader>
-          <CardTitle>IdleMMO API Key</CardTitle>
-          <CardDescription>Required for syncing members and fetching market prices</CardDescription>
+          <CardTitle className="flex items-center gap-2">
+            <Key className="h-5 w-5" />
+            Your IdleMMO API Key
+          </CardTitle>
+          <CardDescription>
+            Required for processing activity logs and managing challenges. Each member uses their own API key.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
@@ -180,11 +155,11 @@ function SetupPageContent() {
               id="api_key"
               type="password"
               placeholder="idlemmo_xxxxx..."
-              value={config.api_key}
-              onChange={(e) => setConfig({ ...config, api_key: e.target.value })}
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              Get your API key from{' '}
+              Get your personal API key from{' '}
               <a
                 href="https://idle-mmo.com/account/api-tokens"
                 target="_blank"
@@ -194,7 +169,72 @@ function SetupPageContent() {
                 idle-mmo.com/account/api-tokens
               </a>
             </p>
+            {hasExistingKey && (
+              <p className="text-xs text-green-600">
+                ✓ You have an API key configured
+              </p>
+            )}
           </div>
+
+          <Button onClick={handleSaveApiKey} disabled={saving} className="w-full">
+            {saving ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              hasExistingKey ? 'Update API Key' : 'Save API Key'
+            )}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Guild Settings - Only for LEADER/DEPUTY */}
+      {isLeaderOrDeputy && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Guild Settings</CardTitle>
+            <CardDescription>Configure guild-wide settings (DEPUTY/LEADER only)</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="donation_req">Daily Donation Requirement (gold)</Label>
+              <Input
+                id="donation_req"
+                type="number"
+                min="0"
+                value={donationReq}
+                onChange={(e) => setDonationReq(parseInt(e.target.value) || 0)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Minimum daily gold donation for a member to be considered active
+              </p>
+            </div>
+
+            <Button onClick={handleSaveGuildConfig} disabled={savingConfig} className="w-full">
+              {savingConfig ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                'Save Guild Settings'
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Info Card */}
+      <Card className="bg-muted/50">
+        <CardContent className="pt-6 space-y-2">
+          <p className="text-sm font-medium">About API Keys:</p>
+          <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
+            <li>Each member needs their own IdleMMO API key</li>
+            <li>You can view guild data without an API key</li>
+            <li>API key is required for processing activity logs and managing challenges</li>
+            <li>Your API key is never shared with other members</li>
+          </ul>
         </CardContent>
       </Card>
 
@@ -213,18 +253,8 @@ function SetupPageContent() {
       )}
 
       <div className="flex gap-3">
-        <Button onClick={handleSave} disabled={saving} className="flex-1">
-          {saving ? (
-            <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              Saving...
-            </>
-          ) : (
-            'Save Configuration'
-          )}
-        </Button>
-        <Button variant="outline" onClick={() => router.push('/')}>
-          Cancel
+        <Button variant="outline" onClick={() => router.push('/')} className="flex-1">
+          Back to Dashboard
         </Button>
       </div>
     </div>
@@ -233,7 +263,7 @@ function SetupPageContent() {
 
 export default function SetupPage() {
   return (
-    <ProtectedRoute requiredRole="LEADER">
+    <ProtectedRoute requiredRole="MEMBER">
       <SetupPageContent />
     </ProtectedRoute>
   );

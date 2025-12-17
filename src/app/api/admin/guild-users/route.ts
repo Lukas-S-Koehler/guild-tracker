@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email or user_id is required' }, { status: 400 });
     }
 
-    if (!['MEMBER', 'OFFICER', 'LEADER'].includes(role)) {
+    if (!['MEMBER', 'OFFICER', 'DEPUTY', 'LEADER'].includes(role)) {
       return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
     }
 
@@ -156,7 +156,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'user_id, role, and target_guild_id are required' }, { status: 400 });
     }
 
-    if (!['MEMBER', 'OFFICER', 'LEADER'].includes(role)) {
+    if (!['MEMBER', 'OFFICER', 'DEPUTY', 'LEADER'].includes(role)) {
       return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
     }
 

@@ -26,20 +26,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch guilds' }, { status: 500 });
     }
 
-    // Get all guild members with user details
+    // Get all guild members with user details using RPC function
+    // This function joins guild_members with auth.users (which is in a different schema)
     const { data: guildMembers, error: membersError } = await supabase
-      .from('guild_members')
-      .select(`
-        guild_id,
-        user_id,
-        role,
-        joined_at,
-        users:user_id (
-          email,
-          raw_user_meta_data
-        )
-      `)
-      .order('role', { ascending: false });
+      .rpc('get_all_guild_members');
 
     if (membersError) {
       console.error('[Admin] Error fetching members:', membersError);
@@ -54,8 +44,8 @@ export async function GET(req: NextRequest) {
       }
       guildMemberMap.get(member.guild_id)!.push({
         user_id: member.user_id,
-        email: member.users?.email || 'Unknown',
-        display_name: member.users?.raw_user_meta_data?.display_name || member.users?.email?.split('@')[0] || 'Unknown',
+        email: member.email,
+        display_name: member.display_name,
         role: member.role,
         joined_at: member.joined_at,
       });
@@ -66,6 +56,7 @@ export async function GET(req: NextRequest) {
       ...guild,
       members: guildMemberMap.get(guild.id) || [],
       leader: guildMemberMap.get(guild.id)?.find(m => m.role === 'LEADER'),
+      deputy: guildMemberMap.get(guild.id)?.find(m => m.role === 'DEPUTY'),
       officers: guildMemberMap.get(guild.id)?.filter(m => m.role === 'OFFICER') || [],
       member_count: guildMemberMap.get(guild.id)?.length || 0,
     }));

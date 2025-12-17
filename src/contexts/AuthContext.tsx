@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase';
 interface GuildMembership {
   guild_id: string;
   guild_name: string;
-  role: 'MEMBER' | 'OFFICER' | 'LEADER';
+  role: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER';
   joined_at: string;
 }
 
@@ -20,7 +20,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string, displayName?: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
-  hasRole: (requiredRole: 'MEMBER' | 'OFFICER' | 'LEADER') => boolean;
+  hasRole: (requiredRole: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER') => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -241,10 +241,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem('currentGuildId');
   };
 
-  const hasRole = (requiredRole: 'MEMBER' | 'OFFICER' | 'LEADER') => {
+  const hasRole = (requiredRole: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER') => {
     if (!currentGuild) return false;
 
-    const roleHierarchy = { MEMBER: 0, OFFICER: 1, LEADER: 2 };
+    const roleHierarchy = { MEMBER: 0, OFFICER: 1, DEPUTY: 2, LEADER: 3 };
     const userRoleLevel = roleHierarchy[currentGuild.role];
     const requiredRoleLevel = roleHierarchy[requiredRole];
 

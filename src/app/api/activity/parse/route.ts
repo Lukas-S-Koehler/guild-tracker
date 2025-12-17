@@ -3,13 +3,14 @@ import { createServerClient } from '@/lib/supabase-server';
 import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { parseActivityLog, getUniqueItems } from '@/lib/parsers';
+import { getMemberApiKey } from '@/lib/member-api-key';
 import type { ProcessedMember } from '@/types';
 
 export async function POST(req: NextRequest) {
   // Verify authentication and get guild context
   const authResult = await verifyAuth(req);
   if (isErrorResponse(authResult)) return authResult;
-  const { guildId } = authResult;
+  const { guildId, user } = authResult;
 
   const supabase = createServerClient(req);
   const body = await req.json();
@@ -19,20 +20,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Activity log is required' }, { status: 400 });
   }
 
-  // Get API key for this guild
-  const { data: config, error: configError } = await supabase
-    .from('guild_config')
-    .select('api_key')
-    .eq('guild_id', guildId)
-    .single();
+  // Get API key for this member
+  const apiKey = await getMemberApiKey(supabase, user.id, guildId);
 
-  if (configError) {
-    console.error('Error fetching guild_config:', configError);
-    return NextResponse.json({ error: 'Failed to load configuration' }, { status: 500 });
-  }
-
-  if (!config?.api_key) {
-    return NextResponse.json({ error: 'API key not configured. Go to Setup first.' }, { status: 400 });
+  if (!apiKey) {
+    return NextResponse.json({
+      error: 'API key not configured. Go to Settings to add your IdleMMO API key.'
+    }, { status: 400 });
   }
 
   try {
@@ -70,7 +64,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Fetch prices for items not in cache
-    const api = new IdleMMOApi(config.api_key);
+    const api = new IdleMMOApi(apiKey);
 
     for (const lowerName of uniqueItems) {
       if (pricesByLower[lowerName] !== undefined) continue;

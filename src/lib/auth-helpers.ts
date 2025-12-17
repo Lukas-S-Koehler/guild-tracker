@@ -4,7 +4,7 @@ import { createServerClient } from '@/lib/supabase-server';
 export interface AuthResult {
   user: { id: string; email?: string };
   guildId: string;
-  role: 'MEMBER' | 'OFFICER' | 'LEADER';
+  role: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER';
 }
 
 /**
@@ -15,7 +15,7 @@ export interface AuthResult {
  */
 export async function verifyAuth(
   request: Request,
-  requiredRole?: 'MEMBER' | 'OFFICER' | 'LEADER'
+  requiredRole?: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER'
 ): Promise<AuthResult | NextResponse> {
   const supabase = createServerClient(request);
 
@@ -72,7 +72,7 @@ export async function verifyAuth(
 
   // 4. Check role if required
   if (requiredRole) {
-    const roleHierarchy = { MEMBER: 0, OFFICER: 1, LEADER: 2 };
+    const roleHierarchy = { MEMBER: 0, OFFICER: 1, DEPUTY: 2, LEADER: 3 };
     const userRoleLevel = roleHierarchy[membership.role as keyof typeof roleHierarchy];
     const requiredRoleLevel = roleHierarchy[requiredRole];
 
@@ -98,7 +98,7 @@ export async function verifyAuth(
   return {
     user: { id: user.id, email: user.email },
     guildId,
-    role: membership.role as 'MEMBER' | 'OFFICER' | 'LEADER',
+    role: membership.role as 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER',
   };
 }
 
