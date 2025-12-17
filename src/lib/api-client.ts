@@ -29,7 +29,19 @@ export class ApiClient {
       console.warn('[ApiClient] No guild ID available for request:', url);
     }
 
-    console.log('[ApiClient] Request:', url, 'Guild ID:', contextGuildId || 'NONE');
+    // Add cache-busting headers to prevent aggressive browser caching
+    requestHeaders.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    requestHeaders.set('Pragma', 'no-cache');
+    requestHeaders.set('Expires', '0');
+
+    // Add cache-busting query parameter for GET requests
+    let finalUrl = url;
+    if (options.method === 'GET' || !options.method) {
+      const separator = url.includes('?') ? '&' : '?';
+      finalUrl = `${url}${separator}_t=${Date.now()}`;
+    }
+
+    console.log('[ApiClient] Request:', finalUrl, 'Guild ID:', contextGuildId || 'NONE');
     console.log('[ApiClient] Headers being sent:', Object.fromEntries(requestHeaders.entries()));
 
     // Convert Headers object to plain object for fetch
@@ -38,6 +50,7 @@ export class ApiClient {
     const fetchOptions = {
       ...restOptions,
       headers: headersPlainObject,
+      cache: 'no-store' as RequestCache,
     };
 
     console.log('[ApiClient] Full fetch options:', {
@@ -45,7 +58,7 @@ export class ApiClient {
       body: typeof fetchOptions.body === 'string' ? `${fetchOptions.body.substring(0, 100)}...` : fetchOptions.body
     });
 
-    return fetch(url, fetchOptions);
+    return fetch(finalUrl, fetchOptions);
   }
 
   async get(url: string, options: ApiClientOptions = {}): Promise<Response> {

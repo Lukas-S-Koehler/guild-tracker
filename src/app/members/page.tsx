@@ -1,6 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+
+// Force dynamic rendering, disable all caching
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';

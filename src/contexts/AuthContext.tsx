@@ -35,6 +35,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Create Supabase client once, outside of useEffect
   const supabase = useMemo(() => createClient(), []);
 
+  // Clear stale data on mount
+  useEffect(() => {
+    // Clear any stale session data
+    const lastActivity = localStorage.getItem('lastActivity');
+    const now = Date.now();
+    const THIRTY_MINUTES = 30 * 60 * 1000;
+
+    if (lastActivity && (now - parseInt(lastActivity)) > THIRTY_MINUTES) {
+      console.log('[AuthContext] Clearing stale session data');
+      localStorage.removeItem('currentGuildId');
+      // Force a fresh session check
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (!session) {
+          console.log('[AuthContext] No valid session found, clearing');
+          localStorage.clear();
+        }
+      });
+    }
+
+    // Update activity timestamp
+    localStorage.setItem('lastActivity', now.toString());
+
+    // Set up activity tracking
+    const activityInterval = setInterval(() => {
+      localStorage.setItem('lastActivity', Date.now().toString());
+    }, 60000); // Update every minute
+
+    return () => clearInterval(activityInterval);
+  }, [supabase]);
+
   // Load user and their guilds on mount
   useEffect(() => {
     let mounted = true;
