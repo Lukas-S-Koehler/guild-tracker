@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
 import { formatGold, formatDate } from '@/lib/utils';
+import { useApiClient } from '@/lib/api-client';
 
 interface ChallengeItem {
   name: string;
@@ -33,16 +34,18 @@ export default function ChallengesListPage() {
   const [challenges, setChallenges] = useState<SavedChallenge[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const api = useApiClient();
 
   useEffect(() => {
     loadChallenges();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadChallenges() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/challenges/list');
+      const res = await api.get('/api/challenges/list');
       if (!res.ok) {
         const txt = await res.text();
         throw new Error(txt || `Status ${res.status}`);

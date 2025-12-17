@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Copy, Check } from 'lucide-react';
 import { getInactivityEmoji, formatInactivityReport, copyToClipboard } from '@/lib/utils';
+import { useApiClient } from '@/lib/api-client';
 import type { InactivityEntry } from '@/types';
 
 export default function ReportsPage() {
@@ -13,13 +14,14 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [guildName, setGuildName] = useState('Guild');
+  const api = useApiClient();
 
   useEffect(() => {
     async function fetchData() {
       try {
         const [reportRes, configRes] = await Promise.all([
-          fetch('/api/reports/inactivity'),
-          fetch('/api/config'),
+          api.get('/api/reports/inactivity'),
+          api.get('/api/config'),
         ]);
 
         const reportData = await reportRes.json();
@@ -37,6 +39,7 @@ export default function ReportsPage() {
       }
     }
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleCopy = async () => {

@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { parseChallengeData } from '@/lib/parsers';
 
 export async function POST(req: NextRequest) {
+  // Verify authentication and get guild context
+  const authResult = await verifyAuth(req);
+  if (isErrorResponse(authResult)) return authResult;
+  const { guildId } = authResult;
+
   const supabase = createServerClient(req);
   const body = await req.json();
 
@@ -13,11 +19,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Challenge data is required' }, { status: 400 });
   }
 
-  // Get API key
+  // Get API key for this guild
   const { data: config } = await supabase
     .from('guild_config')
     .select('api_key')
-    .limit(1)
+    .eq('guild_id', guildId)
     .single();
 
   if (!config?.api_key) {

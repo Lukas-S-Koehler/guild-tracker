@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { parseActivityLog, getUniqueItems } from '@/lib/parsers';
 import type { ProcessedMember } from '@/types';
 
 export async function POST(req: NextRequest) {
+  // Verify authentication and get guild context
+  const authResult = await verifyAuth(req);
+  if (isErrorResponse(authResult)) return authResult;
+  const { guildId } = authResult;
+
   const supabase = createServerClient(req);
   const body = await req.json();
   const { raw_log } = body;
@@ -13,11 +19,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Activity log is required' }, { status: 400 });
   }
 
-  // Get API key
+  // Get API key for this guild
   const { data: config, error: configError } = await supabase
     .from('guild_config')
     .select('api_key')
-    .limit(1)
+    .eq('guild_id', guildId)
     .single();
 
   if (configError) {

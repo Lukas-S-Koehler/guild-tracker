@@ -1,9 +1,15 @@
 // app/api/activity/submit/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 import type { ProcessedMember } from '@/types';
 
 export async function POST(req: NextRequest) {
+  // Verify authentication and get guild context
+  const authResult = await verifyAuth(req);
+  if (isErrorResponse(authResult)) return authResult;
+  const { guildId } = authResult;
+
   const supabase = createServerClient(req);
   try {
     const body = await req.json();
@@ -11,11 +17,6 @@ export async function POST(req: NextRequest) {
 
     if (!log_date) return NextResponse.json({ error: 'log_date is required' }, { status: 400 });
     if (!Array.isArray(members) || members.length === 0) return NextResponse.json({ error: 'members array is required' }, { status: 400 });
-
-    // 1) get guild config
-    const { data: cfg, error: cfgErr } = await supabase.from('guild_config').select('guild_id').limit(1).single();
-    if (cfgErr || !cfg?.guild_id) return NextResponse.json({ error: 'Guild not configured' }, { status: 400 });
-    const guildId = cfg.guild_id;
 
     // 2) resolve IGNs -> member_id
     const igns = Array.from(new Set(members.map(m => m.ign.trim()).filter(Boolean)));

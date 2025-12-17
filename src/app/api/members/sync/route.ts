@@ -1,16 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 
 export async function POST(req: NextRequest) {
   console.log("=== SYNC MEMBERS START ===");
 
+  // Verify authentication and get guild context
+  const authResult = await verifyAuth(req);
+  if (isErrorResponse(authResult)) return authResult;
+  const { guildId } = authResult;
+
   const supabase = createServerClient(req);
 
-  // Load config
+  // Load config for this guild
   const { data: config, error: configError } = await supabase
     .from('guild_config')
     .select('guild_id, api_key')
-    .limit(1)
+    .eq('guild_id', guildId)
     .single();
 
   console.log("CONFIG LOADED:", config);

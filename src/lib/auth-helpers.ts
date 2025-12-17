@@ -36,6 +36,7 @@ export async function verifyAuth(
   const guildId = request.headers.get('x-guild-id');
 
   console.log('[verifyAuth] Step 2 - Guild ID from header:', guildId);
+  console.log('[verifyAuth] All request headers:', Object.fromEntries(request.headers.entries()));
 
   if (!guildId) {
     console.log('[verifyAuth] FAIL - No guild ID in header');

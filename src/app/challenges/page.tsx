@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Loader2, AlertTriangle, Copy, Check, Settings } from 'lucide-react';
 import { formatGold, copyToClipboard } from '@/lib/utils';
+import { useApiClient } from '@/lib/api-client';
 
 interface ChallengeItem {
   name: string;
@@ -29,6 +30,7 @@ export default function ChallengeInputPage() {
   const [items, setItems] = useState<ChallengeItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const api = useApiClient();
 
   const handleCalculate = async () => {
     if (!rawInput.trim()) {
@@ -41,11 +43,7 @@ export default function ChallengeInputPage() {
     setItems(null);
 
     try {
-      const res = await fetch('/api/challenges/parse', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ raw_input: rawInput }),
-      });
+      const res = await api.post('/api/challenges/parse', { raw_input: rawInput });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to process');
@@ -54,14 +52,10 @@ export default function ChallengeInputPage() {
 
       // Save challenge automatically (server attaches guild_id)
       const totalCost = data.items.reduce((sum: number, i: any) => sum + i.total, 0);
-      const saveRes = await fetch('/api/challenges/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          raw_input: rawInput,
-          items: data.items,
-          total_cost: totalCost,
-        }),
+      const saveRes = await api.post('/api/challenges/save', {
+        raw_input: rawInput,
+        items: data.items,
+        total_cost: totalCost,
       });
 
       if (!saveRes.ok) {

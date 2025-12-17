@@ -30,11 +30,22 @@ export class ApiClient {
     }
 
     console.log('[ApiClient] Request:', url, 'Guild ID:', contextGuildId || 'NONE');
+    console.log('[ApiClient] Headers being sent:', Object.fromEntries(requestHeaders.entries()));
 
-    return fetch(url, {
+    // Convert Headers object to plain object for fetch
+    const headersPlainObject = Object.fromEntries(requestHeaders.entries());
+
+    const fetchOptions = {
       ...restOptions,
-      headers: requestHeaders,
+      headers: headersPlainObject,
+    };
+
+    console.log('[ApiClient] Full fetch options:', {
+      ...fetchOptions,
+      body: typeof fetchOptions.body === 'string' ? `${fetchOptions.body.substring(0, 100)}...` : fetchOptions.body
     });
+
+    return fetch(url, fetchOptions);
   }
 
   async get(url: string, options: ApiClientOptions = {}): Promise<Response> {

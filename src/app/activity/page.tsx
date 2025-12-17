@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Check, AlertCircle, Copy } from 'lucide-react';
 import { formatGold, getToday, copyToClipboard } from '@/lib/utils';
+import { useApiClient } from '@/lib/api-client';
 import type { ProcessedMember } from '@/types';
 
 export default function ActivityPage() {
@@ -22,20 +23,21 @@ export default function ActivityPage() {
   const [copied, setCopied] = useState(false);
   const [donationReq, setDonationReq] = useState(5000);
   const [challengeTotal, setChallengeTotal] = useState(0);
+  const api = useApiClient();
 
   // Fetch config and challenge info on mount and when date changes
   useEffect(() => {
     const fetchRequirements = async () => {
       try {
         // Fetch donation requirement from config
-        const configRes = await fetch('/api/config');
+        const configRes = await api.get('/api/config');
         if (configRes.ok) {
           const configData = await configRes.json();
           setDonationReq(configData.donation_requirement || 5000);
         }
 
         // Fetch challenge for selected date
-        const challengeRes = await fetch(`/api/challenges/list?date=${logDate}`);
+        const challengeRes = await api.get(`/api/challenges/list?date=${logDate}`);
         if (challengeRes.ok) {
           const challenges = await challengeRes.json();
           if (challenges && challenges.length > 0) {
@@ -50,7 +52,7 @@ export default function ActivityPage() {
     };
 
     fetchRequirements();
-  }, [logDate]);
+  }, [logDate, api]);
 
   const handleProcess = async () => {
     if (!rawLog.trim()) {
@@ -64,13 +66,12 @@ export default function ActivityPage() {
     setResults(null);
 
     try {
-      const res = await fetch('/api/activity/parse', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ raw_log: rawLog }),
-      });
+      console.log('[Activity] Sending request with raw_log length:', rawLog.length);
+      const res = await api.post('/api/activity/parse', { raw_log: rawLog });
+      console.log('[Activity] Response status:', res.status);
 
       const data = await res.json();
+      console.log('[Activity] Response data:', data);
 
       if (!res.ok) {
         throw new Error(data.error || 'Failed to process');
@@ -91,13 +92,9 @@ export default function ActivityPage() {
     setError(null);
 
     try {
-      const res = await fetch('/api/activity', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          log_date: logDate,
-          members: results,
-        }),
+      const res = await api.post('/api/activity', {
+        log_date: logDate,
+        members: results,
       });
 
       const data = await res.json();
