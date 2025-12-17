@@ -3,6 +3,11 @@ import { createServerClient } from '@/lib/supabase-server';
 import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 import { getMemberApiKey } from '@/lib/member-api-key';
 
+/**
+ * POST /api/members/sync
+ * Sync in-game members for the current user's guild from IdleMMO API
+ * Uses guild ID from the user's current guild context
+ */
 export async function POST(req: NextRequest) {
   console.log("=== SYNC MEMBERS START ===");
 
@@ -17,6 +22,7 @@ export async function POST(req: NextRequest) {
   const apiKey = await getMemberApiKey(supabase, user.id, guildId);
 
   console.log("MEMBER API KEY EXISTS:", !!apiKey);
+  console.log("SYNCING GUILD ID:", guildId);
 
   if (!apiKey) {
     console.log("❌ No API key found for member");
@@ -25,6 +31,23 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
+
+  // Fetch guild info from database to get the actual guild ID for the API
+  const { data: guildInfo, error: guildError } = await supabase
+    .from('guilds')
+    .select('id, name, nickname')
+    .eq('id', guildId)
+    .single();
+
+  if (guildError || !guildInfo) {
+    console.error('[Sync] Guild not found in database:', guildId);
+    return NextResponse.json(
+      { error: 'Guild not found in database' },
+      { status: 404 }
+    );
+  }
+
+  console.log('[Sync] Syncing guild:', guildInfo.nickname, guildInfo.name);
 
   const url = `https://api.idle-mmo.com/v1/guild/${guildId}/members`;
   console.log("FETCHING FROM:", url);
@@ -62,16 +85,19 @@ export async function POST(req: NextRequest) {
   }
 
   console.log("PARSED MEMBERS:", data.members);
+  console.log("GUILD INFO FROM API:", data.guild);
 
+  // Transform members data for database
   const members = data.members.map((m: any) => ({
-    current_guild_id: guildId,
-    idlemmo_id: m.name.toLowerCase(),
-    ign: m.name,
-    position: m.position,
-    total_level: m.total_level,
-    avatar_url: m.avatar_url,
-    is_active: true,
-    synced_at: new Date().toISOString(),
+    current_guild_id: guildId, // Use the guild ID from database
+    idlemmo_id: m.name.toLowerCase(), // Unique identifier
+    ign: m.name, // In-game name
+    position: m.position, // LEADER, OFFICER, etc.
+    total_level: m.total_level, // Total level
+    avatar_url: m.avatar_url, // Avatar URL
+    background_url: m.background_url, // Background URL (if available)
+    is_active: true, // Mark as active
+    synced_at: new Date().toISOString(), // Timestamp
   }));
 
   console.log("UPSERT PAYLOAD:", members);
