@@ -89,7 +89,8 @@ export async function POST(req: NextRequest) {
 
   // Transform members data for database
   const members = data.members.map((m: any) => ({
-    current_guild_id: guildId, // Use the guild ID from database
+    guild_id: guildId, // Legacy column (NOT NULL constraint)
+    current_guild_id: guildId, // Current guild ID
     idlemmo_id: m.name.toLowerCase(), // Unique identifier
     ign: m.name, // In-game name
     position: m.position, // LEADER, OFFICER, etc.

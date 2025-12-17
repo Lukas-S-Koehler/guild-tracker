@@ -95,6 +95,7 @@ export async function POST(req: NextRequest) {
 
         // Transform members data
         const members = data.members.map((m: any) => ({
+          guild_id: guild.id, // Legacy column (NOT NULL constraint)
           current_guild_id: guild.id,
           idlemmo_id: m.name.toLowerCase(),
           ign: m.name,

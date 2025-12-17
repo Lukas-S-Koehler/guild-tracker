@@ -1,10 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-
-// Force dynamic rendering, disable all caching
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';

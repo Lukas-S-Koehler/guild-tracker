@@ -10,10 +10,6 @@ import { Loader2, UserPlus, Trash2, Shield, Crown, Users, AlertCircle, Check, Ch
 import { useApiClient } from '@/lib/api-client';
 import ProtectedRoute from '@/components/ProtectedRoute';
 
-// Force dynamic rendering, disable all caching
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
 interface GuildMember {
   user_id: string;
   email: string;

@@ -2,10 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-
-// Force dynamic rendering, disable all caching
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2, Settings, Users, Swords, Coins, ClipboardList } from 'lucide-react';

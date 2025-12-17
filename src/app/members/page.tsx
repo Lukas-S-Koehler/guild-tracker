@@ -9,10 +9,6 @@ import { useApiClient } from '@/lib/api-client';
 import { useAuth } from '@/contexts/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 
-// Force dynamic rendering, disable all caching
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
 interface GuildMember {
   idlemmo_id: string;
   ign: string;
