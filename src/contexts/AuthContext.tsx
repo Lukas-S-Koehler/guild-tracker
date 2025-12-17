@@ -82,9 +82,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setIsLoadingGuilds(true);
 
           try {
-            // Fetch user's guilds with timeout (increased to 10 seconds for reliability)
+            // Fetch user's guilds with timeout (5 seconds should be plenty with optimized function)
             const timeoutPromise = new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('Timeout fetching guilds')), 10000)
+              setTimeout(() => reject(new Error('Timeout fetching guilds')), 5000)
             );
 
             const guildsPromise = supabase.rpc('get_user_guilds');
@@ -169,7 +169,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           try {
             const timeoutPromise = new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('Timeout fetching guilds')), 10000)
+              setTimeout(() => reject(new Error('Timeout fetching guilds')), 5000)
             );
             const guildsPromise = supabase.rpc('get_user_guilds');
 
