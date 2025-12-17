@@ -223,7 +223,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const value = {
     user,
-    loading,
+    loading: loading || isLoadingGuilds, // Include guild loading in overall loading state
     guilds,
     currentGuild,
     setCurrentGuild,

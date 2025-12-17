@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Loader2, Copy, Check } from 'lucide-react';
 import { formatGold, getRankEmoji, formatLeaderboard, copyToClipboard } from '@/lib/utils';
+import { useApiClient } from '@/lib/api-client';
 import type { LeaderboardEntry } from '@/types';
 
 type Period = 'week' | 'month' | 'all';
@@ -15,12 +16,13 @@ export default function LeaderboardPage() {
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<Period>('week');
   const [copied, setCopied] = useState(false);
+  const api = useApiClient();
 
   useEffect(() => {
     async function fetchLeaderboard() {
       setLoading(true);
       try {
-        const res = await fetch(`/api/leaderboard?period=${period}`);
+        const res = await api.get(`/api/leaderboard?period=${period}`);
         const data = await res.json();
         setEntries(Array.isArray(data) ? data : []);
       } catch (error) {
@@ -31,6 +33,7 @@ export default function LeaderboardPage() {
       }
     }
     fetchLeaderboard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period]);
 
   const handleCopy = async () => {
