@@ -82,9 +82,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setIsLoadingGuilds(true);
 
           try {
-            // Fetch user's guilds with timeout
+            // Fetch user's guilds with timeout (increased to 10 seconds for reliability)
             const timeoutPromise = new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('Timeout fetching guilds')), 5000)
+              setTimeout(() => reject(new Error('Timeout fetching guilds')), 10000)
             );
 
             const guildsPromise = supabase.rpc('get_user_guilds');
@@ -98,6 +98,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
             if (error) {
               console.error('[AuthContext] Error fetching guilds:', error);
+              console.error('[AuthContext] Error details:', {
+                message: error.message,
+                code: error.code,
+                details: error.details,
+                hint: error.hint
+              });
               setGuilds([]);
             } else if (userGuilds && Array.isArray(userGuilds) && userGuilds.length > 0) {
               console.log('[AuthContext] Found guilds:', userGuilds);
@@ -110,13 +116,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               // Set current guild to saved guild or first available guild
               setCurrentGuildState(savedGuild || userGuilds[0]);
             } else {
-              console.log('[AuthContext] No guilds found');
+              console.log('[AuthContext] No guilds found for user');
               // No guilds found
               setGuilds([]);
               setCurrentGuildState(null);
             }
           } catch (timeoutError) {
             console.error('[AuthContext] Timeout or error fetching guilds:', timeoutError);
+            console.error('[AuthContext] This usually means the get_user_guilds() function is missing or slow.');
+            console.error('[AuthContext] Please run database/04-fix-get-user-guilds-function.sql');
             if (mounted) setGuilds([]);
           } finally {
             if (mounted) {
@@ -161,7 +169,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           try {
             const timeoutPromise = new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('Timeout fetching guilds')), 5000)
+              setTimeout(() => reject(new Error('Timeout fetching guilds')), 10000)
             );
             const guildsPromise = supabase.rpc('get_user_guilds');
 
@@ -174,6 +182,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
             if (error) {
               console.error('[AuthContext] Error fetching guilds:', error);
+              console.error('[AuthContext] Error details:', {
+                message: error.message,
+                code: error.code,
+                details: error.details,
+                hint: error.hint
+              });
               setGuilds([]);
             } else if (userGuilds && Array.isArray(userGuilds) && userGuilds.length > 0) {
               console.log('[AuthContext] Found guilds:', userGuilds);
@@ -183,12 +197,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               const savedGuild = userGuilds.find((g: GuildMembership) => g.guild_id === savedGuildId);
               setCurrentGuildState(savedGuild || userGuilds[0]);
             } else {
-              console.log('[AuthContext] No guilds found');
+              console.log('[AuthContext] No guilds found for user');
               setGuilds([]);
               setCurrentGuildState(null);
             }
           } catch (timeoutError) {
             console.error('[AuthContext] Timeout or error fetching guilds:', timeoutError);
+            console.error('[AuthContext] This usually means the get_user_guilds() function is missing or slow.');
+            console.error('[AuthContext] Please run database/04-fix-get-user-guilds-function.sql');
             if (mounted) setGuilds([]);
           } finally {
             if (mounted) {

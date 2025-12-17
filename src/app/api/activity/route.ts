@@ -8,18 +8,20 @@ export async function GET(req: NextRequest) {
   const auth = await verifyAuth(req, 'MEMBER');
   if (isErrorResponse(auth)) return auth;
 
+  const { guildId } = auth;
   const supabase = createServerClient(req);
   const { searchParams } = new URL(req.url);
 
   const date = searchParams.get('date');
 
-  // Note: RLS policies will automatically filter by guild
+  // Filter by guild_id from authenticated context
   let query = supabase
     .from('daily_logs')
     .select(`
       *,
       members (id, ign)
     `)
+    .eq('guild_id', guildId)
     .order('gold_donated', { ascending: false });
 
   if (date) {
@@ -29,6 +31,7 @@ export async function GET(req: NextRequest) {
   const { data, error } = await query;
 
   if (error) {
+    console.error('[Activity GET] Error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
@@ -144,11 +147,12 @@ export async function POST(req: NextRequest) {
     const metsChallengeReq = halfChallengeReq > 0 && member.gold >= halfChallengeReq;
     const metRequirement = metsDonationReq || metsChallengeReq;
 
-    // Upsert daily log
+    // Upsert daily log with guild_id
     const { error: logError } = await supabase
       .from('daily_logs')
       .upsert({
         member_id: memberData.id,
+        guild_id: auth.guildId,
         log_date,
         raids: member.raids,
         gold_donated: member.gold,
