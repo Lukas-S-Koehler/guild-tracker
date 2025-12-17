@@ -35,25 +35,25 @@ function SetupPageContent() {
   const isLeaderOrDeputy = hasRole('DEPUTY');
 
   useEffect(() => {
-    // Don't fetch until we have a current guild
-    if (!currentGuild) return;
-
     async function fetchData() {
       try {
-        // Fetch member's API key
+        // Fetch member's API key (works even without guild)
         const keyRes = await api.get('/api/member-keys');
-        const keyData = await keyRes.json();
-
-        if (keyData.has_key) {
-          setApiKey(keyData.api_key);
-          setHasExistingKey(true);
+        if (keyRes.ok) {
+          const keyData = await keyRes.json();
+          if (keyData.has_key) {
+            setApiKey(keyData.api_key);
+            setHasExistingKey(true);
+          }
         }
 
-        // Fetch guild config (for donation requirement) if LEADER/DEPUTY
-        if (isLeaderOrDeputy) {
+        // Fetch guild config (for donation requirement) if LEADER/DEPUTY and has guild
+        if (currentGuild && isLeaderOrDeputy) {
           const configRes = await api.get('/api/config');
-          const configData = await configRes.json();
-          setDonationReq(configData.donation_requirement || 5000);
+          if (configRes.ok) {
+            const configData = await configRes.json();
+            setDonationReq(configData.donation_requirement || 5000);
+          }
         }
       } catch (err) {
         console.error('Failed to fetch data:', err);
@@ -153,7 +153,7 @@ function SetupPageContent() {
             <Label htmlFor="api_key">API Key</Label>
             <Input
               id="api_key"
-              type="password"
+              type="text"
               placeholder="idlemmo_xxxxx..."
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}

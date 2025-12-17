@@ -26,15 +26,48 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch guilds' }, { status: 500 });
     }
 
-    // Get all guild members with user details using RPC function
-    // This function joins guild_members with auth.users (which is in a different schema)
-    const { data: guildMembers, error: membersError } = await supabase
-      .rpc('get_all_guild_members');
+    // Get all guild members - we'll fetch user details separately
+    const { data: guildMembersRaw, error: membersError } = await supabase
+      .from('guild_members')
+      .select('guild_id, user_id, role, joined_at');
 
     if (membersError) {
-      console.error('[Admin] Error fetching members:', membersError);
+      console.error('[Admin] Error fetching guild members:', membersError);
       return NextResponse.json({ error: 'Failed to fetch members' }, { status: 500 });
     }
+
+    // Get unique user IDs
+    const userIds = [...new Set(guildMembersRaw?.map(m => m.user_id) || [])];
+
+    // Fetch user details from auth.users
+    const { data: { users }, error: usersError } = await supabase.auth.admin.listUsers();
+
+    if (usersError) {
+      console.error('[Admin] Error fetching users:', usersError);
+      // Continue without user details rather than failing completely
+    }
+
+    // Create user lookup map
+    const userMap = new Map<string, any>();
+    users?.forEach(user => {
+      userMap.set(user.id, {
+        email: user.email,
+        display_name: user.user_metadata?.display_name || user.email?.split('@')[0] || 'Unknown',
+      });
+    });
+
+    // Combine guild members with user details
+    const guildMembers = guildMembersRaw?.map(member => {
+      const userDetails = userMap.get(member.user_id);
+      return {
+        guild_id: member.guild_id,
+        user_id: member.user_id,
+        role: member.role,
+        joined_at: member.joined_at,
+        email: userDetails?.email || 'unknown@email.com',
+        display_name: userDetails?.display_name || 'Unknown User',
+      };
+    });
 
     // Group members by guild
     const guildMemberMap = new Map<string, any[]>();

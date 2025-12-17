@@ -7,11 +7,27 @@ import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
  * Get the current user's API key for their current guild
  */
 export async function GET(req: NextRequest) {
-  const auth = await verifyAuth(req, 'MEMBER');
-  if (isErrorResponse(auth)) return auth;
-
-  const { user, guildId } = auth;
   const supabase = createServerClient(req);
+
+  // Check if user is authenticated
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Get guild ID from header (optional - might not have guild yet)
+  const guildId = req.headers.get('x-guild-id');
+
+  if (!guildId) {
+    // User has no guild selected - return empty response
+    return NextResponse.json({
+      has_key: false,
+      api_key: null,
+      created_at: null,
+      updated_at: null,
+    });
+  }
 
   try {
     // Get guild_member record
@@ -23,8 +39,13 @@ export async function GET(req: NextRequest) {
       .single();
 
     if (memberError || !guildMember) {
-      console.error('[MemberKeys] Error fetching guild member:', memberError);
-      return NextResponse.json({ error: 'Guild membership not found' }, { status: 404 });
+      console.log('[MemberKeys] No guild membership found - user not in guild yet');
+      return NextResponse.json({
+        has_key: false,
+        api_key: null,
+        created_at: null,
+        updated_at: null,
+      });
     }
 
     // Get API key for this guild member
@@ -56,11 +77,21 @@ export async function GET(req: NextRequest) {
  * Create or update the current user's API key for their current guild
  */
 export async function POST(req: NextRequest) {
-  const auth = await verifyAuth(req, 'MEMBER');
-  if (isErrorResponse(auth)) return auth;
-
-  const { user, guildId } = auth;
   const supabase = createServerClient(req);
+
+  // Check if user is authenticated
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  // Get guild ID from header (optional - might not have guild yet)
+  const guildId = req.headers.get('x-guild-id');
+
+  if (!guildId) {
+    return NextResponse.json({ error: 'No guild selected. Please join a guild first.' }, { status: 400 });
+  }
 
   try {
     const body = await req.json();
@@ -79,8 +110,10 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (memberError || !guildMember) {
-      console.error('[MemberKeys] Error fetching guild member:', memberError);
-      return NextResponse.json({ error: 'Guild membership not found' }, { status: 404 });
+      console.log('[MemberKeys POST] User not a member of this guild yet');
+      return NextResponse.json({
+        error: 'You must be added to this guild before you can save an API key. Contact your guild leader.'
+      }, { status: 403 });
     }
 
     // Check if key already exists

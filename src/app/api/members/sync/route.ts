@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
+import { getMemberApiKey } from '@/lib/member-api-key';
 
 export async function POST(req: NextRequest) {
   console.log("=== SYNC MEMBERS START ===");
@@ -8,35 +9,30 @@ export async function POST(req: NextRequest) {
   // Verify authentication and get guild context
   const authResult = await verifyAuth(req);
   if (isErrorResponse(authResult)) return authResult;
-  const { guildId } = authResult;
+  const { guildId, user } = authResult;
 
   const supabase = createServerClient(req);
 
-  // Load config for this guild
-  const { data: config, error: configError } = await supabase
-    .from('guild_config')
-    .select('guild_id, api_key')
-    .eq('guild_id', guildId)
-    .single();
+  // Get the member's personal API key
+  const apiKey = await getMemberApiKey(supabase, user.id, guildId);
 
-  console.log("CONFIG LOADED:", config);
-  console.log("CONFIG ERROR:", configError);
+  console.log("MEMBER API KEY EXISTS:", !!apiKey);
 
-  if (configError || !config?.guild_id || !config?.api_key) {
-    console.log("❌ Missing config values");
+  if (!apiKey) {
+    console.log("❌ No API key found for member");
     return NextResponse.json(
-      { error: 'Missing guild ID or API key in config' },
+      { error: 'API key not configured. Go to Settings to add your IdleMMO API key.' },
       { status: 400 }
     );
   }
 
-  const url = `https://api.idle-mmo.com/v1/guild/${config.guild_id}/members`;
+  const url = `https://api.idle-mmo.com/v1/guild/${guildId}/members`;
   console.log("FETCHING FROM:", url);
 
-  // Fetch members from IdleMMO
+  // Fetch members from IdleMMO using member's API key
   const res = await fetch(url, {
     headers: {
-      Authorization: `Bearer ${config.api_key}`,
+      Authorization: `Bearer ${apiKey}`,
       'User-Agent': 'GuildTracker/1.0',
     },
   });
@@ -68,7 +64,7 @@ export async function POST(req: NextRequest) {
   console.log("PARSED MEMBERS:", data.members);
 
   const members = data.members.map((m: any) => ({
-    current_guild_id: config.guild_id,
+    current_guild_id: guildId,
     idlemmo_id: m.name.toLowerCase(),
     ign: m.name,
     position: m.position,

@@ -37,13 +37,26 @@ Based on your data:
 - Creates `find_user_by_email()` RPC function
 - Used for adding members by email in Admin page
 
-### 4️⃣ **Fix get_user_guilds Function**
-📄 **`04-fix-get-user-guilds-function.sql`**
-- Fixes the `get_user_guilds()` RPC function
-- Resolves timeout errors when loading guilds
-- Improves reliability by joining with guilds table
+### 4️⃣ **COMPREHENSIVE FIX - RUN THIS NOW** ⚠️ **CRITICAL - FIXES EVERYTHING**
+📄 **`06-comprehensive-fix-loading-issues.sql`**
+- Fixes ALL RLS policies on `guild_members` AND `guilds` tables
+- Adds critical indexes for fast loading
+- Creates missing `guild_config` entries
+- Fixes permissions and grants
+- **THIS IS THE MOST IMPORTANT SCRIPT - RUN IT NOW**
+- ✅ Fixes "no guilds found" issue
+- ✅ Fixes slow loading screens
+- ✅ Includes diagnostics to verify everything works
 
-### 5️⃣ **Create Member Keys Table**
+**Alternative (if you already ran the old scripts):**
+📄 **`05-fix-guild-members-rls.sql`** - Older partial fix (use 06 instead)
+
+### 5️⃣ **Fix get_user_guilds Function** (Optional - for backup)
+📄 **`04-fix-get-user-guilds-function.sql`**
+- Creates backup RPC function for guild fetching
+- Not currently used but good to have
+
+### 6️⃣ **Create Member Keys Table**
 📄 **`add-member-keys-table.sql`**
 - Creates `member_keys` table for individual API keys
 - Sets up RLS policies
@@ -65,7 +78,32 @@ Based on your data, your guilds use these IDs:
 3. **Add your personal IdleMMO API key**
 4. **Test processing an activity log or challenge**
 
+## ✅ Verify Your Setup
+
+After running the scripts, verify everything is working:
+
+📄 **Run `07-verify-setup.sql`** in the Supabase SQL Editor
+
+This will check:
+- ✅ All tables exist
+- ✅ All guilds have config entries
+- ✅ RLS policies are correct
+- ✅ Indexes are created
+- ✅ Foreign keys are set up
+
+The script will tell you exactly what's wrong (if anything) and what to fix!
+
 ## 🚨 Troubleshooting
+
+### 🔥 **"No guilds found" for all accounts** (MOST COMMON)
+**Root Cause:** Infinite recursion in RLS policy (ERROR: 42P17) - the policy queries `guild_members` while checking permissions on `guild_members`
+
+**Solution:** Run `06-comprehensive-fix-loading-issues.sql` immediately! This fixes ALL RLS policies and indexes.
+
+**If already ran 06 but still broken:** Run `12-fix-recursive-rls-policy.sql` to fix just the RLS recursion issue.
+
+### ⚠️ **ERROR: 42P17: infinite recursion detected in policy**
+**Solution:** Run `12-fix-recursive-rls-policy.sql` to replace recursive policies with simple non-recursive ones.
 
 ### Error: "violates foreign key constraint guild_members_guild_id_fkey"
 **Solution:** Run `02-create-guild-configs-from-existing.sql` first to create all guild_config entries.
@@ -79,7 +117,31 @@ Based on your data, your guilds use these IDs:
 ### Can't add users by email in Admin page
 **Solution:** Run `add-find-user-function.sql`.
 
-## 📊 Verification Commands
+## 🚀 Quick Start (MOST USERS - START HERE!)
+
+If you're experiencing loading issues or "no guilds found":
+
+1. **`06-comprehensive-fix-loading-issues.sql`** - Run this FIRST! Fixes RLS, indexes, foreign keys, everything
+   - ⚠️ Fixes infinite recursion in RLS policies (ERROR: 42P17)
+   - ✅ Creates non-recursive policies
+   - ✅ Adds performance indexes
+   - ✅ Fixes foreign key constraints
+2. **`03-add-yourself-as-member.sql`** - Add yourself to a guild (if not already added)
+3. **`07-verify-setup.sql`** - Verify everything is working
+4. Sign in to the app and enjoy!
+
+## ⚠️ If You Still Can't Connect After Running 06
+
+If you ran the fix but still can't connect with an account that worked before:
+
+1. **`08-fix-foreign-key-constraint.sql`** - Fixes incorrect FK constraint on guild_members
+2. Refresh browser and try again
+
+The issue is that `guild_members.guild_id` may be pointing to `guild_config.guild_id` instead of `guilds.id`
+
+## 📊 Manual Verification Commands
+
+If you prefer to check manually instead of using `07-verify-setup.sql`:
 
 ```sql
 -- Check all guilds have config entries
@@ -95,12 +157,18 @@ FROM guild_members gm
 JOIN guilds g ON g.id = gm.guild_id
 WHERE gm.user_id = 'your-user-uuid';
 
--- Check functions exist
-SELECT routine_name FROM information_schema.routines
-WHERE routine_schema = 'public'
-AND routine_name IN ('get_all_guild_members', 'find_user_by_email');
+-- Check RLS policies on guild_members (should be 3)
+SELECT COUNT(*), STRING_AGG(policyname, ', ')
+FROM pg_policies
+WHERE tablename = 'guild_members';
 
--- Check member_keys table exists
-SELECT table_name FROM information_schema.tables
-WHERE table_schema = 'public' AND table_name = 'member_keys';
+-- Check RLS policies on guilds (should be 1)
+SELECT COUNT(*), STRING_AGG(policyname, ', ')
+FROM pg_policies
+WHERE tablename = 'guilds';
+
+-- Check indexes on guild_members (should be at least 5)
+SELECT COUNT(*), STRING_AGG(indexname, ', ')
+FROM pg_indexes
+WHERE tablename = 'guild_members';
 ```
