@@ -95,7 +95,6 @@ export async function POST(req: NextRequest) {
     position: m.position, // LEADER, OFFICER, etc.
     total_level: m.total_level, // Total level
     avatar_url: m.avatar_url, // Avatar URL
-    background_url: m.background_url, // Background URL (if available)
     is_active: true, // Mark as active
     synced_at: new Date().toISOString(), // Timestamp
   }));
