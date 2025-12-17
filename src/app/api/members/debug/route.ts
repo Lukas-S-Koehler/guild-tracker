@@ -12,8 +12,15 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await supabase
     .from('members')
-    .select('*')
-    .eq('guild_id', guildId);
+    .select(`
+      *,
+      guild:guilds!current_guild_id (
+        id,
+        name,
+        nickname
+      )
+    `)
+    .eq('current_guild_id', guildId);
 
   console.log("DEBUG MEMBERS:", data, error);
 

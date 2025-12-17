@@ -4,25 +4,64 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Copy, Check } from 'lucide-react';
 import { formatGold, getRankEmoji, formatLeaderboard, copyToClipboard } from '@/lib/utils';
 import { useApiClient } from '@/lib/api-client';
-import type { LeaderboardEntry } from '@/types';
 
 type Period = 'week' | 'month' | 'all';
 
+interface Guild {
+  id: string;
+  name: string;
+  nickname: string;
+  min_level: number;
+}
+
+interface LeaderboardEntry {
+  id: string;
+  ign: string;
+  guild_nickname: string;
+  guild_name: string;
+  current_guild_id: string;
+  total_raids: number;
+  total_gold: number;
+  activity_score: number;
+  days_active: number;
+}
+
 export default function LeaderboardPage() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
+  const [guilds, setGuilds] = useState<Guild[]>([]);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<Period>('week');
+  const [guildFilter, setGuildFilter] = useState<string>('all');
   const [copied, setCopied] = useState(false);
   const api = useApiClient();
+
+  // Fetch guilds list on mount
+  useEffect(() => {
+    async function fetchGuilds() {
+      try {
+        const res = await api.get('/api/guilds');
+        const data = await res.json();
+        setGuilds(Array.isArray(data) ? data : []);
+      } catch (error) {
+        console.error('Failed to fetch guilds:', error);
+      }
+    }
+    fetchGuilds();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     async function fetchLeaderboard() {
       setLoading(true);
       try {
-        const res = await api.get(`/api/leaderboard?period=${period}`);
+        const url = guildFilter === 'all'
+          ? `/api/leaderboard?period=${period}`
+          : `/api/leaderboard?period=${period}&guild=${guildFilter}`;
+        const res = await api.get(url);
         const data = await res.json();
         setEntries(Array.isArray(data) ? data : []);
       } catch (error) {
@@ -34,7 +73,7 @@ export default function LeaderboardPage() {
     }
     fetchLeaderboard();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period]);
+  }, [period, guildFilter]);
 
   const handleCopy = async () => {
     const periodLabel = period === 'week' ? 'This Week' : period === 'month' ? 'This Month' : 'All Time';
@@ -62,7 +101,7 @@ export default function LeaderboardPage() {
               <CardTitle>Activity Rankings</CardTitle>
               <CardDescription>Score = (Raids × 1,000) + Gold Donated</CardDescription>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Tabs value={period} onValueChange={(v) => setPeriod(v as Period)}>
                 <TabsList>
                   <TabsTrigger value="week">Week</TabsTrigger>
@@ -70,6 +109,21 @@ export default function LeaderboardPage() {
                   <TabsTrigger value="all">All Time</TabsTrigger>
                 </TabsList>
               </Tabs>
+
+              <Select value={guildFilter} onValueChange={setGuildFilter}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="All Guilds" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Guilds</SelectItem>
+                  {guilds.map((guild) => (
+                    <SelectItem key={guild.id} value={guild.id}>
+                      {guild.nickname} - {guild.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
               <Button variant="outline" size="sm" onClick={handleCopy} disabled={entries.length === 0}>
                 {copied ? <Check className="h-4 w-4 mr-1" /> : <Copy className="h-4 w-4 mr-1" />}
                 {copied ? 'Copied!' : 'Copy'}
@@ -93,6 +147,7 @@ export default function LeaderboardPage() {
                   <tr className="text-left text-muted-foreground text-sm border-b">
                     <th className="pb-3 w-16">Rank</th>
                     <th className="pb-3">Member</th>
+                    <th className="pb-3">Guild</th>
                     <th className="pb-3 text-right">Raids</th>
                     <th className="pb-3 text-right">Gold</th>
                     <th className="pb-3 text-right">Score</th>
@@ -107,9 +162,16 @@ export default function LeaderboardPage() {
                           <span className="text-lg">{getRankEmoji(rank)}</span>
                         </td>
                         <td className="py-3">
-                          <span className="font-medium">{entry.ign}</span>
-                          <span className="text-xs text-muted-foreground ml-2">
-                            {entry.days_active}d active
+                          <div>
+                            <span className="font-medium">{entry.ign}</span>
+                            <div className="text-xs text-muted-foreground">
+                              {entry.days_active}d active
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3">
+                          <span className="font-mono text-sm font-bold text-primary">
+                            {entry.guild_nickname || '-'}
                           </span>
                         </td>
                         <td className="py-3 text-right font-mono">{entry.total_raids}</td>

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
-import { getWeekStart, getMonthStart } from '@/lib/utils';
 
 export async function GET(req: NextRequest) {
   // Verify authentication (members can view leaderboard)
@@ -12,81 +11,36 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
 
   const period = searchParams.get('period') || 'week';
+  const guildFilter = searchParams.get('guild'); // Optional guild_id filter
 
-  let startDate: string;
+  // Choose the appropriate view based on period
+  let viewName: string;
   switch (period) {
     case 'week':
-      startDate = getWeekStart();
+      viewName = 'v_weekly_leaderboard';
       break;
     case 'month':
-      startDate = getMonthStart();
+      viewName = 'v_monthly_leaderboard';
       break;
+    case 'all':
     default:
-      startDate = '2000-01-01';
+      viewName = 'v_global_leaderboard';
   }
 
-  // Get all members
-  const { data: members, error: membersError } = await supabase
-    .from('members')
-    .select('id, ign');
+  // Query the view
+  let query = supabase.from(viewName).select('*');
 
-  if (membersError) {
-    return NextResponse.json({ error: membersError.message }, { status: 500 });
+  // Apply guild filter if provided
+  if (guildFilter && guildFilter !== 'all') {
+    query = query.eq('current_guild_id', guildFilter);
   }
 
-  // Get logs for the period
-  const { data: logs, error: logsError } = await supabase
-    .from('daily_logs')
-    .select('member_id, raids, gold_donated, met_requirement')
-    .gte('log_date', startDate);
+  const { data: leaderboard, error } = await query;
 
-  if (logsError) {
-    return NextResponse.json({ error: logsError.message }, { status: 500 });
+  if (error) {
+    console.error('[Leaderboard] Error:', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
-
-  // Aggregate by member
-  const memberStats = new Map<string, {
-    total_raids: number;
-    total_gold: number;
-    days_active: number;
-  }>();
-
-  logs?.forEach((log) => {
-    const existing = memberStats.get(log.member_id) || {
-      total_raids: 0,
-      total_gold: 0,
-      days_active: 0,
-    };
-
-    existing.total_raids += log.raids || 0;
-    existing.total_gold += log.gold_donated || 0;
-    if (log.met_requirement) {
-      existing.days_active += 1;
-    }
-
-    memberStats.set(log.member_id, existing);
-  });
-
-  // Build leaderboard
-  const leaderboard = members
-    ?.map((member) => {
-      const stats = memberStats.get(member.id) || {
-        total_raids: 0,
-        total_gold: 0,
-        days_active: 0,
-      };
-
-      return {
-        id: member.id,
-        ign: member.ign,
-        total_raids: stats.total_raids,
-        total_gold: stats.total_gold,
-        activity_score: (stats.total_raids * 1000) + stats.total_gold,
-        days_active: stats.days_active,
-      };
-    })
-    .filter((m) => m.activity_score > 0)
-    .sort((a, b) => b.activity_score - a.activity_score);
 
   return NextResponse.json(leaderboard || []);
 }

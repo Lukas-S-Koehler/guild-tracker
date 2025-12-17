@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
   console.log("PARSED MEMBERS:", data.members);
 
   const members = data.members.map((m: any) => ({
-    guild_id: config.guild_id,
+    current_guild_id: config.guild_id,
     idlemmo_id: m.name.toLowerCase(),
     ign: m.name,
     position: m.position,
@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
 
   const { error: upsertError } = await supabase
     .from('members')
-    .upsert(members, { onConflict: 'guild_id,idlemmo_id' });
+    .upsert(members, { onConflict: 'idlemmo_id' });
 
   console.log("UPSERT ERROR:", upsertError);
 
