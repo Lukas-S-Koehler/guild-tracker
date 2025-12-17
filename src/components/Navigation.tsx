@@ -48,6 +48,7 @@ export default function Navigation() {
 
   const navLinks = [
     { href: '/', label: 'Dashboard' },
+    { href: '/members', label: 'Members' },
     { href: '/activity', label: 'Activity Log', requiresRole: 'OFFICER' as const },
     { href: '/challenges', label: 'Challenges', requiresRole: 'OFFICER' as const },
     { href: '/leaderboard', label: 'Leaderboard' },
