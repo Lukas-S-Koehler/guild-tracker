@@ -27,13 +27,15 @@ export async function GET(req: NextRequest) {
   }
 
   // Get the most recent activity date where member MET REQUIREMENTS for each member in this guild
+  // Limit to recent logs to avoid fetching years of data (we only need the most recent per member)
   const { data: recentLogs, error: logsError } = await supabase
     .from('daily_logs')
     .select('member_id, log_date')
     .eq('guild_id', guildId)
     .eq('met_requirement', true) // ONLY count days where requirement was met
     .in('member_id', members.map(m => m.id))
-    .order('log_date', { ascending: false });
+    .order('log_date', { ascending: false })
+    .limit(365); // Fetch last ~365 days of data (more than enough to find each member's recent activity)
 
   if (logsError) {
     console.error('[Inactivity Report] Error fetching logs:', logsError);

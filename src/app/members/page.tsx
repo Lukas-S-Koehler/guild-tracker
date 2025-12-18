@@ -4,17 +4,27 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Users, Settings, RefreshCw } from 'lucide-react';
+import { Loader2, Users, Settings, RefreshCw, ChevronDown, ChevronRight, Check, X } from 'lucide-react';
 import { useApiClient } from '@/lib/api-client';
 import { useAuth } from '@/contexts/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 
 interface GuildMember {
+  id: string;
   idlemmo_id: string;
   ign: string;
   position: 'LEADER' | 'DEPUTY' | 'OFFICER' | 'RECRUIT';
   avatar_url: string | null;
   total_level: number;
+}
+
+interface ActivityDay {
+  date: string;
+  gold_donated: number;
+  raids: number;
+  met_requirement: boolean;
+  challenge_total: number;
+  challenge_percent: number;
 }
 
 function MembersPageContent() {
@@ -23,6 +33,9 @@ function MembersPageContent() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [expandedMemberId, setExpandedMemberId] = useState<string | null>(null);
+  const [memberActivity, setMemberActivity] = useState<Record<string, ActivityDay[]>>({});
+  const [loadingActivity, setLoadingActivity] = useState<string | null>(null);
   const api = useApiClient();
 
   async function loadMembers() {
@@ -121,6 +134,58 @@ function MembersPageContent() {
     } finally {
       setSyncing(false);
     }
+  }
+
+  async function toggleMemberActivity(memberId: string) {
+    // If already expanded, collapse
+    if (expandedMemberId === memberId) {
+      setExpandedMemberId(null);
+      return;
+    }
+
+    // Expand this member
+    setExpandedMemberId(memberId);
+
+    // If we already have activity data, don't fetch again
+    if (memberActivity[memberId]) {
+      return;
+    }
+
+    // Fetch activity for this member
+    try {
+      setLoadingActivity(memberId);
+      const res = await api.get(`/api/members/activity-history?member_id=${memberId}`);
+
+      if (!res.ok) {
+        console.error('Failed to load activity for member', memberId);
+        return;
+      }
+
+      const activity = await res.json();
+      setMemberActivity(prev => ({
+        ...prev,
+        [memberId]: activity,
+      }));
+    } catch (err) {
+      console.error('Error loading member activity:', err);
+    } finally {
+      setLoadingActivity(null);
+    }
+  }
+
+  function formatGold(value: number): string {
+    if (value >= 1_000_000) {
+      return `${(value / 1_000_000).toFixed(1)}M`;
+    }
+    if (value >= 1_000) {
+      return `${(value / 1_000).toFixed(1)}K`;
+    }
+    return value.toString();
+  }
+
+  function formatDate(dateStr: string): string {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
 
   useEffect(() => {
@@ -225,6 +290,7 @@ function MembersPageContent() {
               <table className="min-w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-700 text-left">
+                    <th className="py-2 px-3 w-8"></th>
                     <th className="py-2 px-3">Avatar</th>
                     <th className="py-2 px-3">IGN</th>
                     <th className="py-2 px-3">Level</th>
@@ -234,23 +300,93 @@ function MembersPageContent() {
 
                 <tbody>
                   {members.map(member => (
-                    <tr key={member.idlemmo_id} className="border-b border-gray-800">
-                      <td className="py-2 px-3">
-                        {member.avatar_url ? (
-                          <img
-                            src={member.avatar_url}
-                            alt={member.ign}
-                            className="w-10 h-10 rounded"
-                          />
-                        ) : (
-                          <div className="w-10 h-10 bg-gray-700 rounded" />
-                        )}
-                      </td>
+                    <>
+                      <tr key={member.id} className="border-b border-gray-800">
+                        <td className="py-2 px-3">
+                          <button
+                            onClick={() => toggleMemberActivity(member.id)}
+                            className="text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            {expandedMemberId === member.id ? (
+                              <ChevronDown className="h-4 w-4" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4" />
+                            )}
+                          </button>
+                        </td>
+                        <td className="py-2 px-3">
+                          {member.avatar_url ? (
+                            <img
+                              src={member.avatar_url}
+                              alt={member.ign}
+                              className="w-10 h-10 rounded"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 bg-gray-700 rounded" />
+                          )}
+                        </td>
 
-                      <td className="py-2 px-3 font-medium">{member.ign}</td>
-                      <td className="py-2 px-3">{member.total_level}</td>
-                      <td className="py-2 px-3">{member.position}</td>
-                    </tr>
+                        <td className="py-2 px-3 font-medium">{member.ign}</td>
+                        <td className="py-2 px-3">{member.total_level}</td>
+                        <td className="py-2 px-3">{member.position}</td>
+                      </tr>
+
+                      {/* Expanded Activity Row */}
+                      {expandedMemberId === member.id && (
+                        <tr key={`${member.id}-activity`}>
+                          <td colSpan={5} className="bg-muted/30 p-4">
+                            {loadingActivity === member.id ? (
+                              <div className="flex items-center justify-center py-4">
+                                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                              </div>
+                            ) : memberActivity[member.id]?.length === 0 ? (
+                              <p className="text-center text-muted-foreground py-4">
+                                No activity data available for the last 7 days
+                              </p>
+                            ) : (
+                              <div>
+                                <h4 className="text-sm font-semibold mb-3">Last 7 Days Activity</h4>
+                                <div className="grid grid-cols-7 gap-2">
+                                  {memberActivity[member.id]?.map((day) => (
+                                    <div
+                                      key={day.date}
+                                      className={`rounded-lg border p-3 text-center ${
+                                        day.met_requirement
+                                          ? 'bg-green-500/10 border-green-500/30'
+                                          : 'bg-muted border-border'
+                                      }`}
+                                    >
+                                      <div className="text-xs font-medium text-muted-foreground mb-1">
+                                        {formatDate(day.date)}
+                                      </div>
+                                      <div className="text-lg font-bold mb-1">
+                                        {formatGold(day.gold_donated)}
+                                      </div>
+                                      <div className="text-xs text-muted-foreground mb-2">
+                                        {day.raids} raids
+                                      </div>
+                                      {day.challenge_total > 0 && (
+                                        <div className="text-xs">
+                                          <div className="font-medium">{day.challenge_percent}%</div>
+                                          <div className="text-muted-foreground">of challenge</div>
+                                        </div>
+                                      )}
+                                      <div className="mt-2">
+                                        {day.met_requirement ? (
+                                          <Check className="h-4 w-4 text-green-500 mx-auto" />
+                                        ) : (
+                                          <X className="h-4 w-4 text-red-500 mx-auto" />
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </>
                   ))}
                 </tbody>
               </table>
