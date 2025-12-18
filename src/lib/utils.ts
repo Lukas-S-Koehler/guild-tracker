@@ -71,10 +71,11 @@ export function getInactivityEmoji(category: string): string {
     case '5d':
     case '6d':
       return '🟠';
-    case '1d':
     case '2d':
     case '3d':
       return '🟡';
+    case '1d':
+      return '🟢'; // 1 day = green (safe)
     default:
       return '🟢';
   }

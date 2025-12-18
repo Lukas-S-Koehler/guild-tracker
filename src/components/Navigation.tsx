@@ -53,6 +53,7 @@ export default function Navigation() {
     { href: '/challenges', label: 'Challenges', requiresRole: 'OFFICER' as const },
     { href: '/leaderboard', label: 'Leaderboard' },
     { href: '/reports', label: 'Reports' },
+    { href: '/data-management', label: 'Manage Data', requiresRole: 'OFFICER' as const },
     { href: '/setup', label: 'Settings' },
     { href: '/admin', label: 'Admin', requiresRole: 'LEADER' as const },
   ];
