@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, useMemo } from 'react';
+import { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react';
 import { User } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase';
 
@@ -32,11 +32,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [isLoadingGuilds, setIsLoadingGuilds] = useState(false);
 
+  // Use ref instead of state to avoid closure issues in event handler
+  const hasLoadedInitialGuilds = useRef(false);
+
   // Create Supabase client once, outside of useEffect
   const supabase = useMemo(() => createClient(), []);
 
-  // Clear stale data on mount
+  // Clear stale data ONLY ONCE on mount (not on every render)
+  const [hasCheckedStaleData, setHasCheckedStaleData] = useState(false);
+
   useEffect(() => {
+    if (hasCheckedStaleData) return;
+
     // Clear any stale session data
     const lastActivity = localStorage.getItem('lastActivity');
     const now = Date.now();
@@ -45,25 +52,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (lastActivity && (now - parseInt(lastActivity)) > THIRTY_MINUTES) {
       console.log('[AuthContext] Clearing stale session data');
       localStorage.removeItem('currentGuildId');
-      // Force a fresh session check
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        if (!session) {
-          console.log('[AuthContext] No valid session found, clearing');
-          localStorage.clear();
-        }
-      });
+      localStorage.clear();
     }
 
     // Update activity timestamp
     localStorage.setItem('lastActivity', now.toString());
+    setHasCheckedStaleData(true);
 
-    // Set up activity tracking
+    // Set up activity tracking (update every 5 minutes, not every minute)
     const activityInterval = setInterval(() => {
       localStorage.setItem('lastActivity', Date.now().toString());
-    }, 60000); // Update every minute
+    }, 300000); // Update every 5 minutes
 
     return () => clearInterval(activityInterval);
-  }, [supabase]);
+  }, [hasCheckedStaleData]);
 
   // Load user and their guilds on mount
   useEffect(() => {
@@ -82,47 +84,61 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setIsLoadingGuilds(true);
 
           try {
-            // Fetch user's guilds directly (more reliable than RPC)
+            // Fetch user's guilds directly - using separate queries to avoid join issues
             console.log('[AuthContext] Fetching guilds for user:', currentUser.id);
 
-            const { data: userGuilds, error } = await supabase
+            // Step 1: Fetch guild_leaders records
+            const { data: userGuildLeaders, error: leadersError } = await supabase
               .from('guild_leaders')
-              .select(`
-                guild_id,
-                role,
-                joined_at,
-                guilds!inner (
-                  name
-                )
-              `)
+              .select('guild_id, role, joined_at')
               .eq('user_id', currentUser.id)
               .order('joined_at', { ascending: true });
 
-            console.log('[AuthContext] Query result:', { userGuilds, error });
+            console.log('[AuthContext] Guild leaders query result:', { userGuildLeaders, leadersError });
 
             if (!mounted) return;
 
-            if (error) {
-              console.error('[AuthContext] Error fetching guilds:', error);
+            if (leadersError) {
+              console.error('[AuthContext] Error fetching guild leaders:', leadersError);
               console.error('[AuthContext] Error details:', {
-                message: error.message,
-                code: error.code,
-                details: error.details,
-                hint: error.hint
+                message: leadersError.message,
+                code: leadersError.code,
+                details: leadersError.details,
+                hint: leadersError.hint
               });
               setGuilds([]);
-            } else if (userGuilds && Array.isArray(userGuilds) && userGuilds.length > 0) {
-              console.log('[AuthContext] Found guilds:', userGuilds);
+            } else if (userGuildLeaders && Array.isArray(userGuildLeaders) && userGuildLeaders.length > 0) {
+              console.log('[AuthContext] Found guild leaders:', userGuildLeaders);
+
+              // Step 2: Fetch guild names for these guild IDs
+              const guildIds = userGuildLeaders.map(g => g.guild_id);
+              const { data: guildsData, error: guildsError } = await supabase
+                .from('guilds')
+                .select('id, name')
+                .in('id', guildIds);
+
+              console.log('[AuthContext] Guilds data:', { guildsData, guildsError });
+
+              if (guildsError) {
+                console.error('[AuthContext] Error fetching guilds:', guildsError);
+                setGuilds([]);
+                return;
+              }
+
+              // Create a map of guild_id -> guild_name
+              const guildNameMap = new Map<string, string>();
+              guildsData?.forEach(g => guildNameMap.set(g.id, g.name));
 
               // Transform the data to match GuildMembership interface
-              const transformedGuilds: GuildMembership[] = userGuilds.map((g: any) => ({
+              const transformedGuilds: GuildMembership[] = userGuildLeaders.map((g: any) => ({
                 guild_id: g.guild_id,
-                guild_name: g.guilds.name,
+                guild_name: guildNameMap.get(g.guild_id) || 'Unknown Guild',
                 role: g.role as 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER',
                 joined_at: g.joined_at,
               }));
 
               setGuilds(transformedGuilds);
+              hasLoadedInitialGuilds.current = true; // Mark that we've loaded guilds
 
               // Try to restore current guild from localStorage
               const savedGuildId = localStorage.getItem('currentGuildId');
@@ -164,6 +180,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('[AuthContext] Auth event:', event);
 
+      // Ignore token refresh and user update events (they happen when tab regains focus)
+      if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+        console.log('[AuthContext] Ignoring', event, 'event');
+        return;
+      }
+
+      // Ignore SIGNED_IN if we already have guilds loaded (initial load already handled)
+      if (event === 'SIGNED_IN' && hasLoadedInitialGuilds.current) {
+        console.log('[AuthContext] Ignoring SIGNED_IN - guilds already loaded');
+        return;
+      }
+
       // Only process specific events
       if (event === 'SIGNED_OUT') {
         console.log('[AuthContext] User signed out, clearing guilds');
@@ -171,8 +199,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setGuilds([]);
         setCurrentGuildState(null);
         localStorage.removeItem('currentGuildId');
-      } else if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user) {
-        console.log('[AuthContext] User authenticated, fetching guilds');
+      } else if (event === 'SIGNED_IN' && session?.user) {
+        // ONLY process SIGNED_IN, not INITIAL_SESSION (already handled in loadUser)
+        console.log('[AuthContext] User signed in, fetching guilds');
         setUser(session.user);
 
         // Fetch guilds when user signs in
@@ -181,47 +210,61 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setIsLoadingGuilds(true);
 
           try {
-            // Fetch user's guilds directly (more reliable than RPC)
+            // Fetch user's guilds directly - using separate queries to avoid join issues
             console.log('[AuthContext] Fetching guilds for user:', session.user.id);
 
-            const { data: userGuilds, error } = await supabase
+            // Step 1: Fetch guild_leaders records
+            const { data: userGuildLeaders, error: leadersError } = await supabase
               .from('guild_leaders')
-              .select(`
-                guild_id,
-                role,
-                joined_at,
-                guilds!inner (
-                  name
-                )
-              `)
+              .select('guild_id, role, joined_at')
               .eq('user_id', session.user.id)
               .order('joined_at', { ascending: true });
 
-            console.log('[AuthContext] Query result:', { userGuilds, error });
+            console.log('[AuthContext] Guild leaders query result:', { userGuildLeaders, leadersError });
 
             if (!mounted) return;
 
-            if (error) {
-              console.error('[AuthContext] Error fetching guilds:', error);
+            if (leadersError) {
+              console.error('[AuthContext] Error fetching guild leaders:', leadersError);
               console.error('[AuthContext] Error details:', {
-                message: error.message,
-                code: error.code,
-                details: error.details,
-                hint: error.hint
+                message: leadersError.message,
+                code: leadersError.code,
+                details: leadersError.details,
+                hint: leadersError.hint
               });
               setGuilds([]);
-            } else if (userGuilds && Array.isArray(userGuilds) && userGuilds.length > 0) {
-              console.log('[AuthContext] Found guilds:', userGuilds);
+            } else if (userGuildLeaders && Array.isArray(userGuildLeaders) && userGuildLeaders.length > 0) {
+              console.log('[AuthContext] Found guild leaders:', userGuildLeaders);
+
+              // Step 2: Fetch guild names for these guild IDs
+              const guildIds = userGuildLeaders.map(g => g.guild_id);
+              const { data: guildsData, error: guildsError } = await supabase
+                .from('guilds')
+                .select('id, name')
+                .in('id', guildIds);
+
+              console.log('[AuthContext] Guilds data:', { guildsData, guildsError });
+
+              if (guildsError) {
+                console.error('[AuthContext] Error fetching guilds:', guildsError);
+                setGuilds([]);
+                return;
+              }
+
+              // Create a map of guild_id -> guild_name
+              const guildNameMap = new Map<string, string>();
+              guildsData?.forEach(g => guildNameMap.set(g.id, g.name));
 
               // Transform the data to match GuildMembership interface
-              const transformedGuilds: GuildMembership[] = userGuilds.map((g: any) => ({
+              const transformedGuilds: GuildMembership[] = userGuildLeaders.map((g: any) => ({
                 guild_id: g.guild_id,
-                guild_name: g.guilds.name,
+                guild_name: guildNameMap.get(g.guild_id) || 'Unknown Guild',
                 role: g.role as 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER',
                 joined_at: g.joined_at,
               }));
 
               setGuilds(transformedGuilds);
+              hasLoadedInitialGuilds.current = true; // Mark that we've loaded guilds
 
               const savedGuildId = localStorage.getItem('currentGuildId');
               const savedGuild = transformedGuilds.find((g) => g.guild_id === savedGuildId);
