@@ -29,8 +29,8 @@ export default function LoginPage() {
       if (signInError) {
         setError(signInError.message);
       } else {
-        // Redirect to guild selection or home
-        router.push('/guilds');
+        // Redirect to home (AuthContext automatically selects first guild)
+        router.push('/');
       }
     } catch (err) {
       setError('An unexpected error occurred');
