@@ -52,10 +52,10 @@ export async function GET(req: NextRequest) {
   const today = new Date();
   const inactiveMembers = members
     .map(member => {
-      const lastActivityDate = lastActivityMap.get(member.id) || member.last_seen;
+      const lastActivityDate = lastActivityMap.get(member.id);
 
       if (!lastActivityDate) {
-        // Never had any activity
+        // Never met requirement (might have activity, but never met the threshold)
         return {
           id: member.id,
           ign: member.ign,
@@ -64,7 +64,7 @@ export async function GET(req: NextRequest) {
           last_active_date: null,
           days_inactive: 999,
           category: 'never' as const,
-          warning_level: 'kick' as const, // Immediate kick for never active
+          warning_level: 'kick' as const, // Never met requirement
         };
       }
 
