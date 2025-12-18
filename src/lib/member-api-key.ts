@@ -13,9 +13,9 @@ export async function getMemberApiKey(
   guildId: string
 ): Promise<string | null> {
   try {
-    // Get guild_member record
+    // Get guild_leader record
     const { data: guildMember, error: memberError } = await supabase
-      .from('guild_members')
+      .from('guild_leaders')
       .select('id')
       .eq('user_id', userId)
       .eq('guild_id', guildId)

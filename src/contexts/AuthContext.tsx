@@ -86,7 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             console.log('[AuthContext] Fetching guilds for user:', currentUser.id);
 
             const { data: userGuilds, error } = await supabase
-              .from('guild_members')
+              .from('guild_leaders')
               .select(`
                 guild_id,
                 role,
@@ -185,7 +185,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             console.log('[AuthContext] Fetching guilds for user:', session.user.id);
 
             const { data: userGuilds, error } = await supabase
-              .from('guild_members')
+              .from('guild_leaders')
               .select(`
                 guild_id,
                 role,

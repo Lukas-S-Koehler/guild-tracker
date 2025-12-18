@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
 
   // Get all users in this guild with their details
   const { data: guildUsers, error } = await supabase
-    .from('guild_members')
+    .from('guild_leaders')
     .select(`
       user_id,
       role,
@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
 
     // Check if user is already in this guild
     const { data: existing } = await supabase
-      .from('guild_members')
+      .from('guild_leaders')
       .select('id')
       .eq('guild_id', target_guild_id)
       .eq('user_id', userId)
@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
 
     // Add user to guild
     const { error: insertError } = await supabase
-      .from('guild_members')
+      .from('guild_leaders')
       .insert({
         guild_id: target_guild_id,
         user_id: userId,
@@ -162,7 +162,7 @@ export async function PATCH(req: NextRequest) {
 
     // Update user's role
     const { error: updateError } = await supabase
-      .from('guild_members')
+      .from('guild_leaders')
       .update({ role })
       .eq('guild_id', target_guild_id)
       .eq('user_id', user_id);
@@ -212,7 +212,7 @@ export async function DELETE(req: NextRequest) {
 
     // Remove user from guild
     const { error: deleteError } = await supabase
-      .from('guild_members')
+      .from('guild_leaders')
       .delete()
       .eq('guild_id', targetGuildId)
       .eq('user_id', userIdToRemove);

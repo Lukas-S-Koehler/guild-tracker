@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   // Query members in the current guild with their latest activity
   const { data: members, error: membersError } = await supabase
     .from('members')
-    .select('id, ign, last_seen, first_seen, is_active')
+    .select('id, ign, position, avatar_url, last_seen, first_seen, is_active')
     .eq('current_guild_id', guildId)
     .eq('is_active', true);
 
@@ -26,11 +26,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json([]);
   }
 
-  // Get the most recent activity date for each member in this guild
+  // Get the most recent activity date where member MET REQUIREMENTS for each member in this guild
   const { data: recentLogs, error: logsError } = await supabase
     .from('daily_logs')
     .select('member_id, log_date')
     .eq('guild_id', guildId)
+    .eq('met_requirement', true) // ONLY count days where requirement was met
     .in('member_id', members.map(m => m.id))
     .order('log_date', { ascending: false });
 
@@ -58,6 +59,8 @@ export async function GET(req: NextRequest) {
         return {
           id: member.id,
           ign: member.ign,
+          position: member.position,
+          avatar_url: member.avatar_url,
           last_active_date: null,
           days_inactive: 999,
           category: 'never' as const,
@@ -67,21 +70,23 @@ export async function GET(req: NextRequest) {
       const lastDate = new Date(lastActivityDate);
       const daysDiff = Math.floor((today.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
 
-      // Determine category
+      // Determine category based on days since last met requirement
       let category: string;
       if (daysDiff === 0) {
-        category = 'active';
+        category = 'active'; // Met requirement today
       } else if (daysDiff >= 7) {
-        category = '1w+';
-      } else if (daysDiff >= 4) {
-        category = `${daysDiff}d`;
+        category = '7d+'; // 7 or more days
+      } else if (daysDiff >= 1) {
+        category = `${daysDiff}d`; // 1d, 2d, 3d, 4d, 5d, 6d
       } else {
-        category = 'recent'; // Less than 4 days
+        category = 'active'; // Less than 1 day
       }
 
       return {
         id: member.id,
         ign: member.ign,
+        position: member.position,
+        avatar_url: member.avatar_url,
         last_active_date: lastActivityDate,
         days_inactive: daysDiff,
         category,
@@ -92,8 +97,8 @@ export async function GET(req: NextRequest) {
       if (!m.ign || m.ign.toLowerCase().includes('raw activity') || m.ign.toLowerCase().includes('log')) {
         return false;
       }
-      // Only show inactive members (not active today and not recent)
-      return m.category !== 'active' && m.category !== 'recent';
+      // Only show inactive members (not active today)
+      return m.category !== 'active';
     })
     .sort((a, b) => {
       // Sort by severity (never first, then by days)

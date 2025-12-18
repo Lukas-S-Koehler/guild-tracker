@@ -27,9 +27,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch guilds' }, { status: 500 });
     }
 
-    // Get all guild members - we'll fetch user details separately
+    // Get all guild leaders - we'll fetch user details separately
     const { data: guildMembersRaw, error: membersError } = await supabase
-      .from('guild_members')
+      .from('guild_leaders')
       .select('guild_id, user_id, role, joined_at');
 
     if (membersError) {

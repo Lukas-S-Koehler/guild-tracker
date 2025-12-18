@@ -30,9 +30,9 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Get guild_member record
+    // Get guild_leader record
     const { data: guildMember, error: memberError } = await supabase
-      .from('guild_members')
+      .from('guild_leaders')
       .select('id')
       .eq('user_id', user.id)
       .eq('guild_id', guildId)
@@ -101,9 +101,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'API key is required' }, { status: 400 });
     }
 
-    // Get guild_member record
+    // Get guild_leader record
     const { data: guildMember, error: memberError } = await supabase
-      .from('guild_members')
+      .from('guild_leaders')
       .select('id')
       .eq('user_id', user.id)
       .eq('guild_id', guildId)
@@ -173,9 +173,9 @@ export async function DELETE(req: NextRequest) {
   const supabase = createServerClient(req);
 
   try {
-    // Get guild_member record
+    // Get guild_leader record
     const { data: guildMember, error: memberError } = await supabase
-      .from('guild_members')
+      .from('guild_leaders')
       .select('id')
       .eq('user_id', user.id)
       .eq('guild_id', guildId)

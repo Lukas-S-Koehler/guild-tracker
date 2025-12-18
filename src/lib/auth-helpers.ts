@@ -48,7 +48,7 @@ export async function verifyAuth(
 
   // 3. Verify user has access to this guild
   const { data: membership, error: membershipError } = await supabase
-    .from('guild_members')
+    .from('guild_leaders')
     .select('role')
     .eq('user_id', user.id)
     .eq('guild_id', guildId)
