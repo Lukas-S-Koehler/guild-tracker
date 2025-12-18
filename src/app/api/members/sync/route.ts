@@ -113,6 +113,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: upsertError.message }, { status: 500 });
   }
 
+  // Mark members who are no longer in the guild as inactive
+  const syncedIds = members.map((m: { idlemmo_id: string }) => m.idlemmo_id);
+  const { error: deactivateError } = await supabase
+    .from('members')
+    .update({ is_active: false })
+    .eq('current_guild_id', guildId)
+    .not('idlemmo_id', 'in', `(${syncedIds.map((id: string) => `"${id}"`).join(',')})`);
+
+  if (deactivateError) {
+    console.log("⚠️ Warning: Failed to deactivate old members:", deactivateError);
+    // Don't fail the whole sync, just log the warning
+  } else {
+    console.log("✅ Deactivated members who left the guild");
+  }
+
   console.log(`✅ SYNC COMPLETE — ${members.length} members synced`);
   console.log("=== SYNC MEMBERS END ===");
 

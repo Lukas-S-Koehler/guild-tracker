@@ -64,22 +64,35 @@ export async function GET(req: NextRequest) {
           last_active_date: null,
           days_inactive: 999,
           category: 'never' as const,
+          warning_level: 'kick' as const, // Immediate kick for never active
         };
       }
 
       const lastDate = new Date(lastActivityDate);
       const daysDiff = Math.floor((today.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
 
-      // Determine category based on days since last met requirement
+      // Determine category and warning level based on days since last met requirement
       let category: string;
+      let warning_level: 'safe' | 'warn1' | 'warn2' | 'kick';
+
       if (daysDiff === 0) {
-        category = 'active'; // Met requirement today
+        category = 'active';
+        warning_level = 'safe';
+      } else if (daysDiff === 1) {
+        category = '1d';
+        warning_level = 'safe';
+      } else if (daysDiff >= 2 && daysDiff <= 3) {
+        category = `${daysDiff}d`;
+        warning_level = 'warn1'; // 2-3 days: private warning
+      } else if (daysDiff >= 4 && daysDiff <= 6) {
+        category = `${daysDiff}d`;
+        warning_level = 'warn2'; // 4-6 days: public warning
       } else if (daysDiff >= 7) {
-        category = '7d+'; // 7 or more days
-      } else if (daysDiff >= 1) {
-        category = `${daysDiff}d`; // 1d, 2d, 3d, 4d, 5d, 6d
+        category = '7d+';
+        warning_level = 'kick'; // 7+ days: kick
       } else {
-        category = 'active'; // Less than 1 day
+        category = 'active';
+        warning_level = 'safe';
       }
 
       return {
@@ -90,11 +103,16 @@ export async function GET(req: NextRequest) {
         last_active_date: lastActivityDate,
         days_inactive: daysDiff,
         category,
+        warning_level,
       };
     })
     .filter(m => {
       // Filter out invalid entries
       if (!m.ign || m.ign.toLowerCase().includes('raw activity') || m.ign.toLowerCase().includes('log')) {
+        return false;
+      }
+      // Filter out LEADER and DEPUTY positions - they are not tracked for inactivity
+      if (m.position === 'LEADER' || m.position === 'DEPUTY') {
         return false;
       }
       // Only show inactive members (not active today)

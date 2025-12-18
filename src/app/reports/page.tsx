@@ -60,12 +60,34 @@ export default function ReportsPage() {
     return acc;
   }, {} as Record<string, InactivityEntry[]>);
 
-  const categories = ['1d', '2d', '3d', '4d', '5d', '6d', '1w+', 'never'];
+  const categories = ['1d', '2d', '3d', '4d', '5d', '6d', '7d+', 'never'];
 
-  const getCategoryBadgeColor = (cat: string) => {
-    if (cat === '1w+' || cat === 'never') return 'bg-red-500/20 text-red-500 border-red-500/50';
-    if (['4d', '5d', '6d'].includes(cat)) return 'bg-orange-500/20 text-orange-500 border-orange-500/50';
-    return 'bg-yellow-500/20 text-yellow-500 border-yellow-500/50';
+  const getWarningLevelColor = (warning_level: string) => {
+    switch (warning_level) {
+      case 'safe':
+        return 'bg-green-500/20 text-green-500 border-green-500/50';
+      case 'warn1':
+        return 'bg-yellow-500/20 text-yellow-500 border-yellow-500/50'; // 2-3d: Private warning
+      case 'warn2':
+        return 'bg-orange-500/20 text-orange-500 border-orange-500/50'; // 4-6d: Public warning
+      case 'kick':
+        return 'bg-red-500/20 text-red-500 border-red-500/50'; // 7d+: Kick
+      default:
+        return 'bg-gray-500/20 text-gray-500 border-gray-500/50';
+    }
+  };
+
+  const getWarningLevelLabel = (warning_level: string) => {
+    switch (warning_level) {
+      case 'warn1':
+        return '⚠️ Private Warning';
+      case 'warn2':
+        return '⚠️⚠️ Public Warning';
+      case 'kick':
+        return '🚫 Kick';
+      default:
+        return '';
+    }
   };
 
   return (
@@ -109,14 +131,21 @@ export default function ReportsPage() {
 
                 const emoji = getInactivityEmoji(cat);
                 const label = cat === 'never' ? 'Never Active' : `${cat} Inactive`;
+                const warning_level = members[0]?.warning_level || 'safe';
+                const warningLabel = getWarningLevelLabel(warning_level);
 
                 return (
                   <div key={cat} className="space-y-2">
                     <div className="flex items-center gap-2">
                       <span className="text-lg">{emoji}</span>
-                      <Badge variant="outline" className={getCategoryBadgeColor(cat)}>
+                      <Badge variant="outline" className={getWarningLevelColor(warning_level)}>
                         {label}
                       </Badge>
+                      {warningLabel && (
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {warningLabel}
+                        </span>
+                      )}
                       <span className="text-sm text-muted-foreground">
                         ({members.length})
                       </span>
@@ -145,13 +174,24 @@ export default function ReportsPage() {
         </CardContent>
       </Card>
 
-      <div className="text-sm text-muted-foreground p-4 bg-muted rounded-lg">
-        <p className="font-medium mb-1">📋 Activity Requirement</p>
-        <p>A member is considered active if they meet either requirement:</p>
-        <ul className="list-disc list-inside mt-1 space-y-1">
-          <li>Donated 5,000+ gold in a day, OR</li>
-          <li>Donated 50% or more of the daily challenge requirement</li>
-        </ul>
+      <div className="text-sm text-muted-foreground p-4 bg-muted rounded-lg space-y-3">
+        <div>
+          <p className="font-medium mb-1">📋 Activity Requirement</p>
+          <p>A member is considered active if they meet either requirement:</p>
+          <ul className="list-disc list-inside mt-1 space-y-1">
+            <li>Donated 5,000+ gold in a day, OR</li>
+            <li>Donated 50% or more of the daily challenge requirement</li>
+          </ul>
+        </div>
+        <div>
+          <p className="font-medium mb-1">⚠️ Warning Stages</p>
+          <ul className="list-disc list-inside mt-1 space-y-1">
+            <li><span className="text-yellow-500">2-3 days</span>: Private warning sent</li>
+            <li><span className="text-orange-500">4-6 days</span>: Private + public warning in channel</li>
+            <li><span className="text-red-500">7+ days</span>: Subject to removal</li>
+          </ul>
+          <p className="mt-2 text-xs">Note: Leaders and Deputies are excluded from inactivity tracking</p>
+        </div>
       </div>
     </div>
   );
