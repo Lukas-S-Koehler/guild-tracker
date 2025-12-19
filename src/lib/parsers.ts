@@ -1,5 +1,10 @@
 import type { ParsedActivity } from '@/types';
 
+export interface ParseResult {
+  members: Record<string, ParsedActivity>;
+  memberStatusChanges: Array<{ ign: string; action: 'joined' | 'left' | 'kicked' }>;
+}
+
 /**
  * Parse Discord-style activity log
  * Format:
@@ -10,15 +15,19 @@ import type { ParsedActivity } from '@/types';
  * Contributed 100 Item Name
  * 2h
  */
-export function parseActivityLog(text: string): Record<string, ParsedActivity> {
+export function parseActivityLog(text: string): ParseResult {
   const rawLines = text.split(/\r?\n/);
   const lines = rawLines.map(l => l.trim()).filter(l => l !== '');
   const members: Record<string, ParsedActivity> = {};
+  const memberStatusChanges: Array<{ ign: string; action: 'joined' | 'left' | 'kicked' }> = [];
 
   let currentMember: string | null = null;
   const raidRe = /participated in a raid/i;
   const contributedRe = /contributed\s+([\d,]+)\s+(.+)/i;
   const timeRe = /^\d+[smhdw]$/i;
+  const joinedRe = /joined the guild/i;
+  const leftRe = /left the guild/i;
+  const kickedRe = /kicked from the guild/i;
 
   for (let i = 0; i < lines.length; i++) {
     let line = lines[i];
@@ -73,21 +82,33 @@ export function parseActivityLog(text: string): Record<string, ParsedActivity> {
       continue;
     }
 
-    // ignore other lines (joined/left/kicked)
+    // detect member status changes
+    if (joinedRe.test(line)) {
+      memberStatusChanges.push({ ign: currentMember, action: 'joined' });
+      continue;
+    }
+    if (leftRe.test(line)) {
+      memberStatusChanges.push({ ign: currentMember, action: 'left' });
+      continue;
+    }
+    if (kickedRe.test(line)) {
+      memberStatusChanges.push({ ign: currentMember, action: 'kicked' });
+      continue;
+    }
   }
 
-  return members;
+  return { members, memberStatusChanges };
 }
 
 
 /**
  * Get unique item names from parsed activity data
  */
-export function getUniqueItems(parsedData: Record<string, ParsedActivity>): string[] {
+export function getUniqueItems(parsedData: ParseResult): string[] {
   const items = new Set<string>();
 
-  for (const member in parsedData) {
-    parsedData[member].donations.forEach(donation => {
+  for (const member in parsedData.members) {
+    parsedData.members[member].donations.forEach(donation => {
       items.add(donation.item);
     });
   }

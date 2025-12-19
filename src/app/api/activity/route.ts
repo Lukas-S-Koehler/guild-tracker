@@ -90,20 +90,43 @@ export async function POST(req: NextRequest) {
   let saved = 0;
 
   for (const member of members) {
-    // Try to find existing member by IGN first
-    const { data: existingMember } = await supabase
+    let memberData;
+    const ignLower = member.ign.toLowerCase();
+
+    // Try to find member by idlemmo_id (case-insensitive IGN) first - covers synced members and placeholders
+    let { data: existingMember } = await supabase
       .from('members')
       .select('*')
-      .eq('ign', member.ign)
-      .single();
+      .eq('idlemmo_id', ignLower)
+      .maybeSingle();
 
-    let memberData;
+    if (!existingMember) {
+      // If not found by idlemmo_id, search by IGN in current guild (legacy/manual entries)
+      const { data: legacyMember } = await supabase
+        .from('members')
+        .select('*')
+        .eq('ign', member.ign)
+        .eq('current_guild_id', auth.guildId)
+        .maybeSingle();
+
+      existingMember = legacyMember;
+    }
 
     if (existingMember) {
-      // Update existing member
+      // Member exists - update last_seen and ensure they're in current guild
+      const updateData: any = { last_seen: log_date };
+
+      // If member moved guilds or was inactive, reactivate in current guild
+      if (existingMember.current_guild_id !== auth.guildId) {
+        console.log(`[Activity] Member ${member.ign} moved from ${existingMember.current_guild_id} to ${auth.guildId}`);
+        updateData.current_guild_id = auth.guildId;
+        updateData.guild_id = auth.guildId; // Legacy column
+        updateData.is_active = true;
+      }
+
       const { data: updated, error: updateError } = await supabase
         .from('members')
-        .update({ last_seen: log_date })
+        .update(updateData)
         .eq('id', existingMember.id)
         .select()
         .single();
@@ -114,22 +137,29 @@ export async function POST(req: NextRequest) {
       }
       memberData = updated;
     } else {
-      // Create new member (no guild_id column in members table)
+      // Member not found - create placeholder
+      console.log(`[Activity] Creating placeholder for ${member.ign} in guild ${auth.guildId}`);
+
       const { data: inserted, error: insertError } = await supabase
         .from('members')
         .insert({
           ign: member.ign,
-          idlemmo_id: null, // Activity logs don't have IdleMMO IDs
-          position: 'SOLDIER', // Default position for manual entries
+          idlemmo_id: ignLower, // Use lowercase IGN as placeholder idlemmo_id
+          guild_id: auth.guildId, // Legacy column
+          current_guild_id: auth.guildId,
+          position: 'RECRUIT', // Default position for placeholders
           is_active: true,
           last_seen: log_date,
           first_seen: log_date,
+          total_level: 0, // Placeholder level
+          avatar_url: null,
         })
         .select()
         .single();
 
       if (insertError) {
-        console.error(`Failed to insert member ${member.ign}:`, insertError);
+        console.error(`Failed to create placeholder for ${member.ign}:`, insertError);
+        console.error('Error details:', insertError);
         continue;
       }
       memberData = inserted;

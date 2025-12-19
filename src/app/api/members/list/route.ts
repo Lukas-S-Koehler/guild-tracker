@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
 
   const supabase = createServerClient(req);
 
-  // Get members with guild information
+  // Get members with guild information (only active members)
   const { data, error } = await supabase
     .from('members')
     .select(`
@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
       )
     `)
     .eq('current_guild_id', guildId)
+    .eq('is_active', true)
     .order('position', { ascending: true })
     .order('total_level', { ascending: false });
 

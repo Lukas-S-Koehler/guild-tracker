@@ -31,15 +31,16 @@ export async function POST(req: NextRequest) {
 
   try {
     // Parse the activity log into a map: { ign: { raids, donations: [{item,quantity}] } }
-    const parsed = parseActivityLog(raw_log);
+    const parseResult = parseActivityLog(raw_log);
+    const { members: parsed, memberStatusChanges } = parseResult;
     const memberNames = Object.keys(parsed);
 
-    if (memberNames.length === 0) {
+    if (memberNames.length === 0 && memberStatusChanges.length === 0) {
       return NextResponse.json({ error: 'No valid activity found in log' }, { status: 400 });
     }
 
     // Get unique items that need price lookups (normalize to lowercase)
-    const uniqueItemsRaw = getUniqueItems(parsed); // e.g., ['Yew Log', "Siren's Scales"]
+    const uniqueItemsRaw = getUniqueItems(parseResult); // e.g., ['Yew Log', "Siren's Scales"]
     const uniqueItems = Array.from(new Set(uniqueItemsRaw.map((s: string) => s.toLowerCase())));
 
     // Prepare price map and check cache only if we have items
@@ -118,7 +119,10 @@ export async function POST(req: NextRequest) {
     // Sort by gold (highest first)
     members.sort((a, b) => b.gold - a.gold);
 
-    return NextResponse.json({ members });
+    return NextResponse.json({
+      members,
+      memberStatusChanges: memberStatusChanges.length > 0 ? memberStatusChanges : undefined,
+    });
   } catch (error) {
     console.error('Parse error:', error);
     return NextResponse.json(

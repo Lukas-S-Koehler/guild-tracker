@@ -7,17 +7,24 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Check, AlertCircle, Copy } from 'lucide-react';
+import { Loader2, Check, AlertCircle, Copy, UserPlus, UserMinus, RefreshCw } from 'lucide-react';
 import { formatGold, getToday, copyToClipboard } from '@/lib/utils';
 import { useApiClient } from '@/lib/api-client';
 import type { ProcessedMember } from '@/types';
+
+interface MemberStatusChange {
+  ign: string;
+  action: 'joined' | 'left' | 'kicked';
+}
 
 export default function ActivityPage() {
   const [rawLog, setRawLog] = useState('');
   const [logDate, setLogDate] = useState(getToday());
   const [processing, setProcessing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [results, setResults] = useState<ProcessedMember[] | null>(null);
+  const [memberStatusChanges, setMemberStatusChanges] = useState<MemberStatusChange[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -78,10 +85,32 @@ export default function ActivityPage() {
       }
 
       setResults(data.members);
+      setMemberStatusChanges(data.memberStatusChanges || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to process');
     } finally {
       setProcessing(false);
+    }
+  };
+
+  const handleAutoSync = async () => {
+    setSyncing(true);
+    setError(null);
+
+    try {
+      const res = await api.post('/api/members/sync');
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Failed to sync members');
+      }
+
+      setSuccess('Members synced successfully!');
+      setMemberStatusChanges([]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to sync members');
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -203,6 +232,56 @@ Contributed 100 Iron Ore
           <Check className="h-4 w-4 flex-shrink-0" />
           {success}
         </div>
+      )}
+
+      {memberStatusChanges.length > 0 && (
+        <Card className="border-blue-500/50 bg-blue-500/5">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-blue-600 dark:text-blue-400 flex items-center gap-2">
+                  <RefreshCw className="h-5 w-5" />
+                  Member Status Changes Detected
+                </CardTitle>
+                <CardDescription>
+                  The activity log contains member join/leave/kick events
+                </CardDescription>
+              </div>
+              <Button onClick={handleAutoSync} disabled={syncing} variant="outline" className="border-blue-500">
+                {syncing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Syncing...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Sync Members Now
+                  </>
+                )}
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {memberStatusChanges.map((change, i) => (
+                <div key={i} className="flex items-center gap-2 text-sm">
+                  {change.action === 'joined' && <UserPlus className="h-4 w-4 text-green-500" />}
+                  {(change.action === 'left' || change.action === 'kicked') && <UserMinus className="h-4 w-4 text-red-500" />}
+                  <span className="font-medium">{change.ign}</span>
+                  <span className="text-muted-foreground">
+                    {change.action === 'joined' && 'joined the guild'}
+                    {change.action === 'left' && 'left the guild'}
+                    {change.action === 'kicked' && 'was kicked from the guild'}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground mt-4">
+              Click "Sync Members Now" to update the member roster from IdleMMO
+            </p>
+          </CardContent>
+        </Card>
       )}
 
       {results && results.length > 0 && (
