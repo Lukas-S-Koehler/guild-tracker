@@ -62,18 +62,6 @@ export async function POST(req: NextRequest) {
   // Your schema stores donation_requirement in settings JSONB
   const donationReq = config?.settings?.donation_requirement || 5000;
 
-  // Fetch challenge item initial quantities for quantity-based requirement checking
-  const { data: allItemQuantities } = await supabase
-    .from('challenge_item_quantities')
-    .select('item_name, initial_quantity');
-
-  const itemQuantitiesMap = new Map<string, number>();
-  if (allItemQuantities && allItemQuantities.length > 0) {
-    allItemQuantities.forEach((item: any) => {
-      itemQuantitiesMap.set(item.item_name.toLowerCase(), item.initial_quantity);
-    });
-  }
-
   let saved = 0;
 
   for (const member of members) {
@@ -159,40 +147,39 @@ export async function POST(req: NextRequest) {
 
     // Determine if member met requirement:
     // - Either donated >= 5k gold (or configured amount)
-    // - OR donated >= 50% of initial quantity for ANY item
+    // - OR meets_challenge_quantity flag (already calculated during parsing)
     // - OR manual override is set
     const metsDonationReq = member.gold >= donationReq;
-
-    // Check if member donated >= 50% of initial quantity for any item
-    let metsChallengeReq = false;
-    if (member.donations && Array.isArray(member.donations)) {
-      metsChallengeReq = member.donations.some((donation: any) => {
-        const itemNameLower = donation.item.toLowerCase();
-        const initialQty = itemQuantitiesMap.get(itemNameLower) || 0;
-        const requiredQty = Math.ceil(initialQty / 2); // 50% of initial quantity
-        return initialQty > 0 && donation.quantity >= requiredQty;
-      });
-    }
+    const metsChallengeReq = member.meets_challenge_quantity || false;
 
     const metRequirement = metsDonationReq || metsChallengeReq || (member.manual_override === true);
 
+    console.log(`[Activity Save] ${member.ign}: gold=${member.gold}, donationReq=${donationReq}, metsDonationReq=${metsDonationReq}, meets_challenge_quantity=${member.meets_challenge_quantity}, metsChallengeReq=${metsChallengeReq}, metRequirement=${metRequirement}`);
+
     // Upsert daily log with guild_id
-    const { error: logError } = await supabase
+    const upsertData = {
+      member_id: memberData.id,
+      guild_id: auth.guildId,
+      log_date,
+      raids: member.raids,
+      gold_donated: member.gold,
+      met_requirement: metRequirement,
+      updated_at: new Date().toISOString(),
+    };
+
+    console.log(`[Activity Save] ${member.ign} - Upserting:`, JSON.stringify(upsertData));
+
+    const { data: upsertResult, error: logError } = await supabase
       .from('daily_logs')
-      .upsert({
-        member_id: memberData.id,
-        guild_id: auth.guildId,
-        log_date,
-        raids: member.raids,
-        gold_donated: member.gold,
-        met_requirement: metRequirement,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'member_id,log_date' });
+      .upsert(upsertData, { onConflict: 'member_id,log_date' })
+      .select();
 
     if (logError) {
       console.error(`Failed to upsert log for ${member.ign}:`, logError);
       continue;
     }
+
+    console.log(`[Activity Save] ${member.ign} - Upsert result:`, JSON.stringify(upsertResult));
 
     saved++;
   }

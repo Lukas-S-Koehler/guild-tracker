@@ -169,6 +169,8 @@ export async function POST(req: NextRequest) {
         d.initial_quantity > 0 && d.quantity >= (d.initial_quantity / 2)
       );
 
+      console.log(`[Parse] ${ign}: metsChallengeByQuantity=${metsChallengeByQuantity}, donations:`, donations.map((d: any) => `${d.item}(${d.quantity}/${d.initial_quantity}, ${d.percentage_of_initial}%)`));
+
       return {
         ign,
         raids: data.raids || 0,
