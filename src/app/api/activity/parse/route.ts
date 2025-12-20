@@ -43,6 +43,41 @@ export async function POST(req: NextRequest) {
     const uniqueItemsRaw = getUniqueItems(parseResult); // e.g., ['Yew Log', "Siren's Scales"]
     const uniqueItems = Array.from(new Set(uniqueItemsRaw.map((s: string) => s.toLowerCase())));
 
+    // Check which items are missing from challenge_item_quantities
+    let missingItems: string[] = [];
+    if (uniqueItems.length > 0) {
+      // Fetch ALL items from DB (only ~100 items, so this is efficient)
+      // We need to do case-insensitive comparison since DB stores proper casing
+      const { data: allDbItems, error: checkError } = await supabase
+        .from('challenge_item_quantities')
+        .select('item_name');
+
+      if (checkError) {
+        console.warn('Error checking challenge items:', checkError);
+      } else {
+        // Create a Set of lowercase item names from the database
+        const existingItemsSet = new Set(
+          allDbItems?.map((item: any) => item.item_name.toLowerCase()) || []
+        );
+
+        // Find items from activity log that don't exist in DB (case-insensitive)
+        missingItems = uniqueItems.filter(item => !existingItemsSet.has(item.toLowerCase()));
+
+        // If there are missing items, return them for user to add
+        if (missingItems.length > 0) {
+          console.log('[Parse] Missing challenge items:', missingItems);
+          // Map back to original casing
+          const missingItemsOriginal = uniqueItemsRaw.filter(item =>
+            missingItems.includes(item.toLowerCase())
+          );
+          return NextResponse.json({
+            error: 'Missing challenge item quantities',
+            missing_items: missingItemsOriginal,
+          }, { status: 400 });
+        }
+      }
+    }
+
     // Prepare price map and check cache only if we have items
     const pricesByLower: Record<string, number> = {};
 
@@ -91,6 +126,20 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Fetch challenge item quantities for percentage calculations
+    let itemQuantitiesMap = new Map<string, number>();
+    if (uniqueItems.length > 0) {
+      const { data: allDbItems } = await supabase
+        .from('challenge_item_quantities')
+        .select('item_name, initial_quantity');
+
+      if (allDbItems && allDbItems.length > 0) {
+        allDbItems.forEach((item: any) => {
+          itemQuantitiesMap.set(item.item_name.toLowerCase(), item.initial_quantity);
+        });
+      }
+    }
+
     // Calculate totals per member
     const members: ProcessedMember[] = memberNames.map(ign => {
       const data = parsed[ign];
@@ -98,21 +147,34 @@ export async function POST(req: NextRequest) {
         const lower = d.item.toLowerCase();
         const price = pricesByLower[lower] ?? 0;
         const total = d.quantity * price;
+        const initialQty = itemQuantitiesMap.get(lower) || 0;
+        const percentageOfInitial = initialQty > 0
+          ? Math.round((d.quantity / initialQty) * 100)
+          : 0;
+
         return {
           item: d.item,
           quantity: d.quantity,
           price,
           total,
+          initial_quantity: initialQty,
+          percentage_of_initial: percentageOfInitial,
         };
       });
 
       const totalGold = donations.reduce((sum: number, d: any) => sum + (d.total || 0), 0);
+
+      // Check if any item donation meets 50% of initial quantity
+      const metsChallengeByQuantity = donations.some((d: any) =>
+        d.initial_quantity > 0 && d.quantity >= (d.initial_quantity / 2)
+      );
 
       return {
         ign,
         raids: data.raids || 0,
         gold: totalGold,
         donations,
+        meets_challenge_quantity: metsChallengeByQuantity,
       };
     });
 

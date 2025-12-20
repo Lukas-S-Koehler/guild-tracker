@@ -229,6 +229,9 @@ function DataManagementContent() {
         <p className="text-muted-foreground">
           View, edit, and delete activity logs and challenges
         </p>
+        <p className="text-xs text-muted-foreground mt-1">
+          Note: Members meet requirements by donating 5k+ gold OR 50% of any challenge item quantity
+        </p>
       </div>
 
       {/* Activity Logs Section */}
@@ -301,6 +304,9 @@ function DataManagementContent() {
 
                   {expandedDate === dayData.date && (
                     <div className="border-t bg-muted/30 p-4">
+                      <div className="mb-3 p-2 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded text-xs text-blue-700 dark:text-blue-300">
+                        <strong>Editing Note:</strong> When editing gold values, requirement status is recalculated based only on gold threshold (5k+). The original quantity-based check (50% of challenge items) from initial save is preserved unless gold is changed.
+                      </div>
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="text-left border-b">

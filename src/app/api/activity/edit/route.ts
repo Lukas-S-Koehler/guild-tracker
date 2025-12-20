@@ -35,6 +35,9 @@ export async function PATCH(req: NextRequest) {
   if (gold_donated !== undefined) updates.gold_donated = gold_donated;
 
   // Recalculate met_requirement if gold_donated was updated
+  // NOTE: We can only check gold-based requirement here because individual
+  // donation items aren't stored in the database. The quantity-based check
+  // (50% of any challenge item) is only available during initial save.
   if (gold_donated !== undefined) {
     // Get config for donation requirement
     const { data: config } = await supabase
@@ -45,35 +48,9 @@ export async function PATCH(req: NextRequest) {
 
     const donationReq = config?.settings?.donation_requirement || 5000;
 
-    // Get the log to find its date
-    const { data: log } = await supabase
-      .from('daily_logs')
-      .select('log_date')
-      .eq('id', log_id)
-      .eq('guild_id', guildId)
-      .single();
-
-    if (log) {
-      // Get challenge for this date and the previous day
-      const prevDate = new Date(log.log_date);
-      prevDate.setDate(prevDate.getDate() - 1);
-      const prevDateStr = prevDate.toISOString().split('T')[0];
-
-      const { data: challenges } = await supabase
-        .from('challenges')
-        .select('total_cost')
-        .eq('guild_id', guildId)
-        .in('challenge_date', [log.log_date, prevDateStr])
-        .order('challenge_date', { ascending: false })
-        .limit(1);
-
-      const challengeTotal = challenges && challenges.length > 0 ? challenges[0].total_cost : 0;
-      const halfChallengeReq = Math.floor(challengeTotal / 2);
-
-      const metsDonationReq = gold_donated >= donationReq;
-      const metsChallengeReq = halfChallengeReq > 0 && gold_donated >= halfChallengeReq;
-      updates.met_requirement = metsDonationReq || metsChallengeReq;
-    }
+    // Simple gold-based check
+    // Officers editing manually can see met_requirement and adjust as needed
+    updates.met_requirement = gold_donated >= donationReq;
   }
 
   // Update the log

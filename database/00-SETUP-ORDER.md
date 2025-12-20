@@ -62,6 +62,13 @@ Based on your data:
 - Sets up RLS policies
 - Enables per-member API key system
 
+### 7️⃣ **Create Challenge Item Quantities Table**
+📄 **`create-challenge-item-quantities.sql`**
+- Creates `challenge_item_quantities` table for fixed initial quantities
+- Seeds database with ~100 challenge items from CSV
+- Enables automatic 50% challenge calculation without manual entry
+- RLS policies: all authenticated users can read, officers can manage
+
 ## 🎯 Quick Reference: Your Guild IDs
 
 Based on your data, your guilds use these IDs:

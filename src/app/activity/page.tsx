@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Check, AlertCircle, Copy, UserPlus, UserMinus, RefreshCw } from 'lucide-react';
+import { Loader2, Check, AlertCircle, Copy, UserPlus, UserMinus, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
 import { formatGold, getToday, copyToClipboard } from '@/lib/utils';
 import { useApiClient } from '@/lib/api-client';
 import type { ProcessedMember } from '@/types';
@@ -29,10 +29,14 @@ export default function ActivityPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [donationReq, setDonationReq] = useState(5000);
-  const [challengeTotal, setChallengeTotal] = useState(0);
+  const [missingItems, setMissingItems] = useState<string[]>([]);
+  const [itemQuantities, setItemQuantities] = useState<Record<string, number>>({});
+  const [addingItems, setAddingItems] = useState(false);
+  const [expandedMembers, setExpandedMembers] = useState<Set<string>>(new Set());
+  const [manualOverrides, setManualOverrides] = useState<Record<string, boolean>>({});
   const api = useApiClient();
 
-  // Fetch config and challenge info on mount and when date changes
+  // Fetch config on mount
   useEffect(() => {
     const fetchRequirements = async () => {
       try {
@@ -42,24 +46,13 @@ export default function ActivityPage() {
           const configData = await configRes.json();
           setDonationReq(configData.donation_requirement || 5000);
         }
-
-        // Fetch challenge for selected date
-        const challengeRes = await api.get(`/api/challenges/list?date=${logDate}`);
-        if (challengeRes.ok) {
-          const challenges = await challengeRes.json();
-          if (challenges && challenges.length > 0) {
-            setChallengeTotal(challenges[0].total_cost || 0);
-          } else {
-            setChallengeTotal(0);
-          }
-        }
       } catch (err) {
         console.error('Failed to fetch requirements:', err);
       }
     };
 
     fetchRequirements();
-  }, [logDate, api]);
+  }, [api]);
 
   const handleProcess = async () => {
     if (!rawLog.trim()) {
@@ -71,6 +64,7 @@ export default function ActivityPage() {
     setError(null);
     setSuccess(null);
     setResults(null);
+    setMissingItems([]);
 
     try {
       console.log('[Activity] Sending request with raw_log length:', rawLog.length);
@@ -81,11 +75,25 @@ export default function ActivityPage() {
       console.log('[Activity] Response data:', data);
 
       if (!res.ok) {
+        // Check if it's a missing items error
+        if (data.missing_items && Array.isArray(data.missing_items)) {
+          setMissingItems(data.missing_items);
+          // Initialize quantities for each missing item
+          const initialQuantities: Record<string, number> = {};
+          data.missing_items.forEach((item: string) => {
+            initialQuantities[item] = 0;
+          });
+          setItemQuantities(initialQuantities);
+          setError('Some items are missing initial quantities. Please enter them below to continue.');
+          return;
+        }
         throw new Error(data.error || 'Failed to process');
       }
 
       setResults(data.members);
       setMemberStatusChanges(data.memberStatusChanges || []);
+      // Reset manual overrides when new results come in
+      setManualOverrides({});
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to process');
     } finally {
@@ -114,6 +122,47 @@ export default function ActivityPage() {
     }
   };
 
+  const handleAddMissingItems = async () => {
+    // Validate all quantities are set
+    const invalidItems = missingItems.filter(item => !itemQuantities[item] || itemQuantities[item] <= 0);
+    if (invalidItems.length > 0) {
+      setError(`Please enter valid quantities for all items: ${invalidItems.join(', ')}`);
+      return;
+    }
+
+    setAddingItems(true);
+    setError(null);
+
+    try {
+      // Add each missing item
+      for (const itemName of missingItems) {
+        const quantity = itemQuantities[itemName];
+        const res = await api.post('/api/challenge-items/add', {
+          item_name: itemName,
+          initial_quantity: quantity,
+        });
+
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(`Failed to add ${itemName}: ${data.error}`);
+        }
+      }
+
+      setSuccess(`Added ${missingItems.length} items successfully! Now processing activity log...`);
+      setMissingItems([]);
+      setItemQuantities({});
+
+      // Automatically retry processing the log
+      setTimeout(() => {
+        handleProcess();
+      }, 500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add items');
+    } finally {
+      setAddingItems(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!results || results.length === 0) return;
 
@@ -121,9 +170,15 @@ export default function ActivityPage() {
     setError(null);
 
     try {
+      // Attach manual overrides to members
+      const membersWithOverrides = results.map(member => ({
+        ...member,
+        manual_override: manualOverrides[member.ign] || false,
+      }));
+
       const res = await api.post('/api/activity', {
         log_date: logDate,
-        members: results,
+        members: membersWithOverrides,
       });
 
       const data = await res.json();
@@ -135,11 +190,24 @@ export default function ActivityPage() {
       setSuccess(`Saved ${data.saved} member logs to tracker!`);
       setRawLog('');
       setResults(null);
+      setManualOverrides({});
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
     } finally {
       setSaving(false);
     }
+  };
+
+  const toggleMemberExpanded = (ign: string) => {
+    setExpandedMembers(prev => {
+      const next = new Set(prev);
+      if (next.has(ign)) {
+        next.delete(ign);
+      } else {
+        next.add(ign);
+      }
+      return next;
+    });
   };
 
   const handleCopyResults = async () => {
@@ -234,6 +302,53 @@ Contributed 100 Iron Ore
         </div>
       )}
 
+      {missingItems.length > 0 && (
+        <Card className="border-orange-500/50 bg-orange-500/5">
+          <CardHeader>
+            <CardTitle className="text-orange-600 dark:text-orange-400">Missing Challenge Item Quantities</CardTitle>
+            <CardDescription>
+              The following items don&apos;t have initial quantities set. Please enter them to continue processing.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4">
+              {missingItems.map((item) => (
+                <div key={item} className="flex items-center gap-4">
+                  <Label htmlFor={`item-${item}`} className="flex-1 font-medium">
+                    {item}
+                  </Label>
+                  <Input
+                    id={`item-${item}`}
+                    type="number"
+                    min="1"
+                    placeholder="Initial quantity"
+                    value={itemQuantities[item] || ''}
+                    onChange={(e) => {
+                      const value = parseInt(e.target.value, 10);
+                      setItemQuantities(prev => ({
+                        ...prev,
+                        [item]: isNaN(value) ? 0 : value,
+                      }));
+                    }}
+                    className="w-40"
+                  />
+                </div>
+              ))}
+            </div>
+            <Button onClick={handleAddMissingItems} disabled={addingItems}>
+              {addingItems ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Adding Items...
+                </>
+              ) : (
+                `Add ${missingItems.length} Items & Continue`
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       {memberStatusChanges.length > 0 && (
         <Card className="border-blue-500/50 bg-blue-500/5">
           <CardHeader>
@@ -299,50 +414,126 @@ Contributed 100 Iron Ore
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {(donationReq > 0 || challengeTotal > 0) && (
-              <div className="mb-4 p-3 bg-muted rounded-lg text-sm">
-                <p className="font-medium mb-1">Activity Requirements:</p>
-                <ul className="space-y-1 text-muted-foreground">
-                  <li>• {formatGold(donationReq)} donated (base requirement)</li>
-                  {challengeTotal > 0 && (
-                    <li>• {formatGold(Math.floor(challengeTotal / 2))} donated (50% of {formatGold(challengeTotal)} challenge)</li>
-                  )}
-                </ul>
-                <p className="mt-2 text-xs">Members meeting either requirement will be marked as active.</p>
-              </div>
-            )}
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-muted-foreground border-b">
-                    <th className="pb-2">Member</th>
-                    <th className="pb-2 text-center">Raids</th>
-                    <th className="pb-2 text-right">Gold</th>
-                    <th className="pb-2 text-right">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {results.map((member, i) => {
-                    const metsDonationReq = member.gold >= donationReq;
-                    const halfChallengeReq = Math.floor(challengeTotal / 2);
-                    const metsChallengeReq = halfChallengeReq > 0 && member.gold >= halfChallengeReq;
-                    const meetsReq = metsDonationReq || metsChallengeReq;
+            <div className="mb-4 p-3 bg-muted rounded-lg text-sm">
+              <p className="font-medium mb-1">Activity Requirements:</p>
+              <ul className="space-y-1 text-muted-foreground">
+                <li>• {formatGold(donationReq)} donated (base requirement)</li>
+                <li>• OR donate 50% of initial quantity for any challenge item</li>
+              </ul>
+              <p className="mt-2 text-xs">Members meeting either requirement will be marked as active.</p>
+            </div>
+            <div className="space-y-2">
+              {results.map((member, i) => {
+                const metsDonationReq = member.gold >= donationReq;
+                const metsChallengeReq = member.meets_challenge_quantity || false;
+                const meetsReq = metsDonationReq || metsChallengeReq || manualOverrides[member.ign];
+                const isExpanded = expandedMembers.has(member.ign);
 
-                    return (
-                      <tr key={i} className="border-b last:border-0">
-                        <td className="py-2 font-medium">{member.ign}</td>
-                        <td className="py-2 text-center">{member.raids}</td>
-                        <td className="py-2 text-right">{formatGold(member.gold)}</td>
-                        <td className="py-2 text-right">
+                // Find best item (highest percentage)
+                const bestItem = member.donations.reduce((best: any, current: any) => {
+                  const currentPct = current.percentage_of_initial || 0;
+                  const bestPct = best?.percentage_of_initial || 0;
+                  return currentPct > bestPct ? current : best;
+                }, null);
+
+                return (
+                  <div key={i} className="border rounded-lg">
+                    {/* Main Row */}
+                    <div className="flex items-center gap-4 p-3">
+                      <button
+                        onClick={() => toggleMemberExpanded(member.ign)}
+                        className="text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                      </button>
+                      <div className="flex-1 grid grid-cols-4 gap-4 items-center">
+                        <span className="font-medium">{member.ign}</span>
+                        <span className="text-center">{member.raids} raids</span>
+                        <div className="text-right">
+                          <div>{formatGold(member.gold)}</div>
+                          {bestItem && bestItem.percentage_of_initial > 0 && (
+                            <div className="text-xs text-muted-foreground">
+                              {bestItem.percentage_of_initial}% of {bestItem.item}
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-right">
                           <Badge variant={meetsReq ? 'success' : 'secondary'}>
                             {meetsReq ? '✓ Met' : 'Not Met'}
                           </Badge>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          {manualOverrides[member.ign] && (
+                            <span className="ml-2 text-xs text-blue-500">(Manual)</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Expanded Details */}
+                    {isExpanded && (
+                      <div className="border-t bg-muted/30 p-4 space-y-3">
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div>
+                            <span className="text-muted-foreground">Base Requirement:</span>
+                            <span className={`ml-2 font-medium ${metsDonationReq ? 'text-green-600' : 'text-muted-foreground'}`}>
+                              {formatGold(member.gold)} / {formatGold(donationReq)}
+                              {metsDonationReq && ' ✓'}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Challenge Quantity:</span>
+                            <span className={`ml-2 font-medium ${metsChallengeReq ? 'text-green-600' : 'text-muted-foreground'}`}>
+                              {metsChallengeReq ? 'Met ✓' : 'Not Met'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Item Donations Breakdown */}
+                        {member.donations && member.donations.length > 0 && (
+                          <div className="mt-3">
+                            <p className="text-sm font-medium mb-2">Item Donations:</p>
+                            <div className="space-y-1 text-xs">
+                              {member.donations.map((donation: any, idx: number) => {
+                                const meetsItemReq = donation.initial_quantity > 0 &&
+                                  donation.quantity >= (donation.initial_quantity / 2);
+                                return (
+                                  <div key={idx} className="flex justify-between items-center">
+                                    <span>{donation.item}</span>
+                                    <span className={meetsItemReq ? 'text-green-600 font-medium' : 'text-muted-foreground'}>
+                                      {donation.quantity.toLocaleString()}
+                                      {donation.initial_quantity > 0 && (
+                                        <> / {Math.ceil(donation.initial_quantity / 2).toLocaleString()} ({donation.percentage_of_initial}%)</>
+                                      )}
+                                      {meetsItemReq && ' ✓'}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-2 pt-2">
+                          <input
+                            type="checkbox"
+                            id={`override-${member.ign}`}
+                            checked={manualOverrides[member.ign] || false}
+                            onChange={(e) => {
+                              setManualOverrides(prev => ({
+                                ...prev,
+                                [member.ign]: e.target.checked,
+                              }));
+                            }}
+                            className="h-4 w-4 rounded border-gray-300"
+                          />
+                          <Label htmlFor={`override-${member.ign}`} className="text-sm cursor-pointer">
+                            Manual override - mark as meeting requirement
+                          </Label>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
             <div className="flex gap-3 mt-6">

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
   Card,
@@ -12,7 +12,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { Loader2, AlertTriangle, Copy, Check, Settings } from 'lucide-react';
+import { Loader2, AlertTriangle, Copy, Check, Settings, Upload, ChevronDown, ChevronUp } from 'lucide-react';
 import { formatGold, copyToClipboard } from '@/lib/utils';
 import { useApiClient } from '@/lib/api-client';
 
@@ -30,6 +30,10 @@ export default function ChallengeInputPage() {
   const [items, setItems] = useState<ChallengeItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [showCsvImport, setShowCsvImport] = useState(false);
+  const [csvData, setCsvData] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ imported: number; skipped: number; skipped_items: string[] } | null>(null);
   const api = useApiClient();
 
   const handleCalculate = async () => {
@@ -90,6 +94,31 @@ export default function ChallengeInputPage() {
     }
   };
 
+  const handleImportCsv = async () => {
+    if (!csvData.trim()) {
+      setError('Please paste CSV data');
+      return;
+    }
+
+    setImporting(true);
+    setError(null);
+    setImportResult(null);
+
+    try {
+      const res = await api.post('/api/challenge-items/import', { csv_data: csvData });
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.error || 'Failed to import');
+
+      setImportResult(data);
+      setCsvData(''); // Clear input on success
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to import CSV');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const totalCost = items?.reduce((sum, i) => sum + i.total, 0) || 0;
   const expensiveCount = items?.filter((i) => i.isExpensive).length || 0;
 
@@ -114,6 +143,93 @@ export default function ChallengeInputPage() {
           </Button>
         </div>
       </div>
+
+      {/* CSV Import Section */}
+      <Card className="border-blue-500/50">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-blue-600 dark:text-blue-400">Import Challenge Item Quantities</CardTitle>
+              <CardDescription>Import initial quantities for challenge items from CSV</CardDescription>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowCsvImport(!showCsvImport)}
+            >
+              {showCsvImport ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </Button>
+          </div>
+        </CardHeader>
+
+        {showCsvImport && (
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label>CSV Data (item_name,initial_quantity)</Label>
+              <Textarea
+                placeholder={`Paste CSV data here...
+
+Format:
+Abyssal Scroll,5
+Aetherial Feather Quill,35
+Air Elemental Essence,20
+
+Leave quantity empty or use — to skip items`}
+                value={csvData}
+                onChange={(e) => setCsvData(e.target.value)}
+                rows={10}
+                className="font-mono text-sm"
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <Button onClick={handleImportCsv} disabled={importing || !csvData.trim()}>
+                {importing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Importing...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-4 w-4 mr-2" />
+                    Import CSV
+                  </>
+                )}
+              </Button>
+              {csvData && (
+                <Button variant="outline" onClick={() => { setCsvData(''); setImportResult(null); }}>
+                  Clear
+                </Button>
+              )}
+            </div>
+
+            {importResult && (
+              <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                <p className="text-sm text-green-700">
+                  ✅ Successfully imported <strong>{importResult.imported}</strong> items
+                  {importResult.skipped > 0 && (
+                    <span className="ml-2">
+                      (skipped {importResult.skipped} items with empty quantities)
+                    </span>
+                  )}
+                </p>
+                {importResult.skipped_items && importResult.skipped_items.length > 0 && (
+                  <details className="mt-2">
+                    <summary className="text-xs cursor-pointer text-green-600">
+                      Show skipped items
+                    </summary>
+                    <ul className="mt-1 text-xs text-green-600 ml-4">
+                      {importResult.skipped_items.map((item, i) => (
+                        <li key={i}>• {item}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </div>
+            )}
+          </CardContent>
+        )}
+      </Card>
 
       <Card>
         <CardHeader>

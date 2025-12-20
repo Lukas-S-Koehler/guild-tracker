@@ -61,31 +61,18 @@ export async function POST(req: NextRequest) {
 
   // Your schema stores donation_requirement in settings JSONB
   const donationReq = config?.settings?.donation_requirement || 5000;
-  const guildId = config?.guild_id;
 
-  // Get challenge for this date and the previous day (challenges can overlap)
-  const prevDate = new Date(log_date);
-  prevDate.setDate(prevDate.getDate() - 1);
-  const prevDateStr = prevDate.toISOString().split('T')[0];
+  // Fetch challenge item initial quantities for quantity-based requirement checking
+  const { data: allItemQuantities } = await supabase
+    .from('challenge_item_quantities')
+    .select('item_name, initial_quantity');
 
-  let challengeTotalCost = 0;
-
-  if (guildId) {
-    const { data: challenges } = await supabase
-      .from('challenges')
-      .select('total_cost, challenge_date')
-      .eq('guild_id', guildId)
-      .in('challenge_date', [log_date, prevDateStr])
-      .order('challenge_date', { ascending: false })
-      .limit(1);
-
-    if (challenges && challenges.length > 0) {
-      challengeTotalCost = challenges[0].total_cost || 0;
-    }
+  const itemQuantitiesMap = new Map<string, number>();
+  if (allItemQuantities && allItemQuantities.length > 0) {
+    allItemQuantities.forEach((item: any) => {
+      itemQuantitiesMap.set(item.item_name.toLowerCase(), item.initial_quantity);
+    });
   }
-
-  // Calculate 50% of challenge requirement
-  const halfChallengeReq = Math.floor(challengeTotalCost / 2);
 
   let saved = 0;
 
@@ -172,10 +159,22 @@ export async function POST(req: NextRequest) {
 
     // Determine if member met requirement:
     // - Either donated >= 5k gold (or configured amount)
-    // - OR donated >= 50% of the challenge total cost
+    // - OR donated >= 50% of initial quantity for ANY item
+    // - OR manual override is set
     const metsDonationReq = member.gold >= donationReq;
-    const metsChallengeReq = halfChallengeReq > 0 && member.gold >= halfChallengeReq;
-    const metRequirement = metsDonationReq || metsChallengeReq;
+
+    // Check if member donated >= 50% of initial quantity for any item
+    let metsChallengeReq = false;
+    if (member.donations && Array.isArray(member.donations)) {
+      metsChallengeReq = member.donations.some((donation: any) => {
+        const itemNameLower = donation.item.toLowerCase();
+        const initialQty = itemQuantitiesMap.get(itemNameLower) || 0;
+        const requiredQty = Math.ceil(initialQty / 2); // 50% of initial quantity
+        return initialQty > 0 && donation.quantity >= requiredQty;
+      });
+    }
+
+    const metRequirement = metsDonationReq || metsChallengeReq || (member.manual_override === true);
 
     // Upsert daily log with guild_id
     const { error: logError } = await supabase

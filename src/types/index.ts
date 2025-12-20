@@ -65,7 +65,16 @@ export interface ProcessedMember {
   ign: string;
   raids: number;
   gold: number;
-  donations: Array<{ item: string; quantity: number; price: number; total: number }>;
+  donations: Array<{
+    item: string;
+    quantity: number;
+    price: number;
+    total: number;
+    initial_quantity?: number;
+    percentage_of_initial?: number;
+  }>;
+  meets_challenge_quantity?: boolean;
+  manual_override?: boolean;
 }
 
 // Leaderboard
