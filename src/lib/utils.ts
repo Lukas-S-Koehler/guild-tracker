@@ -58,13 +58,13 @@ export function getRankEmoji(rank: number): string {
 export function getInactivityCategory(daysInactive: number): string {
   if (daysInactive < 0) return 'never';
   if (daysInactive === 0) return 'active';
-  if (daysInactive >= 7) return '1w+';
+  if (daysInactive >= 7) return '7d+';
   return `${daysInactive}d`;
 }
 
 export function getInactivityEmoji(category: string): string {
   switch (category) {
-    case '1w+':
+    case '7d+':
     case 'never':
       return '🔴';
     case '4d':
@@ -105,12 +105,12 @@ export function formatInactivityReport(
   let output = `**${guildName} - Inactivity Report**\n`;
   output += `*Generated: ${new Date().toLocaleDateString()}*\n\n`;
 
-  const categories = ['1d', '2d', '3d', '4d', '5d', '6d', '1w+', 'never'];
+  const categories = ['1d', '2d', '3d', '4d', '5d', '6d', '7d+', 'never'];
 
   for (const cat of categories) {
     if (grouped[cat] && grouped[cat].length > 0) {
       const emoji = getInactivityEmoji(cat);
-      const label = cat === 'never' ? 'Never Active' : cat;
+      const label = cat === 'never' ? 'Never Active' : cat === '7d+' ? '7d+ Inactive' : cat;
       output += `${emoji} **${label}**: ${grouped[cat].join(', ')}\n`;
     }
   }
