@@ -308,7 +308,7 @@ export default function ActivityPage() {
                 <p className="text-sm font-medium text-green-700 dark:text-green-300">
                   ✅ Last processed from {new Date(lastLogDate).toLocaleDateString()}
                 </p>
-                <p className="text-xs text-green-600 dark:text-green-400">These were at the top of Discord</p>
+                <p className="text-xs text-green-600 dark:text-green-400">These were at the top of the Activity Log</p>
               </div>
               <div className="space-y-1">
                 {lastLogEntries.map((entry, idx) => (

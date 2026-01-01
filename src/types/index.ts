@@ -75,6 +75,7 @@ export interface ProcessedMember {
   }>;
   meets_challenge_quantity?: boolean;
   manual_override?: boolean;
+  log_order?: number;
 }
 
 // Leaderboard

@@ -141,7 +141,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Calculate totals per member
-    const members: ProcessedMember[] = memberNames.map(ign => {
+    const members: ProcessedMember[] = memberNames.map((ign, index) => {
       const data = parsed[ign];
       const donations = data.donations.map((d: { item: string; quantity: number }) => {
         const lower = d.item.toLowerCase();
@@ -177,10 +177,11 @@ export async function POST(req: NextRequest) {
         gold: totalGold,
         donations,
         meets_challenge_quantity: metsChallengeByQuantity,
+        log_order: index, // Preserve chronological order from Discord log (0 = first/most recent)
       };
     });
 
-    // Sort by gold (highest first)
+    // Sort by gold (highest first) for display, but preserve log_order
     members.sort((a, b) => b.gold - a.gold);
 
     return NextResponse.json({

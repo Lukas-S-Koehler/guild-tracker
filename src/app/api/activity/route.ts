@@ -164,6 +164,7 @@ export async function POST(req: NextRequest) {
       raids: member.raids,
       gold_donated: member.gold,
       met_requirement: metRequirement,
+      log_order: member.log_order ?? 999, // Chronological order from Discord log
       updated_at: new Date().toISOString(),
     };
 

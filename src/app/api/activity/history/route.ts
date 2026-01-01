@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
       raids,
       gold_donated,
       met_requirement,
+      log_order,
       members!inner (
         id,
         ign
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
     `)
     .eq('guild_id', guildId)
     .order('log_date', { ascending: false })
-    .order('gold_donated', { ascending: false });
+    .order('log_order', { ascending: true }); // Order by chronological order (0 = most recent)
 
   if (error) {
     console.error('[Activity History] Error:', error);
