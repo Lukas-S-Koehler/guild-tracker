@@ -34,11 +34,13 @@ export default function ActivityPage() {
   const [addingItems, setAddingItems] = useState(false);
   const [expandedMembers, setExpandedMembers] = useState<Set<string>>(new Set());
   const [manualOverrides, setManualOverrides] = useState<Record<string, boolean>>({});
+  const [lastLogEntries, setLastLogEntries] = useState<Array<{ ign: string; gold: number }>>([]);
+  const [lastLogDate, setLastLogDate] = useState<string | null>(null);
   const api = useApiClient();
 
-  // Fetch config on mount
+  // Fetch config and last log entries on mount
   useEffect(() => {
-    const fetchRequirements = async () => {
+    const fetchData = async () => {
       try {
         // Fetch donation requirement from config
         const configRes = await api.get('/api/config');
@@ -46,12 +48,33 @@ export default function ActivityPage() {
           const configData = await configRes.json();
           setDonationReq(configData.donation_requirement || 5000);
         }
+
+        // Fetch last activity log's last 3 entries
+        const historyRes = await api.get('/api/activity/history');
+        if (historyRes.ok) {
+          const historyData = await historyRes.json();
+          if (historyData && historyData.length > 0) {
+            // Get the most recent date that's not today
+            const today = getToday();
+            const previousLog = historyData.find((day: any) => day.date !== today);
+
+            if (previousLog && previousLog.logs && previousLog.logs.length > 0) {
+              // Get last 3 entries from that log
+              const lastThree = previousLog.logs.slice(-3).map((log: any) => ({
+                ign: log.ign,
+                gold: log.gold_donated
+              }));
+              setLastLogEntries(lastThree);
+              setLastLogDate(previousLog.date);
+            }
+          }
+        }
       } catch (err) {
-        console.error('Failed to fetch requirements:', err);
+        console.error('Failed to fetch data:', err);
       }
     };
 
-    fetchRequirements();
+    fetchData();
   }, [api]);
 
   const handleProcess = async () => {
@@ -191,6 +214,29 @@ export default function ActivityPage() {
       setRawLog('');
       setResults(null);
       setManualOverrides({});
+
+      // Refresh last log entries for next day
+      try {
+        const historyRes = await api.get('/api/activity/history');
+        if (historyRes.ok) {
+          const historyData = await historyRes.json();
+          if (historyData && historyData.length > 0) {
+            const today = getToday();
+            const previousLog = historyData.find((day: any) => day.date !== today);
+
+            if (previousLog && previousLog.logs && previousLog.logs.length > 0) {
+              const lastThree = previousLog.logs.slice(-3).map((log: any) => ({
+                ign: log.ign,
+                gold: log.gold_donated
+              }));
+              setLastLogEntries(lastThree);
+              setLastLogDate(previousLog.date);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to refresh last log entries:', err);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
     } finally {
@@ -255,6 +301,24 @@ export default function ActivityPage() {
               />
             </div>
           </div>
+
+          {lastLogEntries.length > 0 && lastLogDate && (
+            <div className="p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                  📋 Last 3 entries from {new Date(lastLogDate).toLocaleDateString()}
+                </p>
+                <p className="text-xs text-blue-600 dark:text-blue-400">Start copying after these</p>
+              </div>
+              <div className="space-y-1">
+                {lastLogEntries.map((entry, idx) => (
+                  <div key={idx} className="text-xs font-mono text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/50 px-2 py-1 rounded">
+                    {entry.ign} - {formatGold(entry.gold)} gold
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label>Activity Log</Label>
