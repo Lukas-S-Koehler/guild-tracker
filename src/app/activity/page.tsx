@@ -303,20 +303,26 @@ export default function ActivityPage() {
           </div>
 
           {lastLogEntries.length > 0 && lastLogDate && (
-            <div className="p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
+            <div className="p-3 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg">
               <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-medium text-blue-700 dark:text-blue-300">
-                  📋 Top 3 by gold from {new Date(lastLogDate).toLocaleDateString()}
+                <p className="text-sm font-medium text-green-700 dark:text-green-300">
+                  ✅ Last processed from {new Date(lastLogDate).toLocaleDateString()}
                 </p>
-                <p className="text-xs text-blue-600 dark:text-blue-400">Look for these in Discord log</p>
+                <p className="text-xs text-green-600 dark:text-green-400">These were at the top of Discord</p>
               </div>
               <div className="space-y-1">
                 {lastLogEntries.map((entry, idx) => (
-                  <div key={idx} className="text-xs font-mono text-blue-700 dark:text-blue-300 bg-blue-100 dark:bg-blue-900/50 px-2 py-1 rounded">
-                    {entry.ign} - {formatGold(entry.gold)} gold
+                  <div key={idx} className="flex items-center gap-2 text-xs font-mono text-green-700 dark:text-green-300 bg-green-100 dark:bg-green-900/50 px-2 py-1 rounded">
+                    <span className="text-green-500">#{idx + 1}</span>
+                    <span>{entry.ign}</span>
+                    <span className="text-green-600 dark:text-green-400">·</span>
+                    <span>{formatGold(entry.gold)} gold</span>
                   </div>
                 ))}
               </div>
+              <p className="mt-2 text-xs text-green-600 dark:text-green-400">
+                💡 Start copying from the line <strong>after</strong> these in today&apos;s Discord log
+              </p>
             </div>
           )}
 
