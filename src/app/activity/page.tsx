@@ -59,12 +59,12 @@ export default function ActivityPage() {
             const previousLog = historyData.find((day: any) => day.date !== today);
 
             if (previousLog && previousLog.logs && previousLog.logs.length > 0) {
-              // Get last 3 entries from that log
-              const lastThree = previousLog.logs.slice(-3).map((log: any) => ({
+              // Get top 3 entries (highest gold donors - these appear first in Discord log)
+              const topThree = previousLog.logs.slice(0, 3).map((log: any) => ({
                 ign: log.ign,
                 gold: log.gold_donated
               }));
-              setLastLogEntries(lastThree);
+              setLastLogEntries(topThree);
               setLastLogDate(previousLog.date);
             }
           }
@@ -225,11 +225,11 @@ export default function ActivityPage() {
             const previousLog = historyData.find((day: any) => day.date !== today);
 
             if (previousLog && previousLog.logs && previousLog.logs.length > 0) {
-              const lastThree = previousLog.logs.slice(-3).map((log: any) => ({
+              const topThree = previousLog.logs.slice(0, 3).map((log: any) => ({
                 ign: log.ign,
                 gold: log.gold_donated
               }));
-              setLastLogEntries(lastThree);
+              setLastLogEntries(topThree);
               setLastLogDate(previousLog.date);
             }
           }
@@ -306,9 +306,9 @@ export default function ActivityPage() {
             <div className="p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
               <div className="flex items-center justify-between mb-2">
                 <p className="text-sm font-medium text-blue-700 dark:text-blue-300">
-                  📋 Last 3 entries from {new Date(lastLogDate).toLocaleDateString()}
+                  📋 Top 3 by gold from {new Date(lastLogDate).toLocaleDateString()}
                 </p>
-                <p className="text-xs text-blue-600 dark:text-blue-400">Start copying after these</p>
+                <p className="text-xs text-blue-600 dark:text-blue-400">Look for these in Discord log</p>
               </div>
               <div className="space-y-1">
                 {lastLogEntries.map((entry, idx) => (
