@@ -34,7 +34,7 @@ export default function ActivityPage() {
   const [addingItems, setAddingItems] = useState(false);
   const [expandedMembers, setExpandedMembers] = useState<Set<string>>(new Set());
   const [manualOverrides, setManualOverrides] = useState<Record<string, boolean>>({});
-  const [lastLogEntries, setLastLogEntries] = useState<Array<{ ign: string; gold: number }>>([]);
+  const [lastLogEntries, setLastLogEntries] = useState<Array<{ ign: string; raids: number; gold: number }>>([]);
   const [lastLogDate, setLastLogDate] = useState<string | null>(null);
   const api = useApiClient();
 
@@ -59,10 +59,11 @@ export default function ActivityPage() {
             const previousLog = historyData.find((day: any) => day.date !== today);
 
             if (previousLog && previousLog.logs && previousLog.logs.length > 0) {
-              // Get top 3 entries (highest gold donors - these appear first in Discord log)
+              // Get top 3 entries (chronologically first - these appear first in game log)
               const topThree = previousLog.logs.slice(0, 3).map((log: any) => ({
                 ign: log.ign,
-                gold: log.gold_donated
+                raids: log.raids || 0,
+                gold: log.gold_donated || 0
               }));
               setLastLogEntries(topThree);
               setLastLogDate(previousLog.date);
@@ -227,7 +228,8 @@ export default function ActivityPage() {
             if (previousLog && previousLog.logs && previousLog.logs.length > 0) {
               const topThree = previousLog.logs.slice(0, 3).map((log: any) => ({
                 ign: log.ign,
-                gold: log.gold_donated
+                raids: log.raids || 0,
+                gold: log.gold_donated || 0
               }));
               setLastLogEntries(topThree);
               setLastLogDate(previousLog.date);
@@ -286,7 +288,7 @@ export default function ActivityPage() {
         <CardHeader>
           <CardTitle>Activity Log Input</CardTitle>
           <CardDescription>
-            Paste the raw activity log from Discord (includes &quot;* Username&quot;, &quot;Participated in a raid&quot;, &quot;Contributed X Item&quot;)
+            Paste the raw activity log from the guild tab in-game (includes &quot;Username&quot;, &quot;Participated in a raid&quot;, &quot;Contributed X Item&quot;)
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -310,18 +312,25 @@ export default function ActivityPage() {
                 </p>
                 <p className="text-xs text-green-600 dark:text-green-400">These were at the top of the Activity Log</p>
               </div>
-              <div className="space-y-1">
+              <div className="space-y-2">
                 {lastLogEntries.map((entry, idx) => (
-                  <div key={idx} className="flex items-center gap-2 text-xs font-mono text-green-700 dark:text-green-300 bg-green-100 dark:bg-green-900/50 px-2 py-1 rounded">
-                    <span className="text-green-500">#{idx + 1}</span>
-                    <span>{entry.ign}</span>
-                    <span className="text-green-600 dark:text-green-400">·</span>
-                    <span>{formatGold(entry.gold)} gold</span>
+                  <div key={idx} className="text-xs text-green-700 dark:text-green-300 bg-green-100 dark:bg-green-900/50 px-2 py-1.5 rounded">
+                    <div className="font-semibold">{entry.ign}</div>
+                    {entry.raids > 0 && (
+                      <div className="text-green-600 dark:text-green-400">
+                        Participated in {entry.raids} raid{entry.raids > 1 ? 's' : ''}.
+                      </div>
+                    )}
+                    {entry.gold > 0 && (
+                      <div className="text-green-600 dark:text-green-400">
+                        Contributed {formatGold(entry.gold)} gold.
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
               <p className="mt-2 text-xs text-green-600 dark:text-green-400">
-                💡 Start copying from the line <strong>after</strong> these in today&apos;s Discord log
+                💡 Start copying from the line <strong>after</strong> these in the guild activity log
               </p>
             </div>
           )}
