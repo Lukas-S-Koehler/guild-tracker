@@ -22,6 +22,7 @@ export async function GET(req: NextRequest) {
       log_date,
       raids,
       gold_donated,
+      deposits_gold,
       met_requirement,
       log_order,
       members!inner (
@@ -49,6 +50,7 @@ export async function GET(req: NextRequest) {
       ign: (log.members as any).ign,
       raids: log.raids,
       gold_donated: log.gold_donated,
+      deposits_gold: log.deposits_gold || 0,
       met_requirement: log.met_requirement,
     });
   });
@@ -58,7 +60,7 @@ export async function GET(req: NextRequest) {
     date,
     member_count: grouped[date].length,
     total_raids: grouped[date].reduce((sum, l) => sum + l.raids, 0),
-    total_gold: grouped[date].reduce((sum, l) => sum + l.gold_donated, 0),
+    total_gold: grouped[date].reduce((sum, l) => sum + l.gold_donated + (l.deposits_gold || 0), 0),
     logs: grouped[date],
   }));
 

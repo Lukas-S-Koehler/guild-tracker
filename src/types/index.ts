@@ -59,12 +59,14 @@ export interface ParsedActivity {
   ign: string;
   raids: number;
   donations: Array<{ item: string; quantity: number }>;
+  deposits: Array<{ item: string; quantity: number }>;
 }
 
 export interface ProcessedMember {
   ign: string;
   raids: number;
   gold: number;
+  deposits_gold: number;
   donations: Array<{
     item: string;
     quantity: number;
@@ -72,6 +74,12 @@ export interface ProcessedMember {
     total: number;
     initial_quantity?: number;
     percentage_of_initial?: number;
+  }>;
+  deposits: Array<{
+    item: string;
+    quantity: number;
+    price: number;
+    total: number;
   }>;
   meets_challenge_quantity?: boolean;
   manual_override?: boolean;

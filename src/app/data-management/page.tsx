@@ -15,6 +15,7 @@ interface ActivityLog {
   ign: string;
   raids: number;
   gold_donated: number;
+  deposits_gold: number;
   met_requirement: boolean;
 }
 
@@ -230,7 +231,7 @@ function DataManagementContent() {
           View, edit, and delete activity logs and challenges
         </p>
         <p className="text-xs text-muted-foreground mt-1">
-          Note: Members meet requirements by donating 5k+ gold OR 50% of any challenge item quantity
+          Note: Members meet requirements by donating 5k+ gold OR 50% of any challenge item quantity OR depositing the configured amount to guild hall
         </p>
       </div>
 
@@ -305,14 +306,16 @@ function DataManagementContent() {
                   {expandedDate === dayData.date && (
                     <div className="border-t bg-muted/30 p-4">
                       <div className="mb-3 p-2 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded text-xs text-blue-700 dark:text-blue-300">
-                        <strong>Editing Note:</strong> When editing gold values, requirement status is recalculated based only on gold threshold (5k+). The original quantity-based check (50% of challenge items) from initial save is preserved unless gold is changed.
+                        <strong>Editing Note:</strong> When editing gold values, requirement status is recalculated based only on gold threshold (5k+). The original quantity-based check (50% of challenge items) and deposit requirements from initial save are preserved unless gold is changed.
                       </div>
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="text-left border-b">
                             <th className="pb-2">Member</th>
                             <th className="pb-2 text-center">Raids</th>
-                            <th className="pb-2 text-right">Gold</th>
+                            <th className="pb-2 text-right">Donations</th>
+                            <th className="pb-2 text-right">Deposits</th>
+                            <th className="pb-2 text-right">Total</th>
                             <th className="pb-2 text-center">Met Req</th>
                             <th className="pb-2 text-right">Actions</th>
                           </tr>
@@ -344,6 +347,12 @@ function DataManagementContent() {
                                 ) : (
                                   formatGold(log.gold_donated)
                                 )}
+                              </td>
+                              <td className="py-2 text-right text-blue-500">
+                                {formatGold(log.deposits_gold || 0)}
+                              </td>
+                              <td className="py-2 text-right font-semibold">
+                                {formatGold(log.gold_donated + (log.deposits_gold || 0))}
                               </td>
                               <td className="py-2 text-center">
                                 {log.met_requirement ? '✓' : '✗'}

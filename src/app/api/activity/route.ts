@@ -148,11 +148,16 @@ export async function POST(req: NextRequest) {
     // Determine if member met requirement:
     // - Either donated >= 5k gold (or configured amount)
     // - OR meets_challenge_quantity flag (already calculated during parsing)
+    // - OR deposited >= configured amount to guild hall
     // - OR manual override is set
     const metsDonationReq = member.gold >= donationReq;
     const metsChallengeReq = member.meets_challenge_quantity || false;
 
-    const metRequirement = metsDonationReq || metsChallengeReq || (member.manual_override === true);
+    // Get deposit requirement from config (defaults to 0 if not set)
+    const depositReq = config?.settings?.daily_deposit_requirement || 0;
+    const metsDepositReq = depositReq > 0 && (member.deposits_gold || 0) >= depositReq;
+
+    const metRequirement = metsDonationReq || metsChallengeReq || metsDepositReq || (member.manual_override === true);
 
     console.log(`[Activity Save] ${member.ign}: gold=${member.gold}, donationReq=${donationReq}, metsDonationReq=${metsDonationReq}, meets_challenge_quantity=${member.meets_challenge_quantity}, metsChallengeReq=${metsChallengeReq}, metRequirement=${metRequirement}`);
 
@@ -163,6 +168,7 @@ export async function POST(req: NextRequest) {
       log_date,
       raids: member.raids,
       gold_donated: member.gold,
+      deposits_gold: member.deposits_gold || 0,
       met_requirement: metRequirement,
       log_order: member.log_order ?? 999, // Chronological order from Discord log
       updated_at: new Date().toISOString(),

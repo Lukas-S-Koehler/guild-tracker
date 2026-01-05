@@ -273,7 +273,7 @@ export default function ActivityPage() {
   };
 
   const totalRaids = results?.reduce((sum, m) => sum + m.raids, 0) || 0;
-  const totalGold = results?.reduce((sum, m) => sum + m.gold, 0) || 0;
+  const totalGold = results?.reduce((sum, m) => sum + m.gold + (m.deposits_gold || 0), 0) || 0;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -494,15 +494,16 @@ Contributed 100 Iron Ore
           </CardHeader>
           <CardContent>
             <div className="mb-4 p-3 bg-muted rounded-lg text-sm">
-              <p className="font-medium mb-1">Activity Requirements:</p>
+              <p className="font-medium mb-1">Activity Requirements (meet any one):</p>
               <ul className="space-y-1 text-muted-foreground">
-                <li>• {formatGold(donationReq)} donated (base requirement)</li>
-                <li>• OR donate 50% of initial quantity for any challenge item</li>
+                <li>• {formatGold(donationReq)} donated to guild challenges</li>
+                <li>• Donate 50% of initial quantity for any challenge item</li>
+                <li>• Deposit items worth required gold to guild hall (if configured)</li>
               </ul>
-              <p className="mt-2 text-xs">Members meeting either requirement will be marked as active.</p>
             </div>
             <div className="space-y-2">
               {results.map((member, i) => {
+                const totalGold = member.gold + (member.deposits_gold || 0);
                 const metsDonationReq = member.gold >= donationReq;
                 const metsChallengeReq = member.meets_challenge_quantity || false;
                 const meetsReq = metsDonationReq || metsChallengeReq || manualOverrides[member.ign];
@@ -529,7 +530,7 @@ Contributed 100 Iron Ore
                         <span className="font-medium">{member.ign}</span>
                         <span className="text-center">{member.raids} raids</span>
                         <div className="text-right">
-                          <div>{formatGold(member.gold)}</div>
+                          <div>{formatGold(totalGold)}</div>
                           {bestItem && bestItem.percentage_of_initial > 0 && (
                             <div className="text-xs text-muted-foreground">
                               {bestItem.percentage_of_initial}% of {bestItem.item}
@@ -550,26 +551,38 @@ Contributed 100 Iron Ore
                     {/* Expanded Details */}
                     {isExpanded && (
                       <div className="border-t bg-muted/30 p-4 space-y-3">
-                        <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div className="grid grid-cols-3 gap-4 text-sm">
                           <div>
-                            <span className="text-muted-foreground">Base Requirement:</span>
+                            <span className="text-muted-foreground">Total Gold:</span>
+                            <span className="ml-2 font-medium">
+                              {formatGold(totalGold)}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Challenge Donations:</span>
                             <span className={`ml-2 font-medium ${metsDonationReq ? 'text-green-600' : 'text-muted-foreground'}`}>
                               {formatGold(member.gold)} / {formatGold(donationReq)}
                               {metsDonationReq && ' ✓'}
                             </span>
                           </div>
                           <div>
-                            <span className="text-muted-foreground">Challenge Quantity:</span>
-                            <span className={`ml-2 font-medium ${metsChallengeReq ? 'text-green-600' : 'text-muted-foreground'}`}>
-                              {metsChallengeReq ? 'Met ✓' : 'Not Met'}
+                            <span className="text-muted-foreground">Guild Hall Deposits:</span>
+                            <span className="ml-2 font-medium text-muted-foreground">
+                              {formatGold(member.deposits_gold || 0)}
                             </span>
                           </div>
+                        </div>
+                        <div className="text-sm">
+                          <span className="text-muted-foreground">Challenge Quantity:</span>
+                          <span className={`ml-2 font-medium ${metsChallengeReq ? 'text-green-600' : 'text-muted-foreground'}`}>
+                            {metsChallengeReq ? 'Met ✓' : 'Not Met'}
+                          </span>
                         </div>
 
                         {/* Item Donations Breakdown */}
                         {member.donations && member.donations.length > 0 && (
                           <div className="mt-3">
-                            <p className="text-sm font-medium mb-2">Item Donations:</p>
+                            <p className="text-sm font-medium mb-2">Challenge Item Donations:</p>
                             <div className="space-y-1 text-xs">
                               {member.donations.map((donation: any, idx: number) => {
                                 const meetsItemReq = donation.initial_quantity > 0 &&
@@ -587,6 +600,23 @@ Contributed 100 Iron Ore
                                   </div>
                                 );
                               })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Guild Hall Deposits */}
+                        {member.deposits && member.deposits.length > 0 && (
+                          <div className="mt-3">
+                            <p className="text-sm font-medium mb-2">Guild Hall Deposits ({formatGold(member.deposits_gold || 0)}):</p>
+                            <div className="space-y-1 text-xs">
+                              {member.deposits.map((deposit: any, idx: number) => (
+                                <div key={idx} className="flex justify-between items-center">
+                                  <span>{deposit.item}</span>
+                                  <span className="text-muted-foreground">
+                                    {deposit.quantity.toLocaleString()} ({formatGold(deposit.total)})
+                                  </span>
+                                </div>
+                              ))}
                             </div>
                           </div>
                         )}

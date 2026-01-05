@@ -99,7 +99,7 @@ export default function LeaderboardPage() {
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <CardTitle>Activity Rankings</CardTitle>
-              <CardDescription>Score = (Raids × 1,000) + Gold Donated</CardDescription>
+              <CardDescription>Score = (Raids × 1,000) + Total Gold (donations + deposits)</CardDescription>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <Tabs value={period} onValueChange={(v) => setPeriod(v as Period)}>

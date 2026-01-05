@@ -24,6 +24,7 @@ export function parseActivityLog(text: string): ParseResult {
   let currentMember: string | null = null;
   const raidRe = /participated in a raid/i;
   const contributedRe = /contributed\s+([\d,]+)\s+(.+)/i;
+  const depositedRe = /deposited\s+([\d,]+)\s+(.+)/i;
   const timeRe = /^\d+[smhdw]$/i;
   const joinedRe = /joined the guild/i;
   const leftRe = /left the guild/i;
@@ -44,14 +45,14 @@ export function parseActivityLog(text: string): ParseResult {
 
     // Heuristic: if line is followed by an action, treat it as username
     const next = (lines[i + 1] ?? '').trim();
-    const nextIsAction = raidRe.test(next) || contributedRe.test(next);
+    const nextIsAction = raidRe.test(next) || contributedRe.test(next) || depositedRe.test(next);
 
     if (looksLikeStarUser || nextIsAction) {
       // username line
       const ign = line.replace(/^\*\s*/, '').trim();
       currentMember = ign;
       if (ign && !members[ign]) {
-        members[ign] = { ign, raids: 0, donations: [] };
+        members[ign] = { ign, raids: 0, donations: [], deposits: [] };
       }
       continue;
     }
@@ -59,10 +60,10 @@ export function parseActivityLog(text: string): ParseResult {
     // If we reach here and currentMember is null, try to infer: if line itself is an action, skip
     if (!currentMember) {
       // If this line itself is an action but no username above, skip
-      if (raidRe.test(line) || contributedRe.test(line)) continue;
+      if (raidRe.test(line) || contributedRe.test(line) || depositedRe.test(line)) continue;
       // Otherwise treat as a username fallback
       currentMember = line;
-      if (!members[currentMember]) members[currentMember] = { ign: currentMember, raids: 0, donations: [] };
+      if (!members[currentMember]) members[currentMember] = { ign: currentMember, raids: 0, donations: [], deposits: [] };
       continue;
     }
 
@@ -79,6 +80,16 @@ export function parseActivityLog(text: string): ParseResult {
       let item = m[2].trim();
       item = item.replace(/__|[*]{1,2}/g, '').trim();
       members[currentMember].donations.push({ item, quantity: qty });
+      continue;
+    }
+
+    // handle deposit (guild hall)
+    const d = line.match(depositedRe);
+    if (d) {
+      const qty = parseInt(d[1].replace(/,/g, ''), 10) || 0;
+      let item = d[2].trim();
+      item = item.replace(/__|[*]{1,2}/g, '').trim();
+      members[currentMember].deposits.push({ item, quantity: qty });
       continue;
     }
 
@@ -102,7 +113,7 @@ export function parseActivityLog(text: string): ParseResult {
 
 
 /**
- * Get unique item names from parsed activity data
+ * Get unique item names from parsed activity data (both donations and deposits)
  */
 export function getUniqueItems(parsedData: ParseResult): string[] {
   const items = new Set<string>();
@@ -110,6 +121,9 @@ export function getUniqueItems(parsedData: ParseResult): string[] {
   for (const member in parsedData.members) {
     parsedData.members[member].donations.forEach(donation => {
       items.add(donation.item);
+    });
+    parsedData.members[member].deposits.forEach(deposit => {
+      items.add(deposit.item);
     });
   }
 

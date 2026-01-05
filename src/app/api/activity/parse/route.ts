@@ -164,6 +164,22 @@ export async function POST(req: NextRequest) {
 
       const totalGold = donations.reduce((sum: number, d: any) => sum + (d.total || 0), 0);
 
+      // Process deposits (guild hall)
+      const deposits = data.deposits.map((d: { item: string; quantity: number }) => {
+        const lower = d.item.toLowerCase();
+        const price = pricesByLower[lower] ?? 0;
+        const total = d.quantity * price;
+
+        return {
+          item: d.item,
+          quantity: d.quantity,
+          price,
+          total,
+        };
+      });
+
+      const totalDepositsGold = deposits.reduce((sum: number, d: any) => sum + (d.total || 0), 0);
+
       // Check if any item donation meets 50% of initial quantity
       const metsChallengeByQuantity = donations.some((d: any) =>
         d.initial_quantity > 0 && d.quantity >= (d.initial_quantity / 2)
@@ -175,7 +191,9 @@ export async function POST(req: NextRequest) {
         ign,
         raids: data.raids || 0,
         gold: totalGold,
+        deposits_gold: totalDepositsGold,
         donations,
+        deposits,
         meets_challenge_quantity: metsChallengeByQuantity,
         log_order: index, // Preserve chronological order from Discord log (0 = first/most recent)
       };

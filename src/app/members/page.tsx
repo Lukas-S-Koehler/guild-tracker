@@ -21,6 +21,8 @@ interface GuildMember {
 interface ActivityDay {
   date: string;
   gold_donated: number;
+  deposits_gold: number;
+  total_gold: number;
   raids: number;
   met_requirement: boolean;
   challenge_total: number;
@@ -360,11 +362,16 @@ function MembersPageContent() {
                                         {formatDate(day.date)}
                                       </div>
                                       <div className="text-lg font-bold mb-1">
-                                        {formatGold(day.gold_donated)}
+                                        {formatGold(day.total_gold)}
                                       </div>
                                       <div className="text-xs text-muted-foreground mb-2">
                                         {day.raids} raids
                                       </div>
+                                      {day.deposits_gold > 0 && (
+                                        <div className="text-xs text-blue-500 mb-1">
+                                          +{formatGold(day.deposits_gold)} deposits
+                                        </div>
+                                      )}
                                       {day.challenge_total > 0 && (
                                         <div className="text-xs">
                                           <div className="font-medium">{day.challenge_percent}%</div>

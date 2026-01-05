@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   // Get last 7 days of daily logs for this member in this guild
   const { data: logs, error: logsError } = await supabase
     .from('daily_logs')
-    .select('id, log_date, gold_donated, raids, met_requirement')
+    .select('id, log_date, gold_donated, deposits_gold, raids, met_requirement')
     .eq('member_id', memberId)
     .eq('guild_id', guildId)
     .order('log_date', { ascending: false })
@@ -77,9 +77,13 @@ export async function GET(req: NextRequest) {
       ? Math.round((log.gold_donated / challengeTotal) * 100)
       : 0;
 
+    const totalGold = (log.gold_donated || 0) + (log.deposits_gold || 0);
+
     return {
       date: log.log_date,
       gold_donated: log.gold_donated,
+      deposits_gold: log.deposits_gold || 0,
+      total_gold: totalGold,
       raids: log.raids,
       met_requirement: log.met_requirement,
       challenge_total: challengeTotal,
