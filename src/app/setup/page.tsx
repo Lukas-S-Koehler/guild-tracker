@@ -26,6 +26,10 @@ function SetupPageContent() {
 
   // Guild config state (LEADER/DEPUTY only)
   const [donationReq, setDonationReq] = useState(5000);
+  const [depositReq, setDepositReq] = useState(0);
+  const [allowChallengeQty, setAllowChallengeQty] = useState(false);
+  const [activeBuildings, setActiveBuildings] = useState<string[]>([]);
+  const [availableBuildings, setAvailableBuildings] = useState<any[]>([]);
   const [savingConfig, setSavingConfig] = useState(false);
 
   const isLeaderOrDeputy = hasRole('DEPUTY');
@@ -45,10 +49,22 @@ function SetupPageContent() {
 
         // Fetch guild config (for donation requirement) if LEADER/DEPUTY and has guild
         if (currentGuild && isLeaderOrDeputy) {
-          const configRes = await api.get('/api/config');
+          const [configRes, buildingsRes] = await Promise.all([
+            api.get('/api/config'),
+            api.get('/api/guild-buildings')
+          ]);
+
           if (configRes.ok) {
             const configData = await configRes.json();
             setDonationReq(configData.donation_requirement || 5000);
+            setDepositReq(configData.settings?.daily_deposit_requirement || 0);
+            setAllowChallengeQty(configData.settings?.allow_challenge_quantity_requirement || false);
+            setActiveBuildings(configData.settings?.active_buildings || []);
+          }
+
+          if (buildingsRes.ok) {
+            const buildings = await buildingsRes.json();
+            setAvailableBuildings(buildings);
           }
         }
       } catch (err) {
@@ -101,6 +117,12 @@ function SetupPageContent() {
         guild_id: currentGuild?.guild_id || '',
         api_key: configData.api_key || 'placeholder', // Keep existing or use placeholder
         donation_requirement: donationReq,
+        settings: {
+          daily_donation_requirement: donationReq,
+          daily_deposit_requirement: depositReq,
+          allow_challenge_quantity_requirement: allowChallengeQty,
+          active_buildings: activeBuildings,
+        },
       };
 
       const res = await api.post('/api/config', payload);
@@ -203,9 +225,84 @@ function SetupPageContent() {
                 onChange={(e) => setDonationReq(parseInt(e.target.value) || 0)}
               />
               <p className="text-xs text-muted-foreground">
-                Minimum daily gold donation for a member to be considered active
+                Minimum daily gold donation to challenges for a member to meet requirement
               </p>
             </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="deposit_req">Daily Deposit Requirement (gold)</Label>
+              <Input
+                id="deposit_req"
+                type="number"
+                min="0"
+                value={depositReq}
+                onChange={(e) => setDepositReq(parseInt(e.target.value) || 0)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Minimum daily guild hall deposits for a member to meet requirement (0 = disabled)
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <input
+                  id="allow_challenge_qty"
+                  type="checkbox"
+                  checked={allowChallengeQty}
+                  onChange={(e) => setAllowChallengeQty(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300"
+                />
+                <Label htmlFor="allow_challenge_qty" className="cursor-pointer">
+                  Allow 50% Challenge Item Quantity Requirement
+                </Label>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                When enabled, members can meet requirement by donating 50% of any challenge item's initial quantity
+              </p>
+            </div>
+
+            {depositReq > 0 && (
+              <div className="space-y-2">
+                <Label>Active Guild Buildings (for Deposit Verification)</Label>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Select which building(s) you're working on. Only deposits of resources needed for these buildings will count toward the deposit requirement.
+                </p>
+                <div className="space-y-2 max-h-64 overflow-y-auto border rounded p-3">
+                  {availableBuildings.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">Loading buildings...</p>
+                  ) : (
+                    availableBuildings.map((building) => (
+                      <div key={building.id} className="flex items-start gap-2">
+                        <input
+                          id={`building_${building.id}`}
+                          type="checkbox"
+                          checked={activeBuildings.includes(building.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setActiveBuildings([...activeBuildings, building.id]);
+                            } else {
+                              setActiveBuildings(activeBuildings.filter(id => id !== building.id));
+                            }
+                          }}
+                          className="w-4 h-4 rounded border-gray-300 mt-0.5"
+                        />
+                        <Label htmlFor={`building_${building.id}`} className="cursor-pointer flex-1">
+                          <div className="font-medium">{building.name}</div>
+                          <div className="text-xs text-muted-foreground">
+                            Level {building.guild_level_required} • {building.mark_cost} Marks • {building.resources?.length || 0} resources
+                          </div>
+                        </Label>
+                      </div>
+                    ))
+                  )}
+                </div>
+                {depositReq > 0 && activeBuildings.length === 0 && (
+                  <p className="text-xs text-amber-600">
+                    ⚠️ No buildings selected. Deposit requirement will not be enforced.
+                  </p>
+                )}
+              </div>
+            )}
 
             <Button onClick={handleSaveGuildConfig} disabled={savingConfig} className="w-full">
               {savingConfig ? (

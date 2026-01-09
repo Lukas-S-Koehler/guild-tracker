@@ -607,17 +607,32 @@ Contributed 100 Iron Ore
                         {/* Guild Hall Deposits */}
                         {member.deposits && member.deposits.length > 0 && (
                           <div className="mt-3">
-                            <p className="text-sm font-medium mb-2">Guild Hall Deposits ({formatGold(member.deposits_gold || 0)}):</p>
+                            <p className="text-sm font-medium mb-2">
+                              Guild Hall Deposits ({formatGold(member.deposits_gold || 0)}):
+                            </p>
                             <div className="space-y-1 text-xs">
                               {member.deposits.map((deposit: any, idx: number) => (
-                                <div key={idx} className="flex justify-between items-center">
-                                  <span>{deposit.item}</span>
+                                <div
+                                  key={idx}
+                                  className={`flex justify-between items-center ${
+                                    deposit.valid === false ? 'opacity-50 line-through' : ''
+                                  }`}
+                                >
+                                  <span className={deposit.valid === false ? 'text-red-500' : ''}>
+                                    {deposit.item}
+                                    {deposit.valid === false && ' ❌'}
+                                  </span>
                                   <span className="text-muted-foreground">
                                     {deposit.quantity.toLocaleString()} ({formatGold(deposit.total)})
                                   </span>
                                 </div>
                               ))}
                             </div>
+                            {member.deposits.some((d: any) => d.valid === false) && (
+                              <p className="text-xs text-amber-600 mt-2">
+                                ⚠️ Invalid deposits (not needed for active buildings) don't count toward requirement
+                              </p>
+                            )}
                           </div>
                         )}
 

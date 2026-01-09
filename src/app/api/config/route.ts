@@ -38,6 +38,7 @@ export async function GET(req: NextRequest) {
       api_key: data.api_key,
       donation_requirement:
         data.settings?.donation_requirement || DEFAULT_DONATION_REQUIREMENT,
+      settings: data.settings || {},
     });
 
   } catch (err) {
@@ -55,7 +56,7 @@ export async function POST(req: NextRequest) {
     const supabase = createServerClient(req);
     const body = await req.json();
 
-    const { guild_name, guild_id, api_key, donation_requirement } = body;
+    const { guild_name, guild_id, api_key, donation_requirement, settings } = body;
 
     if (!guild_name || !guild_id || !api_key) {
       return NextResponse.json(
@@ -78,8 +79,10 @@ export async function POST(req: NextRequest) {
       .eq('guild_id', guild_id)
       .single();
 
+    // Merge settings from request body with existing settings
     const newSettings = {
       ...(existing?.settings || {}),
+      ...(settings || {}),
       donation_requirement: donation_requirement || DEFAULT_DONATION_REQUIREMENT,
     };
 

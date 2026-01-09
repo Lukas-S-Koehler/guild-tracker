@@ -29,6 +29,40 @@ export async function POST(req: NextRequest) {
     }, { status: 400 });
   }
 
+  // Fetch guild config to check settings
+  const { data: config } = await supabase
+    .from('guild_config')
+    .select('settings')
+    .eq('guild_id', guildId)
+    .single();
+
+  const allowChallengeQtyRequirement = config?.settings?.allow_challenge_quantity_requirement || false;
+  const activeBuildings = config?.settings?.active_buildings || [];
+
+  // Fetch valid deposit items from active buildings
+  const validDepositItems = new Set<string>();
+  if (activeBuildings.length > 0) {
+    const { data: buildings } = await supabase
+      .from('guild_buildings')
+      .select('id, name, resources')
+      .in('id', activeBuildings);
+
+    if (buildings) {
+      buildings.forEach((building: any) => {
+        if (building.resources && Array.isArray(building.resources)) {
+          building.resources.forEach((resource: any) => {
+            if (resource.item) {
+              validDepositItems.add(resource.item.toLowerCase());
+            }
+          });
+        }
+      });
+    }
+  }
+
+  console.log(`[Parse] Guild ${guildId}: active buildings=${activeBuildings.join(',')}, valid deposit items=${Array.from(validDepositItems).join(',')}`);
+
+
   try {
     // Parse the activity log into a map: { ign: { raids, donations: [{item,quantity}] } }
     const parseResult = parseActivityLog(raw_log);
@@ -165,27 +199,34 @@ export async function POST(req: NextRequest) {
       const totalGold = donations.reduce((sum: number, d: any) => sum + (d.total || 0), 0);
 
       // Process deposits (guild hall)
+      // Only count deposits of items that are in the active buildings' resource lists
       const deposits = data.deposits.map((d: { item: string; quantity: number }) => {
         const lower = d.item.toLowerCase();
         const price = pricesByLower[lower] ?? 0;
         const total = d.quantity * price;
+        const isValid = validDepositItems.size === 0 || validDepositItems.has(lower);
 
         return {
           item: d.item,
           quantity: d.quantity,
           price,
           total,
+          valid: isValid,
         };
       });
 
-      const totalDepositsGold = deposits.reduce((sum: number, d: any) => sum + (d.total || 0), 0);
+      // Only sum gold from valid deposits
+      const totalDepositsGold = deposits
+        .filter((d: any) => d.valid)
+        .reduce((sum: number, d: any) => sum + (d.total || 0), 0);
 
       // Check if any item donation meets 50% of initial quantity
-      const metsChallengeByQuantity = donations.some((d: any) =>
+      // Only count this if the guild has the toggle enabled
+      const metsChallengeByQuantity = allowChallengeQtyRequirement && donations.some((d: any) =>
         d.initial_quantity > 0 && d.quantity >= (d.initial_quantity / 2)
       );
 
-      console.log(`[Parse] ${ign}: metsChallengeByQuantity=${metsChallengeByQuantity}, donations:`, donations.map((d: any) => `${d.item}(${d.quantity}/${d.initial_quantity}, ${d.percentage_of_initial}%)`));
+      console.log(`[Parse] ${ign}: allowChallengeQty=${allowChallengeQtyRequirement}, metsChallengeByQuantity=${metsChallengeByQuantity}, donations:`, donations.map((d: any) => `${d.item}(${d.quantity}/${d.initial_quantity}, ${d.percentage_of_initial}%)`));
 
       return {
         ign,

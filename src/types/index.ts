@@ -80,6 +80,7 @@ export interface ProcessedMember {
     quantity: number;
     price: number;
     total: number;
+    valid?: boolean;
   }>;
   meets_challenge_quantity?: boolean;
   manual_override?: boolean;
