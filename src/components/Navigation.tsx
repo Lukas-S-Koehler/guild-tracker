@@ -48,14 +48,14 @@ export default function Navigation() {
 
   const navLinks = [
     { href: '/', label: 'Dashboard' },
-    { href: '/members', label: 'Members' },
     { href: '/activity', label: 'Activity Log', requiresRole: 'OFFICER' as const },
-    { href: '/challenges', label: 'Challenges', requiresRole: 'OFFICER' as const },
+    { href: '/reports', label: 'Discord Output' },
+    { href: '/members', label: 'Members' },
     { href: '/leaderboard', label: 'Leaderboard' },
-    { href: '/reports', label: 'Reports' },
+    { href: '/challenges', label: 'Challenges', requiresRole: 'OFFICER' as const },
     { href: '/data-management', label: 'Manage Data', requiresRole: 'OFFICER' as const },
-    { href: '/setup', label: 'Settings' },
     { href: '/admin', label: 'Admin', requiresRole: 'LEADER' as const },
+    { href: '/setup', label: 'Settings' },
   ];
 
   return (

@@ -496,17 +496,16 @@ Contributed 100 Iron Ore
             <div className="mb-4 p-3 bg-muted rounded-lg text-sm">
               <p className="font-medium mb-1">Activity Requirements (meet any one):</p>
               <ul className="space-y-1 text-muted-foreground">
-                <li>• {formatGold(donationReq)} donated to guild challenges</li>
-                <li>• Donate 50% of initial quantity for any challenge item</li>
-                <li>• Deposit items worth required gold to guild hall (if configured)</li>
+                <li>• {formatGold(donationReq)} total gold (challenge donations + valid guild hall deposits)</li>
+                <li>• Donate 50% of initial quantity for any challenge item (if enabled in Settings)</li>
               </ul>
             </div>
             <div className="space-y-2">
               {results.map((member, i) => {
                 const totalGold = member.gold + (member.deposits_gold || 0);
-                const metsDonationReq = member.gold >= donationReq;
+                const metsTotalGoldReq = totalGold >= donationReq;
                 const metsChallengeReq = member.meets_challenge_quantity || false;
-                const meetsReq = metsDonationReq || metsChallengeReq || manualOverrides[member.ign];
+                const meetsReq = metsTotalGoldReq || metsChallengeReq || manualOverrides[member.ign];
                 const isExpanded = expandedMembers.has(member.ign);
 
                 // Find best item (highest percentage)
@@ -553,27 +552,27 @@ Contributed 100 Iron Ore
                       <div className="border-t bg-muted/30 p-4 space-y-3">
                         <div className="grid grid-cols-3 gap-4 text-sm">
                           <div>
-                            <span className="text-muted-foreground">Total Gold:</span>
-                            <span className="ml-2 font-medium">
-                              {formatGold(totalGold)}
+                            <span className="text-muted-foreground">Total Gold Requirement:</span>
+                            <span className={`ml-2 font-medium ${metsTotalGoldReq ? 'text-green-600' : 'text-amber-600'}`}>
+                              {formatGold(totalGold)} / {formatGold(donationReq)}
+                              {metsTotalGoldReq && ' ✓'}
                             </span>
                           </div>
-                          <div>
-                            <span className="text-muted-foreground">Challenge Donations:</span>
-                            <span className={`ml-2 font-medium ${metsDonationReq ? 'text-green-600' : 'text-muted-foreground'}`}>
-                              {formatGold(member.gold)} / {formatGold(donationReq)}
-                              {metsDonationReq && ' ✓'}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Guild Hall Deposits:</span>
-                            <span className="ml-2 font-medium text-muted-foreground">
-                              {formatGold(member.deposits_gold || 0)}
-                            </span>
+                          <div className="pl-4 space-y-1 text-xs">
+                            <div>
+                              <span className="text-muted-foreground">└─ Challenge Donations:</span>
+                              <span className="ml-2">{formatGold(member.gold)}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">└─ Guild Hall Deposits:</span>
+                              <span className={`ml-2 ${(member.deposits_gold || 0) > 0 ? 'text-blue-500' : ''}`}>
+                                {formatGold(member.deposits_gold || 0)}
+                              </span>
+                            </div>
                           </div>
                         </div>
                         <div className="text-sm">
-                          <span className="text-muted-foreground">Challenge Quantity:</span>
+                          <span className="text-muted-foreground">Challenge Quantity Requirement:</span>
                           <span className={`ml-2 font-medium ${metsChallengeReq ? 'text-green-600' : 'text-muted-foreground'}`}>
                             {metsChallengeReq ? 'Met ✓' : 'Not Met'}
                           </span>

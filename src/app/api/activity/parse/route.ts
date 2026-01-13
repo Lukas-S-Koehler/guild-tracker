@@ -240,8 +240,12 @@ export async function POST(req: NextRequest) {
       };
     });
 
-    // Sort by gold (highest first) for display, but preserve log_order
-    members.sort((a, b) => b.gold - a.gold);
+    // Sort by total gold (challenge donations + deposits) - highest first for display, but preserve log_order
+    members.sort((a, b) => {
+      const totalA = a.gold + (a.deposits_gold || 0);
+      const totalB = b.gold + (b.deposits_gold || 0);
+      return totalB - totalA;
+    });
 
     return NextResponse.json({
       members,

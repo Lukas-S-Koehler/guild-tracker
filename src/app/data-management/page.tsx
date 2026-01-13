@@ -231,7 +231,7 @@ function DataManagementContent() {
           View, edit, and delete activity logs and challenges
         </p>
         <p className="text-xs text-muted-foreground mt-1">
-          Note: Members meet requirements by donating configured gold amount OR depositing configured amount of valid guild hall items (matching active buildings in Settings). Some guilds also allow meeting requirement via 50% of any challenge item quantity (see Settings).
+          Note: Members meet requirements by reaching the configured total gold (challenge donations + valid guild hall deposits). Some guilds also allow meeting requirement via 50% of any challenge item quantity (see Settings).
         </p>
       </div>
 

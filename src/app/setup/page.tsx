@@ -26,7 +26,6 @@ function SetupPageContent() {
 
   // Guild config state (LEADER/DEPUTY only)
   const [donationReq, setDonationReq] = useState(5000);
-  const [depositReq, setDepositReq] = useState(0);
   const [allowChallengeQty, setAllowChallengeQty] = useState(false);
   const [activeBuildings, setActiveBuildings] = useState<string[]>([]);
   const [availableBuildings, setAvailableBuildings] = useState<any[]>([]);
@@ -57,7 +56,6 @@ function SetupPageContent() {
           if (configRes.ok) {
             const configData = await configRes.json();
             setDonationReq(configData.donation_requirement || 5000);
-            setDepositReq(configData.settings?.daily_deposit_requirement || 0);
             setAllowChallengeQty(configData.settings?.allow_challenge_quantity_requirement || false);
             setActiveBuildings(configData.settings?.active_buildings || []);
           }
@@ -119,7 +117,6 @@ function SetupPageContent() {
         donation_requirement: donationReq,
         settings: {
           daily_donation_requirement: donationReq,
-          daily_deposit_requirement: depositReq,
           allow_challenge_quantity_requirement: allowChallengeQty,
           active_buildings: activeBuildings,
         },
@@ -216,7 +213,7 @@ function SetupPageContent() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="donation_req">Daily Donation Requirement (gold)</Label>
+              <Label htmlFor="donation_req">Daily Gold Requirement</Label>
               <Input
                 id="donation_req"
                 type="number"
@@ -225,21 +222,7 @@ function SetupPageContent() {
                 onChange={(e) => setDonationReq(parseInt(e.target.value) || 0)}
               />
               <p className="text-xs text-muted-foreground">
-                Minimum daily gold donation to challenges for a member to meet requirement
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="deposit_req">Daily Deposit Requirement (gold)</Label>
-              <Input
-                id="deposit_req"
-                type="number"
-                min="0"
-                value={depositReq}
-                onChange={(e) => setDepositReq(parseInt(e.target.value) || 0)}
-              />
-              <p className="text-xs text-muted-foreground">
-                Minimum daily guild hall deposits for a member to meet requirement (0 = disabled)
+                Total gold from challenge donations + valid guild hall deposits needed to meet requirement
               </p>
             </div>
 
@@ -261,12 +244,11 @@ function SetupPageContent() {
               </p>
             </div>
 
-            {depositReq > 0 && (
-              <div className="space-y-2">
-                <Label>Active Guild Buildings (for Deposit Verification)</Label>
-                <p className="text-xs text-muted-foreground mb-2">
-                  Select which building(s) you're working on. Only deposits of resources needed for these buildings will count toward the deposit requirement.
-                </p>
+            <div className="space-y-2">
+              <Label>Active Guild Buildings (for Deposit Verification)</Label>
+              <p className="text-xs text-muted-foreground mb-2">
+                Select which building(s) you're working on. Only deposits of resources needed for these buildings will count toward the gold requirement.
+              </p>
                 <div className="space-y-2 max-h-64 overflow-y-auto border rounded p-3">
                   {availableBuildings.length === 0 ? (
                     <p className="text-xs text-muted-foreground">Loading buildings...</p>
@@ -296,13 +278,12 @@ function SetupPageContent() {
                     ))
                   )}
                 </div>
-                {depositReq > 0 && activeBuildings.length === 0 && (
+                {activeBuildings.length === 0 && (
                   <p className="text-xs text-amber-600">
-                    ⚠️ No buildings selected. Deposit requirement will not be enforced.
+                    ⚠️ No buildings selected. Guild hall deposits will not count toward the gold requirement.
                   </p>
                 )}
               </div>
-            )}
 
             <Button onClick={handleSaveGuildConfig} disabled={savingConfig} className="w-full">
               {savingConfig ? (

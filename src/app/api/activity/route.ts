@@ -146,20 +146,16 @@ export async function POST(req: NextRequest) {
     }
 
     // Determine if member met requirement:
-    // - Either donated >= 5k gold (or configured amount)
-    // - OR meets_challenge_quantity flag (already calculated during parsing)
-    // - OR deposited >= configured amount to guild hall
+    // - Total gold (challenge donations + valid guild hall deposits) >= configured amount
+    // - OR meets_challenge_quantity flag (if enabled, already calculated during parsing)
     // - OR manual override is set
-    const metsDonationReq = member.gold >= donationReq;
+    const totalGold = member.gold + (member.deposits_gold || 0);
+    const metsTotalGoldReq = totalGold >= donationReq;
     const metsChallengeReq = member.meets_challenge_quantity || false;
 
-    // Get deposit requirement from config (defaults to 0 if not set)
-    const depositReq = config?.settings?.daily_deposit_requirement || 0;
-    const metsDepositReq = depositReq > 0 && (member.deposits_gold || 0) >= depositReq;
+    const metRequirement = metsTotalGoldReq || metsChallengeReq || (member.manual_override === true);
 
-    const metRequirement = metsDonationReq || metsChallengeReq || metsDepositReq || (member.manual_override === true);
-
-    console.log(`[Activity Save] ${member.ign}: gold=${member.gold}, donationReq=${donationReq}, metsDonationReq=${metsDonationReq}, meets_challenge_quantity=${member.meets_challenge_quantity}, metsChallengeReq=${metsChallengeReq}, metRequirement=${metRequirement}`);
+    console.log(`[Activity Save] ${member.ign}: challengeGold=${member.gold}, depositsGold=${member.deposits_gold}, totalGold=${totalGold}, donationReq=${donationReq}, metsTotalGoldReq=${metsTotalGoldReq}, meets_challenge_quantity=${member.meets_challenge_quantity}, metsChallengeReq=${metsChallengeReq}, metRequirement=${metRequirement}`);
 
     // Upsert daily log with guild_id
     const upsertData = {

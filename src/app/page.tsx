@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Settings, Users, Swords, Coins, ClipboardList } from 'lucide-react';
+import { Loader2, Settings, FileText, Copy, Swords, Coins, TrendingUp } from 'lucide-react';
 import { formatGold, formatDate, getToday } from '@/lib/utils';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { useApiClient } from '@/lib/api-client';
@@ -14,29 +14,16 @@ interface DashboardStats {
   hasConfig: boolean;
   guildName: string;
   activeMembersToday: number;
+  totalMembers: number;
   totalRaids: number;
   totalGold: number;
-}
-
-interface Challenge {
-  id: string;
-  challenge_date: string;
-  total_cost: number;
-  items: { name: string; quantity: number; price: number; total: number; isExpensive?: boolean }[];
-}
-
-interface InactivityEntry {
-  id: string;
-  ign: string;
-  category: string;
+  inactiveCount: number;
 }
 
 function DashboardPageContent() {
   const api = useApiClient();
   const { hasRole, loading: authLoading, currentGuild } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [challenges, setChallenges] = useState<Challenge[]>([]);
-  const [inactiveMembers, setInactiveMembers] = useState<InactivityEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -49,31 +36,21 @@ function DashboardPageContent() {
     async function fetchStats() {
       setLoading(true);
       try {
-        const [configRes, todayLogsRes, allTimeRes, challengesRes, reportRes] = await Promise.all([
+        const [configRes, todayLogsRes, allTimeRes, reportRes] = await Promise.all([
           api.get('/api/config'),
           api.get(`/api/activity?date=${getToday()}`),
           api.get('/api/leaderboard?period=all'),
-          api.get('/api/challenges/list'),
           api.get('/api/reports/inactivity'),
         ]);
-
-        if (!configRes.ok) {
-          console.error('/api/config failed', configRes.status, await configRes.text());
-        }
-        if (!challengesRes.ok) {
-          console.error('/api/challenges/list failed', challengesRes.status, await challengesRes.text());
-        }
 
         const config = configRes.ok ? await configRes.json() : {};
         const todayLogs = todayLogsRes.ok ? await todayLogsRes.json() : [];
         const allTimeData = allTimeRes.ok ? await allTimeRes.json() : [];
-        const challengesData = challengesRes.ok ? await challengesRes.json() : [];
         const reportData = reportRes.ok ? await reportRes.json() : [];
 
         const todayLogsArray = Array.isArray(todayLogs) ? todayLogs : [];
         const allTimeArray = Array.isArray(allTimeData) ? allTimeData : [];
-        const normalizedChallenges = Array.isArray(challengesData) ? challengesData : [];
-        const normalizedReport = Array.isArray(reportData) ? reportData : [];
+        const reportArray = Array.isArray(reportData) ? reportData : [];
 
         // Calculate all-time totals from leaderboard data
         const totalRaids = allTimeArray.reduce((sum: number, entry: any) => sum + (entry.total_raids || 0), 0);
@@ -83,23 +60,22 @@ function DashboardPageContent() {
           hasConfig: !!config?.api_key,
           guildName: config?.guild_name || 'My Guild',
           activeMembersToday: todayLogsArray.filter((l: { met_requirement: boolean }) => l.met_requirement).length,
+          totalMembers: allTimeArray.length,
           totalRaids,
           totalGold,
+          inactiveCount: reportArray.length,
         });
-
-        setChallenges(normalizedChallenges);
-        setInactiveMembers(normalizedReport);
       } catch (error) {
         console.error('Failed to fetch stats:', error);
         setStats({
           hasConfig: false,
           guildName: 'My Guild',
           activeMembersToday: 0,
+          totalMembers: 0,
           totalRaids: 0,
           totalGold: 0,
+          inactiveCount: 0,
         });
-        setChallenges([]);
-        setInactiveMembers([]);
       } finally {
         setLoading(false);
       }
@@ -139,226 +115,178 @@ function DashboardPageContent() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Top bar */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">{stats?.guildName || 'Guild'} Dashboard</h1>
-          <p className="text-muted-foreground">{formatDate(new Date())}</p>
-        </div>
+    <div className="space-y-8">
+      {/* Header */}
+      <div>
+        <h1 className="text-3xl font-bold">{stats?.guildName || 'Guild'} Tracker</h1>
+        <p className="text-muted-foreground mt-1">{formatDate(new Date())}</p>
+      </div>
 
-        <div className="flex items-center gap-2">
-          <Button asChild variant="outline">
-            <Link href="/members" className="flex items-center">
-              <Users className="h-4 w-4 mr-2" />
-              Members
+      {/* Main 3 Workflow Cards - Hero Section */}
+      <div className="grid md:grid-cols-3 gap-6">
+        {/* Activity Log */}
+        {hasRole('OFFICER') && (
+          <Card className="border-2 border-primary/20 hover:border-primary/40 transition-colors">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-xl">
+                <FileText className="h-6 w-6 text-primary" />
+                Activity Log
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Process daily activity from guild Discord to track member contributions
+              </p>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Active Today:</span>
+                  <span className="font-bold">{stats?.activeMembersToday}/{stats?.totalMembers}</span>
+                </div>
+              </div>
+              <Button asChild className="w-full" size="lg">
+                <Link href="/activity">Process Activity Log →</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Discord Output (Reports) */}
+        <Card className="border-2 border-primary/20 hover:border-primary/40 transition-colors">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-xl">
+              <Copy className="h-6 w-6 text-primary" />
+              Discord Output
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Generate formatted reports to copy and paste into Discord
+            </p>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Inactive Members:</span>
+                <span className="font-bold text-amber-600">{stats?.inactiveCount}</span>
+              </div>
+            </div>
+            <Button asChild className="w-full" size="lg">
+              <Link href="/reports">Generate Reports →</Link>
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Settings */}
+        <Card className="border-2 border-primary/20 hover:border-primary/40 transition-colors">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-xl">
+              <Settings className="h-6 w-6 text-primary" />
+              Settings
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Configure guild requirements, API keys, and building tracking
+            </p>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Config:</span>
+                <span className="font-bold text-green-600">{stats?.hasConfig ? 'Ready' : 'Setup Needed'}</span>
+              </div>
+            </div>
+            <Button asChild className="w-full" size="lg" variant="outline">
+              <Link href="/setup">Open Settings →</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Guild Statistics */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5" />
+            Guild Statistics
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-2xl">✅</span>
+                <span className="text-sm text-muted-foreground">Active Today</span>
+              </div>
+              <p className="text-3xl font-bold">{stats?.activeMembersToday}</p>
+              <p className="text-xs text-muted-foreground mt-1">of {stats?.totalMembers} members</p>
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Swords className="h-5 w-5 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">Total Raids</span>
+              </div>
+              <p className="text-3xl font-bold">{stats?.totalRaids?.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground mt-1">all time</p>
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Coins className="h-5 w-5 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">Total Gold</span>
+              </div>
+              <p className="text-3xl font-bold">{formatGold(stats?.totalGold || 0)}</p>
+              <p className="text-xs text-muted-foreground mt-1">all time</p>
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-2xl">⚠️</span>
+                <span className="text-sm text-muted-foreground">Inactive</span>
+              </div>
+              <p className="text-3xl font-bold text-amber-600">{stats?.inactiveCount}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                <Link href="/reports" className="hover:underline">View report →</Link>
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Secondary Actions */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Quick Links</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <Button asChild variant="outline" className="h-auto py-4">
+            <Link href="/members" className="flex flex-col items-center gap-2">
+              <span className="text-2xl">👥</span>
+              <span className="text-sm">Members</span>
             </Link>
           </Button>
 
-          {hasRole('LEADER') && (
-            <Button asChild variant="outline">
-              <Link href="/setup" className="flex items-center">
-                <Settings className="h-4 w-4 mr-2" />
-                Settings
+          <Button asChild variant="outline" className="h-auto py-4">
+            <Link href="/leaderboard" className="flex flex-col items-center gap-2">
+              <span className="text-2xl">🏆</span>
+              <span className="text-sm">Leaderboard</span>
+            </Link>
+          </Button>
+
+          {hasRole('OFFICER') && (
+            <Button asChild variant="outline" className="h-auto py-4">
+              <Link href="/challenges" className="flex flex-col items-center gap-2">
+                <span className="text-2xl">📋</span>
+                <span className="text-sm">Challenges</span>
               </Link>
             </Button>
           )}
-        </div>
-      </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-2">
-              <span className="text-sm">✅</span>
-              <span className="text-sm text-muted-foreground">Active Members Today</span>
-            </div>
-            <p className="text-2xl font-bold mt-1">{stats?.activeMembersToday || 0}</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-2">
-              <Swords className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm text-muted-foreground">Total Raids</span>
-            </div>
-            <p className="text-2xl font-bold mt-1">{stats?.totalRaids || 0}</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-2">
-              <Coins className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm text-muted-foreground">Total Gold</span>
-            </div>
-            <p className="text-2xl font-bold mt-1">{formatGold(stats?.totalGold || 0)}</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Two-column layout: Challenges (left, narrower) and Reports (right, wider) */}
-      <div className="grid md:grid-cols-5 gap-6">
-        {/* Recent Challenges - 2 columns */}
-        <Card className="md:col-span-2">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <ClipboardList className="h-5 w-5" />
-              Recent Challenges
-            </CardTitle>
-          </CardHeader>
-
-          <CardContent>
-            {challenges.length === 0 ? (
-              <p className="text-muted-foreground text-sm">No challenges saved yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {challenges.slice(0, 5).map((c) => (
-                  <div key={c.id} className="py-2 border-b last:border-0">
-                    <div className="flex justify-between items-start">
-                      <p className="font-medium text-sm">{formatDate(new Date(c.challenge_date))}</p>
-                      <p className="font-bold text-sm">{formatGold(c.total_cost)}</p>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {c.items?.length || 0} items
-                    </p>
-                  </div>
-                ))}
-                <Link href="/challenges/list" className="text-xs text-muted-foreground hover:text-primary block mt-2">
-                  View all challenges →
-                </Link>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Inactivity Report - 3 columns */}
-        <Card className="md:col-span-3">
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                📊 Inactivity Report
-              </span>
-              <Link href="/reports">
-                <Button variant="ghost" size="sm" className="text-xs">
-                  View Full Report →
-                </Button>
+          {hasRole('OFFICER') && (
+            <Button asChild variant="outline" className="h-auto py-4">
+              <Link href="/data-management" className="flex flex-col items-center gap-2">
+                <span className="text-2xl">🗂️</span>
+                <span className="text-sm">Manage Data</span>
               </Link>
-            </CardTitle>
-          </CardHeader>
-
-          <CardContent>
-            {inactiveMembers.length === 0 ? (
-              <p className="text-muted-foreground text-sm">No inactive members! 🎉</p>
-            ) : (
-              <div className="space-y-3">
-                {/* Group by category */}
-                {['1w+', 'never', '6d', '5d', '4d'].map((cat) => {
-                  const members = inactiveMembers.filter(m => m.category === cat);
-                  if (members.length === 0) return null;
-
-                  const getEmoji = (category: string) => {
-                    if (category === '1w+') return '🔴';
-                    if (category === 'never') return '💀';
-                    if (['6d', '5d', '4d'].includes(category)) return '🟡';
-                    return '⚠️';
-                  };
-
-                  const getLabel = (category: string) => {
-                    if (category === 'never') return 'Never Active';
-                    return `${category} Inactive`;
-                  };
-
-                  return (
-                    <div key={cat} className="flex items-start gap-2">
-                      <span className="text-lg">{getEmoji(cat)}</span>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-sm font-medium">{getLabel(cat)}</span>
-                          <span className="text-xs text-muted-foreground">({members.length})</span>
-                        </div>
-                        <div className="flex flex-wrap gap-1">
-                          {members.slice(0, 10).map((member) => (
-                            <span
-                              key={member.id}
-                              className="bg-muted rounded px-2 py-0.5 text-xs"
-                            >
-                              {member.ign}
-                            </span>
-                          ))}
-                          {members.length > 10 && (
-                            <span className="text-xs text-muted-foreground px-2">
-                              +{members.length - 10} more
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-                <p className="text-sm text-muted-foreground pt-2 border-t">
-                  Total inactive: <span className="font-bold text-foreground">{inactiveMembers.length}</span>
-                </p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Quick Actions */}
-      <div className="grid md:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">📝 Process Activity Log</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Paste your guild&apos;s Discord activity log to track raids and donations.
-            </p>
-            <Button asChild className="w-full">
-              <Link href="/activity">Process Activity Log</Link>
             </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">📋 Calculate Challenge</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Paste challenge items to calculate total cost and find expensive items.
-            </p>
-            <Button asChild className="w-full">
-              <Link href="/challenges">Calculate Challenge</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* More Actions (deduplicated) */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">⚡ Quick Links</CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-2">
-          <Button asChild variant="outline">
-            <Link href="/leaderboard">🏆 Leaderboard</Link>
-          </Button>
-
-          <Button asChild variant="outline">
-            <Link href="/reports">📊 Inactivity Report</Link>
-          </Button>
-
-          <Button asChild variant="outline">
-            <Link href="/challenges/list">📚 All Challenges</Link>
-          </Button>
-
-          <Button asChild variant="outline">
-            <Link href="/activity">🗂 Activity</Link>
-          </Button>
+          )}
         </CardContent>
       </Card>
     </div>
