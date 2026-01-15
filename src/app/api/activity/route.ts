@@ -46,7 +46,11 @@ export async function POST(req: NextRequest) {
   const supabase = createServerClient(req);
   const body = await req.json();
 
-  const { log_date, members } = body as { log_date: string; members: ProcessedMember[] };
+  const { log_date, members, memberStatusChanges } = body as {
+    log_date: string;
+    members: ProcessedMember[];
+    memberStatusChanges?: Array<{ ign: string; action: 'joined' | 'left' | 'kicked' }>;
+  };
 
   if (!log_date || !members || members.length === 0) {
     return NextResponse.json({ error: 'Date and members are required' }, { status: 400 });
@@ -185,6 +189,68 @@ export async function POST(req: NextRequest) {
     console.log(`[Activity Save] ${member.ign} - Upsert result:`, JSON.stringify(upsertResult));
 
     saved++;
+  }
+
+  // Process member status changes (joins, leaves, kicks)
+  if (memberStatusChanges && memberStatusChanges.length > 0) {
+    for (const change of memberStatusChanges) {
+      const ignLower = change.ign.toLowerCase();
+
+      if (change.action === 'joined') {
+        // Update first_seen to this log_date for newly joined members
+        // Try to find by idlemmo_id first
+        let { data: existingMember } = await supabase
+          .from('members')
+          .select('id, first_seen')
+          .eq('idlemmo_id', ignLower)
+          .maybeSingle();
+
+        if (!existingMember) {
+          // Try by IGN in current guild
+          const { data: legacyMember } = await supabase
+            .from('members')
+            .select('id, first_seen')
+            .eq('ign', change.ign)
+            .eq('current_guild_id', auth.guildId)
+            .maybeSingle();
+          existingMember = legacyMember;
+        }
+
+        if (existingMember) {
+          // Update first_seen to this log_date (join date)
+          console.log(`[Activity] Member ${change.ign} joined on ${log_date}, updating first_seen`);
+          await supabase
+            .from('members')
+            .update({ first_seen: log_date })
+            .eq('id', existingMember.id);
+        }
+      } else if (change.action === 'left' || change.action === 'kicked') {
+        // Mark member as inactive (left or kicked from guild)
+        let { data: existingMember } = await supabase
+          .from('members')
+          .select('id')
+          .eq('idlemmo_id', ignLower)
+          .maybeSingle();
+
+        if (!existingMember) {
+          const { data: legacyMember } = await supabase
+            .from('members')
+            .select('id')
+            .eq('ign', change.ign)
+            .eq('current_guild_id', auth.guildId)
+            .maybeSingle();
+          existingMember = legacyMember;
+        }
+
+        if (existingMember) {
+          console.log(`[Activity] Member ${change.ign} ${change.action} guild, marking inactive`);
+          await supabase
+            .from('members')
+            .update({ is_active: false })
+            .eq('id', existingMember.id);
+        }
+      }
+    }
   }
 
   return NextResponse.json({ success: true, saved });

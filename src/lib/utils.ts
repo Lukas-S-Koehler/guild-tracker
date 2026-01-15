@@ -56,26 +56,24 @@ export function getRankEmoji(rank: number): string {
 }
 
 export function getInactivityCategory(daysInactive: number): string {
-  if (daysInactive < 0) return 'never';
   if (daysInactive === 0) return 'active';
-  if (daysInactive >= 7) return '7d+';
-  return `${daysInactive}d`;
+  if (daysInactive === 1) return '1d';
+  if (daysInactive === 2) return '2d';
+  if (daysInactive === 3) return '3d';
+  return '4d+'; // 4+ days = kick
 }
 
 export function getInactivityEmoji(category: string): string {
+  // New warning tiers: 1d=green, 2d=yellow, 3d=orange, 4d+=red
   switch (category) {
-    case '7d+':
-    case 'never':
-      return '🔴';
-    case '4d':
-    case '5d':
-    case '6d':
-      return '🟠';
-    case '2d':
+    case '4d+':
+      return '🔴'; // Red - kick
     case '3d':
-      return '🟡';
+      return '🟠'; // Orange - private + optional public
+    case '2d':
+      return '🟡'; // Yellow - private warn
     case '1d':
-      return '🟢'; // 1 day = green (safe)
+      return '🟢'; // Green - safe
     default:
       return '🟢';
   }
@@ -105,13 +103,13 @@ export function formatInactivityReport(
   let output = `**${guildName} - Inactivity Report**\n`;
   output += `*Generated: ${new Date().toLocaleDateString()}*\n\n`;
 
-  const categories = ['1d', '2d', '3d', '4d', '5d', '6d', '7d+', 'never'];
+  // New warning tiers: 1d=green(safe), 2d=yellow(private), 3d=orange(private+public), 4d+=red(kick)
+  const categories = ['1d', '2d', '3d', '4d+'];
 
   for (const cat of categories) {
     if (grouped[cat] && grouped[cat].length > 0) {
       const emoji = getInactivityEmoji(cat);
-      const label = cat === 'never' ? 'Never Active' : cat === '7d+' ? '7d+ Inactive' : cat;
-      output += `${emoji} **${label}**: ${grouped[cat].join(', ')}\n`;
+      output += `${emoji} **${cat} Inactive**: ${grouped[cat].join(', ')}\n`;
     }
   }
 

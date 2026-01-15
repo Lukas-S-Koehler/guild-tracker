@@ -60,18 +60,18 @@ export default function ReportsPage() {
     return acc;
   }, {} as Record<string, InactivityEntry[]>);
 
-  const categories = ['1d', '2d', '3d', '4d', '5d', '6d', '7d+', 'never'];
+  const categories = ['1d', '2d', '3d', '4d+'];
 
   const getWarningLevelColor = (warning_level: string) => {
     switch (warning_level) {
       case 'safe':
-        return 'bg-green-500/20 text-green-500 border-green-500/50';
+        return 'bg-green-500/20 text-green-500 border-green-500/50'; // 1d: Safe
       case 'warn1':
-        return 'bg-yellow-500/20 text-yellow-500 border-yellow-500/50'; // 2-3d: Private warning
+        return 'bg-yellow-500/20 text-yellow-500 border-yellow-500/50'; // 2d: Private warning
       case 'warn2':
-        return 'bg-orange-500/20 text-orange-500 border-orange-500/50'; // 4-6d: Public warning
+        return 'bg-orange-500/20 text-orange-500 border-orange-500/50'; // 3d: Private + optional public
       case 'kick':
-        return 'bg-red-500/20 text-red-500 border-red-500/50'; // 7d+: Kick
+        return 'bg-red-500/20 text-red-500 border-red-500/50'; // 4d+: Kick
       default:
         return 'bg-gray-500/20 text-gray-500 border-gray-500/50';
     }
@@ -82,9 +82,9 @@ export default function ReportsPage() {
       case 'warn1':
         return '⚠️ Private Warning';
       case 'warn2':
-        return '⚠️⚠️ Public Warning';
+        return '⚠️ Private Warning (+optional public)';
       case 'kick':
-        return '🚫 Kick';
+        return '🚫 Kick from Guild';
       default:
         return '';
     }
@@ -130,7 +130,7 @@ export default function ReportsPage() {
                 if (!members || members.length === 0) return null;
 
                 const emoji = getInactivityEmoji(cat);
-                const label = cat === 'never' ? 'Never Active' : `${cat} Inactive`;
+                const label = `${cat} Inactive`;
                 const warning_level = members[0]?.warning_level || 'safe';
                 const warningLabel = getWarningLevelLabel(warning_level);
 
@@ -186,11 +186,12 @@ export default function ReportsPage() {
         <div>
           <p className="font-medium mb-1">⚠️ Warning Stages</p>
           <ul className="list-disc list-inside mt-1 space-y-1">
-            <li><span className="text-yellow-500">2-3 days</span>: Private warning sent</li>
-            <li><span className="text-orange-500">4-6 days</span>: Private + public warning in channel</li>
-            <li><span className="text-red-500">7+ days</span>: Subject to removal</li>
+            <li><span className="text-green-500">1 day</span>: Safe - no action needed</li>
+            <li><span className="text-yellow-500">2 days</span>: Private warning sent</li>
+            <li><span className="text-orange-500">3 days</span>: Private warning + optional public</li>
+            <li><span className="text-red-500">4+ days</span>: Kick from guild</li>
           </ul>
-          <p className="mt-2 text-xs">Note: Leaders and Deputies are excluded from inactivity tracking</p>
+          <p className="mt-2 text-xs">Note: Leaders and Deputies are excluded from inactivity tracking. New members are tracked from their join date.</p>
         </div>
       </div>
     </div>

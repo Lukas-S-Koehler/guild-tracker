@@ -104,6 +104,7 @@ export interface InactivityEntry {
   position: string;
   avatar_url: string | null;
   last_active_date: string | null;
+  first_seen: string | null;
   days_inactive: number;
   category: string;
   warning_level: 'safe' | 'warn1' | 'warn2' | 'kick';

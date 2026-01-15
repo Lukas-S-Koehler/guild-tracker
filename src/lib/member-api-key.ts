@@ -1,36 +1,23 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 
 /**
- * Get the API key for the current user in the specified guild
+ * Get the API key for the current user (account-based, shared across all guilds)
  * @param supabase - Supabase client
  * @param userId - User ID
- * @param guildId - Guild ID
+ * @param guildId - Guild ID (kept for API compatibility, not used)
  * @returns API key or null if not found
  */
 export async function getMemberApiKey(
   supabase: SupabaseClient,
   userId: string,
-  guildId: string
+  _guildId?: string // Kept for backward compatibility but not used
 ): Promise<string | null> {
   try {
-    // Get guild_leader record
-    const { data: guildMember, error: memberError } = await supabase
-      .from('guild_leaders')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('guild_id', guildId)
-      .single();
-
-    if (memberError || !guildMember) {
-      console.error('[getMemberApiKey] Error fetching guild member:', memberError);
-      return null;
-    }
-
-    // Get API key for this guild member
+    // Get API key for this user (account-based, not guild-based)
     const { data: keyData, error: keyError } = await supabase
-      .from('member_keys')
+      .from('user_api_keys')
       .select('api_key')
-      .eq('guild_member_id', guildMember.id)
+      .eq('user_id', userId)
       .single();
 
     if (keyError && keyError.code !== 'PGRST116') {

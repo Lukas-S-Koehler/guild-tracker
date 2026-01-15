@@ -50,52 +50,61 @@ export async function GET(req: NextRequest) {
     }
   });
 
+  // Helper function to calculate warning level and category based on days inactive
+  // New warning tiers: 1d=green, 2d=yellow(private), 3d=orange(private+optional public), 4d+=red(kick)
+  const getWarningInfo = (daysInactive: number): { category: string; warning_level: 'safe' | 'warn1' | 'warn2' | 'kick' } => {
+    if (daysInactive === 0) {
+      return { category: 'active', warning_level: 'safe' };
+    } else if (daysInactive === 1) {
+      return { category: '1d', warning_level: 'safe' }; // Green - safe
+    } else if (daysInactive === 2) {
+      return { category: '2d', warning_level: 'warn1' }; // Yellow - private warn
+    } else if (daysInactive === 3) {
+      return { category: '3d', warning_level: 'warn2' }; // Orange - private + optional public
+    } else {
+      return { category: '4d+', warning_level: 'kick' }; // Red - kick
+    }
+  };
+
   // Calculate inactivity for each member
   const today = new Date();
   const inactiveMembers = members
     .map(member => {
       const lastActivityDate = lastActivityMap.get(member.id);
 
+      // Calculate days since join (first_seen) - used to cap inactivity
+      let daysSinceJoin = 999; // Default high value if no first_seen
+      if (member.first_seen) {
+        const joinDate = new Date(member.first_seen);
+        daysSinceJoin = Math.floor((today.getTime() - joinDate.getTime()) / (1000 * 60 * 60 * 24));
+      }
+
       if (!lastActivityDate) {
-        // Never met requirement (might have activity, but never met the threshold)
+        // No activity that met requirement - cap at days since join
+        // Never show "never active" - use days since join instead
+        const effectiveDays = Math.min(daysSinceJoin, 999);
+        const { category, warning_level } = getWarningInfo(effectiveDays);
+
         return {
           id: member.id,
           ign: member.ign,
           position: member.position,
           avatar_url: member.avatar_url,
           last_active_date: null,
-          days_inactive: 999,
-          category: 'never' as const,
-          warning_level: 'kick' as const, // Never met requirement
+          first_seen: member.first_seen,
+          days_inactive: effectiveDays,
+          category,
+          warning_level,
         };
       }
 
       const lastDate = new Date(lastActivityDate);
-      const daysDiff = Math.floor((today.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
+      let daysDiff = Math.floor((today.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
 
-      // Determine category and warning level based on days since last met requirement
-      let category: string;
-      let warning_level: 'safe' | 'warn1' | 'warn2' | 'kick';
+      // Cap days inactive at days since join (can't be inactive longer than membership)
+      daysDiff = Math.min(daysDiff, daysSinceJoin);
 
-      if (daysDiff === 0) {
-        category = 'active';
-        warning_level = 'safe';
-      } else if (daysDiff === 1) {
-        category = '1d';
-        warning_level = 'safe';
-      } else if (daysDiff >= 2 && daysDiff <= 3) {
-        category = `${daysDiff}d`;
-        warning_level = 'warn1'; // 2-3 days: private warning
-      } else if (daysDiff >= 4 && daysDiff <= 6) {
-        category = `${daysDiff}d`;
-        warning_level = 'warn2'; // 4-6 days: public warning
-      } else if (daysDiff >= 7) {
-        category = '7d+';
-        warning_level = 'kick'; // 7+ days: kick
-      } else {
-        category = 'active';
-        warning_level = 'safe';
-      }
+      const { category, warning_level } = getWarningInfo(daysDiff);
 
       return {
         id: member.id,
@@ -103,6 +112,7 @@ export async function GET(req: NextRequest) {
         position: member.position,
         avatar_url: member.avatar_url,
         last_active_date: lastActivityDate,
+        first_seen: member.first_seen,
         days_inactive: daysDiff,
         category,
         warning_level,
@@ -121,9 +131,7 @@ export async function GET(req: NextRequest) {
       return m.category !== 'active';
     })
     .sort((a, b) => {
-      // Sort by severity (never first, then by days)
-      if (a.category === 'never') return -1;
-      if (b.category === 'never') return 1;
+      // Sort by days inactive (most inactive first)
       return b.days_inactive - a.days_inactive;
     });
 

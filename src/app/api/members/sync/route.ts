@@ -87,18 +87,50 @@ export async function POST(req: NextRequest) {
   console.log("PARSED MEMBERS:", data.members);
   console.log("GUILD INFO FROM API:", data.guild);
 
+  // Get existing members to check who's new to this guild
+  const memberIds = data.members.map((m: any) => m.name.toLowerCase());
+  const { data: existingMembers } = await supabase
+    .from('members')
+    .select('idlemmo_id, current_guild_id, first_seen')
+    .in('idlemmo_id', memberIds);
+
+  // Create a map of existing members for quick lookup
+  const existingMap = new Map<string, { current_guild_id: string | null; first_seen: string | null }>();
+  existingMembers?.forEach(m => {
+    existingMap.set(m.idlemmo_id, { current_guild_id: m.current_guild_id, first_seen: m.first_seen });
+  });
+
+  const today = new Date().toISOString().split('T')[0];
+
   // Transform members data for database
-  const members = data.members.map((m: any) => ({
-    guild_id: guildId, // Legacy column (NOT NULL constraint)
-    current_guild_id: guildId, // Current guild ID
-    idlemmo_id: m.name.toLowerCase(), // Unique identifier
-    ign: m.name, // In-game name
-    position: m.position, // LEADER, OFFICER, etc.
-    total_level: m.total_level, // Total level
-    avatar_url: m.avatar_url, // Avatar URL
-    is_active: true, // Mark as active
-    synced_at: new Date().toISOString(), // Timestamp
-  }));
+  // Set first_seen to today if member is NEW to this guild (either brand new or moved from another guild)
+  const members = data.members.map((m: any) => {
+    const idlemmoId = m.name.toLowerCase();
+    const existing = existingMap.get(idlemmoId);
+
+    // Member is new to THIS guild if:
+    // 1. They don't exist in our DB at all, OR
+    // 2. They exist but their current_guild_id is different (moved from another guild)
+    const isNewToGuild = !existing || existing.current_guild_id !== guildId;
+
+    if (isNewToGuild) {
+      console.log(`[Sync] New member to guild: ${m.name} (was in guild: ${existing?.current_guild_id || 'none'})`);
+    }
+
+    return {
+      guild_id: guildId, // Legacy column (NOT NULL constraint)
+      current_guild_id: guildId, // Current guild ID
+      idlemmo_id: idlemmoId, // Unique identifier
+      ign: m.name, // In-game name
+      position: m.position, // LEADER, OFFICER, etc.
+      total_level: m.total_level, // Total level
+      avatar_url: m.avatar_url, // Avatar URL
+      is_active: true, // Mark as active
+      synced_at: new Date().toISOString(), // Timestamp
+      // Set first_seen to today if new to this guild, otherwise keep existing value
+      ...(isNewToGuild ? { first_seen: today } : {}),
+    };
+  });
 
   console.log("UPSERT PAYLOAD:", members);
 

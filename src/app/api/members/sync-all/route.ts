@@ -93,18 +93,41 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        // Transform members data
-        const members = data.members.map((m: any) => ({
-          guild_id: guild.id, // Legacy column (NOT NULL constraint)
-          current_guild_id: guild.id,
-          idlemmo_id: m.name.toLowerCase(),
-          ign: m.name,
-          position: m.position,
-          total_level: m.total_level,
-          avatar_url: m.avatar_url,
-          is_active: true,
-          synced_at: new Date().toISOString(),
-        }));
+        // Get existing members to check who's new to this guild
+        const memberIds = data.members.map((m: any) => m.name.toLowerCase());
+        const { data: existingMembers } = await supabase
+          .from('members')
+          .select('idlemmo_id, current_guild_id')
+          .in('idlemmo_id', memberIds);
+
+        // Create a map of existing members
+        const existingMap = new Map<string, string | null>();
+        existingMembers?.forEach(m => {
+          existingMap.set(m.idlemmo_id, m.current_guild_id);
+        });
+
+        const today = new Date().toISOString().split('T')[0];
+
+        // Transform members data - set first_seen for new guild members
+        const members = data.members.map((m: any) => {
+          const idlemmoId = m.name.toLowerCase();
+          const existingGuildId = existingMap.get(idlemmoId);
+          const isNewToGuild = existingGuildId === undefined || existingGuildId !== guild.id;
+
+          return {
+            guild_id: guild.id, // Legacy column (NOT NULL constraint)
+            current_guild_id: guild.id,
+            idlemmo_id: idlemmoId,
+            ign: m.name,
+            position: m.position,
+            total_level: m.total_level,
+            avatar_url: m.avatar_url,
+            is_active: true,
+            synced_at: new Date().toISOString(),
+            // Set first_seen to today if new to this guild
+            ...(isNewToGuild ? { first_seen: today } : {}),
+          };
+        });
 
         // Upsert to database
         const { error: upsertError } = await supabase

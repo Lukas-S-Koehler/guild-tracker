@@ -203,6 +203,7 @@ export default function ActivityPage() {
       const res = await api.post('/api/activity', {
         log_date: logDate,
         members: membersWithOverrides,
+        memberStatusChanges: memberStatusChanges.length > 0 ? memberStatusChanges : undefined,
       });
 
       const data = await res.json();
@@ -215,6 +216,7 @@ export default function ActivityPage() {
       setRawLog('');
       setResults(null);
       setManualOverrides({});
+      setMemberStatusChanges([]);
 
       // Refresh last log entries for next day
       try {

@@ -176,12 +176,12 @@ function SetupPageContent() {
             <p className="text-xs text-muted-foreground">
               Get your personal API key from{' '}
               <a
-                href="https://idle-mmo.com/account/api-tokens"
+                href="https://web.idle-mmo.com/settings/api"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="underline hover:text-primary"
               >
-                idle-mmo.com/account/api-tokens
+                idle-mmo.com/settings/api
               </a>
             </p>
             {hasExistingKey && (
