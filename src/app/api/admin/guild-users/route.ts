@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
-import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
+import { verifyGuildLeader, isErrorResponse } from '@/lib/auth-helpers';
 
 /**
  * GET /api/admin/guild-users
  * List all users who have access to the current guild
  */
 export async function GET(req: NextRequest) {
-  const auth = await verifyAuth(req, 'LEADER');
+  const auth = await verifyGuildLeader(req, 'Dream Bandits');
   if (isErrorResponse(auth)) return auth;
 
   const { guildId } = auth;
@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
  * Requires target_guild_id in body to specify which guild to add to
  */
 export async function POST(req: NextRequest) {
-  const auth = await verifyAuth(req, 'LEADER');
+  const auth = await verifyGuildLeader(req, 'Dream Bandits');
   if (isErrorResponse(auth)) return auth;
 
   const supabase = createServerClient(req);
@@ -143,7 +143,7 @@ export async function POST(req: NextRequest) {
  * Requires target_guild_id in body
  */
 export async function PATCH(req: NextRequest) {
-  const auth = await verifyAuth(req, 'LEADER');
+  const auth = await verifyGuildLeader(req, 'Dream Bandits');
   if (isErrorResponse(auth)) return auth;
 
   const supabase = createServerClient(req);
@@ -188,7 +188,7 @@ export async function PATCH(req: NextRequest) {
  * Query params: user_id, target_guild_id
  */
 export async function DELETE(req: NextRequest) {
-  const auth = await verifyAuth(req, 'LEADER');
+  const auth = await verifyGuildLeader(req, 'Dream Bandits');
   if (isErrorResponse(auth)) return auth;
 
   const { user } = auth;

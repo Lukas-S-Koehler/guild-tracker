@@ -17,7 +17,7 @@ import { ChevronDown, User, LogOut, Users, Shield, Crown } from 'lucide-react';
 
 export default function Navigation() {
   const pathname = usePathname();
-  const { user, currentGuild, guilds, setCurrentGuild, signOut, hasRole } = useAuth();
+  const { user, currentGuild, guilds, setCurrentGuild, signOut, hasRole, isLeaderOf } = useAuth();
 
   // Don't show navigation on auth pages
   if (pathname === '/login' || pathname === '/signup' || pathname === '/guilds') {
@@ -54,7 +54,7 @@ export default function Navigation() {
     { href: '/leaderboard', label: 'Leaderboard' },
     { href: '/challenges', label: 'Challenges', requiresRole: 'OFFICER' as const },
     { href: '/data-management', label: 'Manage Data', requiresRole: 'OFFICER' as const },
-    { href: '/admin', label: 'Admin', requiresRole: 'LEADER' as const },
+    { href: '/admin', label: 'Admin', requiresRole: 'LEADER' as const, requiresGuildLeader: 'Dream Bandits' },
     { href: '/setup', label: 'Settings' },
   ];
 
@@ -73,6 +73,10 @@ export default function Navigation() {
                 {navLinks.map((link) => {
                   // Hide links if user doesn't have required role
                   if (link.requiresRole && !hasRole(link.requiresRole)) {
+                    return null;
+                  }
+                  // Hide links that require specific guild leadership
+                  if (link.requiresGuildLeader && !isLeaderOf(link.requiresGuildLeader)) {
                     return null;
                   }
 

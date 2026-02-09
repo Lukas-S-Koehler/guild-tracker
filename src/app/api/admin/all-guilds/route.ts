@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, createAdminClient } from '@/lib/supabase-server';
-import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
+import { verifyGuildLeader, isErrorResponse } from '@/lib/auth-helpers';
 
 /**
  * GET /api/admin/all-guilds
  * Get overview of all guilds with their leadership
- * Only accessible to LEADER role
+ * Only accessible to Dream Bandits leader
  */
 export async function GET(req: NextRequest) {
-  // Verify user has LEADER role in at least one guild
-  const auth = await verifyAuth(req, 'LEADER');
+  // Verify user is the Dream Bandits leader
+  const auth = await verifyGuildLeader(req, 'Dream Bandits');
   if (isErrorResponse(auth)) return auth;
 
   const supabase = createServerClient(req);

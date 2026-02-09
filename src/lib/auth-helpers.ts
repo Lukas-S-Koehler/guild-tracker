@@ -103,6 +103,52 @@ export async function verifyAuth(
 }
 
 /**
+ * Verify the user is a LEADER of a specific guild (by name).
+ * Used for admin routes that should only be accessible to a specific guild's leader.
+ */
+export async function verifyGuildLeader(
+  request: Request,
+  guildName: string
+): Promise<AuthResult | NextResponse> {
+  // First verify the user is authenticated and has LEADER role in their current guild
+  const auth = await verifyAuth(request, 'LEADER');
+  if (isErrorResponse(auth)) return auth;
+
+  const supabase = createServerClient(request);
+
+  // Check if the user is a LEADER in the specified guild
+  const { data: guild } = await supabase
+    .from('guilds')
+    .select('id')
+    .eq('name', guildName)
+    .single();
+
+  if (!guild) {
+    return NextResponse.json(
+      { error: `Guild "${guildName}" not found` },
+      { status: 500 }
+    );
+  }
+
+  const { data: membership } = await supabase
+    .from('guild_leaders')
+    .select('role')
+    .eq('user_id', auth.user.id)
+    .eq('guild_id', guild.id)
+    .eq('role', 'LEADER')
+    .single();
+
+  if (!membership) {
+    return NextResponse.json(
+      { error: `Forbidden - Only the ${guildName} leader can access this` },
+      { status: 403 }
+    );
+  }
+
+  return auth;
+}
+
+/**
  * Helper to check if a value is a NextResponse (error response)
  */
 export function isErrorResponse(value: AuthResult | NextResponse): value is NextResponse {

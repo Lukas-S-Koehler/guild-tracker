@@ -8,10 +8,11 @@ import { Loader2 } from 'lucide-react';
 interface ProtectedRouteProps {
   children: React.ReactNode;
   requiredRole?: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER';
+  requiredGuildLeader?: string;
 }
 
-export default function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
-  const { user, loading, currentGuild, guilds, hasRole, signOut } = useAuth();
+export default function ProtectedRoute({ children, requiredRole, requiredGuildLeader }: ProtectedRouteProps) {
+  const { user, loading, currentGuild, guilds, hasRole, isLeaderOf, signOut } = useAuth();
   const router = useRouter();
   const [isRedirecting, setIsRedirecting] = useState(false);
 
@@ -40,10 +41,16 @@ export default function ProtectedRoute({ children, requiredRole }: ProtectedRout
     // Check role requirement
     if (requiredRole && !hasRole(requiredRole)) {
       setIsRedirecting(true);
-      // Redirect to home if insufficient permissions
+      router.push('/');
+      return;
+    }
+
+    // Check specific guild leader requirement
+    if (requiredGuildLeader && !isLeaderOf(requiredGuildLeader)) {
+      setIsRedirecting(true);
       router.push('/');
     }
-  }, [user, loading, currentGuild, guilds, requiredRole, hasRole, router]);
+  }, [user, loading, currentGuild, guilds, requiredRole, requiredGuildLeader, hasRole, isLeaderOf, router]);
 
   // Show loading state
   if (loading || isRedirecting) {
@@ -98,6 +105,20 @@ export default function ProtectedRoute({ children, requiredRole }: ProtectedRout
           <h1 className="text-2xl font-bold">Access Denied</h1>
           <p className="text-muted-foreground">
             You need {requiredRole} permissions to access this page.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Check specific guild leader requirement
+  if (requiredGuildLeader && !isLeaderOf(requiredGuildLeader)) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <h1 className="text-2xl font-bold">Access Denied</h1>
+          <p className="text-muted-foreground">
+            Only the {requiredGuildLeader} leader can access this page.
           </p>
         </div>
       </div>

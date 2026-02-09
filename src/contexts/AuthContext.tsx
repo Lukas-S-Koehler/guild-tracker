@@ -21,6 +21,7 @@ interface AuthContextType {
   signUp: (email: string, password: string, displayName?: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   hasRole: (requiredRole: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER') => boolean;
+  isLeaderOf: (guildName: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -338,6 +339,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return userRoleLevel >= requiredRoleLevel;
   };
 
+  const isLeaderOf = (guildName: string) => {
+    return guilds.some(g => g.guild_name === guildName && g.role === 'LEADER');
+  };
+
   const value = {
     user,
     loading: loading || isLoadingGuilds, // Include guild loading in overall loading state
@@ -348,6 +353,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signUp,
     signOut,
     hasRole,
+    isLeaderOf,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

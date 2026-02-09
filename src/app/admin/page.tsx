@@ -446,7 +446,7 @@ function AdminPageContent() {
 
 export default function AdminPage() {
   return (
-    <ProtectedRoute requiredRole="LEADER">
+    <ProtectedRoute requiredRole="LEADER" requiredGuildLeader="Dream Bandits">
       <AdminPageContent />
     </ProtectedRoute>
   );
