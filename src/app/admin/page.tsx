@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, UserPlus, Trash2, Shield, Crown, Users, AlertCircle, Check, ChevronDown, ChevronRight } from 'lucide-react';
+import { Loader2, UserPlus, Trash2, Shield, Crown, Users, AlertCircle, Check, ChevronDown, ChevronRight, Settings, RefreshCw, History } from 'lucide-react';
 import { useApiClient } from '@/lib/api-client';
 import ProtectedRoute from '@/components/ProtectedRoute';
 
@@ -31,6 +31,211 @@ interface Guild {
   member_count: number;
 }
 
+interface GuildSettings {
+  api_key: string;
+  donation_requirement: number;
+  active_buildings: string[];
+}
+
+interface Building {
+  id: string;
+  name: string;
+}
+
+function GuildSettingsSection({ guildId, guildName }: { guildId: string; guildName: string }) {
+  const api = useApiClient();
+  const [settings, setSettings] = useState<GuildSettings>({ api_key: '', donation_requirement: 5000, active_buildings: [] });
+  const [buildings, setBuildings] = useState<Building[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      try {
+        const [configRes, buildingsRes] = await Promise.all([
+          api.get('/api/config', { guildId }),
+          api.get('/api/guild-buildings', { guildId }),
+        ]);
+
+        if (configRes.ok) {
+          const data = await configRes.json();
+          setSettings({
+            api_key: data.api_key || '',
+            donation_requirement: data.donation_requirement || 5000,
+            active_buildings: data.settings?.active_buildings || [],
+          });
+        }
+
+        if (buildingsRes.ok) {
+          const data = await buildingsRes.json();
+          setBuildings(Array.isArray(data) ? data : []);
+        }
+      } catch {
+        // ignore
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [api, guildId]);
+
+  const showMsg = (type: 'success' | 'error', text: string) => {
+    setMessage({ type, text });
+    setTimeout(() => setMessage(null), 4000);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await api.post('/api/config', {
+        guild_name: guildName,
+        guild_id: guildId,
+        api_key: settings.api_key || 'placeholder',
+        donation_requirement: settings.donation_requirement,
+        settings: {
+          donation_requirement: settings.donation_requirement,
+          active_buildings: settings.active_buildings,
+        },
+      }, { guildId });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to save');
+      }
+      showMsg('success', 'Settings saved');
+    } catch (err) {
+      showMsg('error', err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSyncMembers = async () => {
+    setSyncing(true);
+    try {
+      const res = await api.post('/api/members/sync', {}, { guildId });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Sync failed');
+      }
+      const data = await res.json();
+      showMsg('success', `Synced ${data.synced} members`);
+    } catch (err) {
+      showMsg('error', err instanceof Error ? err.message : 'Sync failed');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleBackfill = async () => {
+    if (!confirm(`Fetch 90 days of history for ${guildName}? This may take a few minutes.`)) return;
+    setBackfilling(true);
+    try {
+      const res = await api.post('/api/admin/backfill', { guild_id: guildId, days: 90 });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Backfill request failed');
+      }
+      const data = await res.json();
+      showMsg('success', `Backfill complete: ${data.stored ?? 0} events stored, ${data.processed ?? 0} member-days processed`);
+    } catch (err) {
+      showMsg('error', err instanceof Error ? err.message : 'Backfill failed');
+    } finally {
+      setBackfilling(false);
+    }
+  };
+
+  const toggleBuilding = (buildingId: string) => {
+    setSettings(prev => ({
+      ...prev,
+      active_buildings: prev.active_buildings.includes(buildingId)
+        ? prev.active_buildings.filter(id => id !== buildingId)
+        : [...prev.active_buildings, buildingId],
+    }));
+  };
+
+  if (loading) {
+    return <div className="py-4 flex justify-center"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
+  }
+
+  return (
+    <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
+      <h3 className="font-semibold flex items-center gap-2 text-sm">
+        <Settings className="h-4 w-4" />
+        Guild Settings
+      </h3>
+
+      {message && (
+        <div className={`flex items-center gap-2 p-2 rounded text-sm ${message.type === 'success' ? 'bg-green-500/10 text-green-600' : 'bg-destructive/10 text-destructive'}`}>
+          {message.type === 'success' ? <Check className="h-3 w-3" /> : <AlertCircle className="h-3 w-3" />}
+          {message.text}
+        </div>
+      )}
+
+      <div className="grid gap-3">
+        <div>
+          <Label className="text-xs text-muted-foreground">IdleMMO API Key (for automated fetching)</Label>
+          <Input
+            type="password"
+            value={settings.api_key}
+            onChange={e => setSettings(prev => ({ ...prev, api_key: e.target.value }))}
+            placeholder="Enter API key..."
+            className="mt-1"
+          />
+        </div>
+
+        <div>
+          <Label className="text-xs text-muted-foreground">Donation Requirement (gold)</Label>
+          <Input
+            type="number"
+            value={settings.donation_requirement}
+            onChange={e => setSettings(prev => ({ ...prev, donation_requirement: parseInt(e.target.value) || 5000 }))}
+            className="mt-1 w-40"
+          />
+        </div>
+
+        {buildings.length > 0 && (
+          <div>
+            <Label className="text-xs text-muted-foreground">Active Buildings (valid deposit items)</Label>
+            <div className="mt-1 grid grid-cols-2 gap-2">
+              {buildings.map(b => (
+                <label key={b.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.active_buildings.includes(b.id)}
+                    onChange={() => toggleBuilding(b.id)}
+                    className="rounded"
+                  />
+                  {b.name}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-wrap gap-2 pt-2">
+        <Button size="sm" onClick={handleSave} disabled={saving}>
+          {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+          Save Settings
+        </Button>
+        <Button size="sm" variant="outline" onClick={handleSyncMembers} disabled={syncing}>
+          {syncing ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+          Sync Members
+        </Button>
+        <Button size="sm" variant="outline" onClick={handleBackfill} disabled={backfilling}>
+          {backfilling ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <History className="h-3 w-3 mr-1" />}
+          Backfill 90 Days
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function AdminPageContent() {
   const api = useApiClient();
   const [guilds, setGuilds] = useState<Guild[]>([]);
@@ -38,6 +243,7 @@ function AdminPageContent() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [expandedGuild, setExpandedGuild] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState<string | null>(null);
 
   // Add user form state
   const [addingToGuild, setAddingToGuild] = useState<string | null>(null);
@@ -45,11 +251,7 @@ function AdminPageContent() {
   const [newUserRole, setNewUserRole] = useState<'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER'>('MEMBER');
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    fetchGuilds();
-  }, [api]);
-
-  async function fetchGuilds() {
+  const fetchGuilds = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api.get('/api/admin/all-guilds');
@@ -60,12 +262,15 @@ function AdminPageContent() {
       const data = await res.json();
       setGuilds(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error('Failed to fetch guilds:', err);
       setError(err instanceof Error ? err.message : 'Failed to load guilds');
     } finally {
       setLoading(false);
     }
-  }
+  }, [api]);
+
+  useEffect(() => {
+    fetchGuilds();
+  }, [fetchGuilds]);
 
   const handleAddUser = async (guildId: string) => {
     if (!newUserEmail) {
@@ -85,17 +290,12 @@ function AdminPageContent() {
       });
 
       const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to add user');
-      }
+      if (!res.ok) throw new Error(data.error || 'Failed to add user');
 
       setSuccess(`Successfully added ${newUserEmail} to guild`);
       setNewUserEmail('');
       setNewUserRole('MEMBER');
       setAddingToGuild(null);
-
-      // Refresh guilds
       await fetchGuilds();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add user');
@@ -107,20 +307,14 @@ function AdminPageContent() {
   const handleUpdateRole = async (guildId: string, userId: string, newRole: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER') => {
     setError(null);
     setSuccess(null);
-
     try {
       const res = await api.patch('/api/admin/guild-users', {
         user_id: userId,
         role: newRole,
         target_guild_id: guildId,
       });
-
       const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to update role');
-      }
-
+      if (!res.ok) throw new Error(data.error || 'Failed to update role');
       setSuccess('Role updated successfully');
       await fetchGuilds();
     } catch (err) {
@@ -129,21 +323,13 @@ function AdminPageContent() {
   };
 
   const handleRemoveUser = async (guildId: string, userId: string, email: string) => {
-    if (!confirm(`Remove ${email} from this guild?`)) {
-      return;
-    }
-
+    if (!confirm(`Remove ${email} from this guild?`)) return;
     setError(null);
     setSuccess(null);
-
     try {
       const res = await api.delete(`/api/admin/guild-users?user_id=${userId}&target_guild_id=${guildId}`);
       const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to remove user');
-      }
-
+      if (!res.ok) throw new Error(data.error || 'Failed to remove user');
       setSuccess(`Removed ${email} from guild`);
       await fetchGuilds();
     } catch (err) {
@@ -172,9 +358,7 @@ function AdminPageContent() {
     <div className="max-w-7xl mx-auto space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Leadership Management</h1>
-        <p className="text-muted-foreground">
-          Manage leadership across all Dream guilds
-        </p>
+        <p className="text-muted-foreground">Manage leadership and settings across all Dream guilds</p>
       </div>
 
       {error && (
@@ -222,7 +406,6 @@ function AdminPageContent() {
                 </div>
 
                 <div className="flex items-center gap-4">
-                  {/* Leader */}
                   <div className="text-right">
                     <p className="text-xs text-muted-foreground">Leader</p>
                     {guild.leader ? (
@@ -235,7 +418,6 @@ function AdminPageContent() {
                     )}
                   </div>
 
-                  {/* Deputy */}
                   <div className="text-right">
                     <p className="text-xs text-muted-foreground">Deputy</p>
                     {guild.deputy ? (
@@ -248,20 +430,29 @@ function AdminPageContent() {
                     )}
                   </div>
 
-                  {/* Officers */}
                   <div className="text-right">
                     <p className="text-xs text-muted-foreground">Officers</p>
                     <p className="text-sm font-medium">{guild.officers.length}</p>
                   </div>
 
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setAddingToGuild(addingToGuild === guild.id ? null : guild.id)}
-                  >
-                    <UserPlus className="h-4 w-4 mr-2" />
-                    Add User
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setShowSettings(showSettings === guild.id ? null : guild.id)}
+                    >
+                      <Settings className="h-4 w-4 mr-2" />
+                      Settings
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setAddingToGuild(addingToGuild === guild.id ? null : guild.id)}
+                    >
+                      <UserPlus className="h-4 w-4 mr-2" />
+                      Add User
+                    </Button>
+                  </div>
                 </div>
               </div>
 
@@ -300,24 +491,20 @@ function AdminPageContent() {
                     </div>
                   </div>
                   <div className="flex gap-2 mt-3">
-                    <Button
-                      size="sm"
-                      onClick={() => handleAddUser(guild.id)}
-                      disabled={submitting}
-                    >
+                    <Button size="sm" onClick={() => handleAddUser(guild.id)} disabled={submitting}>
                       {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add'}
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        setAddingToGuild(null);
-                        setNewUserEmail('');
-                      }}
-                    >
+                    <Button size="sm" variant="ghost" onClick={() => { setAddingToGuild(null); setNewUserEmail(''); }}>
                       Cancel
                     </Button>
                   </div>
+                </div>
+              )}
+
+              {/* Guild Settings */}
+              {showSettings === guild.id && (
+                <div className="mt-4">
+                  <GuildSettingsSection guildId={guild.id} guildName={guild.name} />
                 </div>
               )}
             </CardHeader>
@@ -352,28 +539,16 @@ function AdminPageContent() {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="MEMBER">
-                                <div className="flex items-center gap-2">
-                                  <Users className="h-4 w-4" />
-                                  Member
-                                </div>
+                                <div className="flex items-center gap-2"><Users className="h-4 w-4" />Member</div>
                               </SelectItem>
                               <SelectItem value="OFFICER">
-                                <div className="flex items-center gap-2">
-                                  <Shield className="h-4 w-4 text-blue-500" />
-                                  Officer
-                                </div>
+                                <div className="flex items-center gap-2"><Shield className="h-4 w-4 text-blue-500" />Officer</div>
                               </SelectItem>
                               <SelectItem value="DEPUTY">
-                                <div className="flex items-center gap-2">
-                                  <Shield className="h-4 w-4 text-purple-500" />
-                                  Deputy
-                                </div>
+                                <div className="flex items-center gap-2"><Shield className="h-4 w-4 text-purple-500" />Deputy</div>
                               </SelectItem>
                               <SelectItem value="LEADER">
-                                <div className="flex items-center gap-2">
-                                  <Crown className="h-4 w-4 text-yellow-500" />
-                                  Leader
-                                </div>
+                                <div className="flex items-center gap-2"><Crown className="h-4 w-4 text-yellow-500" />Leader</div>
                               </SelectItem>
                             </SelectContent>
                           </Select>
@@ -396,7 +571,6 @@ function AdminPageContent() {
         ))}
       </div>
 
-      {/* Role Descriptions */}
       <Card>
         <CardHeader>
           <CardTitle>Role Permissions</CardTitle>
@@ -406,36 +580,28 @@ function AdminPageContent() {
             <Crown className="h-5 w-5 text-yellow-500 mt-0.5" />
             <div>
               <p className="font-medium">Leader</p>
-              <p className="text-sm text-muted-foreground">
-                Full access - can manage settings, members, leadership, and all guild features
-              </p>
+              <p className="text-sm text-muted-foreground">Full access — manage settings, members, leadership, and all guild features</p>
             </div>
           </div>
           <div className="flex items-start gap-2">
             <Shield className="h-5 w-5 text-purple-500 mt-0.5" />
             <div>
               <p className="font-medium">Deputy</p>
-              <p className="text-sm text-muted-foreground">
-                Can process activity logs, manage challenges, configure settings, and view reports (cannot manage leadership)
-              </p>
+              <p className="text-sm text-muted-foreground">Can trigger activity fetches, manage challenges, configure settings, and view reports</p>
             </div>
           </div>
           <div className="flex items-start gap-2">
             <Shield className="h-5 w-5 text-blue-500 mt-0.5" />
             <div>
               <p className="font-medium">Officer</p>
-              <p className="text-sm text-muted-foreground">
-                Can process activity logs, manage challenges, and view reports
-              </p>
+              <p className="text-sm text-muted-foreground">Can trigger activity fetches, manage challenges, and view reports</p>
             </div>
           </div>
           <div className="flex items-start gap-2">
             <Users className="h-5 w-5 text-gray-500 mt-0.5" />
             <div>
               <p className="font-medium">Member</p>
-              <p className="text-sm text-muted-foreground">
-                Can view leaderboard, members, and reports
-              </p>
+              <p className="text-sm text-muted-foreground">Can view leaderboard, members, and reports</p>
             </div>
           </div>
         </CardContent>

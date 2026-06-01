@@ -157,10 +157,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             console.error('[AuthContext] Error fetching guilds:', fetchError);
             if (mounted) setGuilds([]);
           } finally {
-            if (mounted) {
-              setIsLoadingGuilds(false);
-              loadingGuildsRef = false;
-            }
+            // Always clear loading state — even if unmounted, stuck isLoadingGuilds causes infinite spinner
+            setIsLoadingGuilds(false);
+            loadingGuildsRef = false;
           }
         } else if (!currentUser) {
           // Not logged in
@@ -279,10 +278,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             console.error('[AuthContext] Error fetching guilds:', fetchError);
             if (mounted) setGuilds([]);
           } finally {
-            if (mounted) {
-              setIsLoadingGuilds(false);
-              loadingGuildsRef = false;
-            }
+            // Always clear loading — stuck isLoadingGuilds causes infinite spinner
+            setIsLoadingGuilds(false);
+            loadingGuildsRef = false;
           }
         }
       }

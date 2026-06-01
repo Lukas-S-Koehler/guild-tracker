@@ -1,5 +1,44 @@
 const IDLEMMO_BASE_URL = 'https://api.idle-mmo.com';
 
+export interface ActivityEventCharacter {
+  hashed_id: string;
+  name: string;
+  avatar_url: string | null;
+}
+
+export interface ActivityEventItem {
+  hashed_id: string;
+  name: string;
+  image_url: string | null;
+  quality: string;
+}
+
+export interface ActivityEventGuildItem {
+  id: number;
+  key: string;
+  name: string;
+  image_url: string | null;
+}
+
+export interface ActivityEvent {
+  id: number;
+  type: string;
+  character: ActivityEventCharacter | null;
+  text: string;
+  value: number | null;
+  item: ActivityEventItem | null;
+  guild_item: ActivityEventGuildItem | null;
+  created_at: string;
+  created_ago: string;
+}
+
+interface GuildActivityResponse {
+  guild: { id: number; name: string };
+  activity: ActivityEvent[];
+  pagination: { current_page: number; has_more: boolean; next_page: number | null };
+  endpoint_updates_at: string;
+}
+
 interface SearchItem {
   hashed_id: string;
   name: string;
@@ -104,10 +143,44 @@ export class IdleMMOApi {
     for (const itemName of itemNames) {
       const { price } = await this.getItemPrice(itemName);
       prices[itemName] = price;
-      // Small delay to avoid rate limiting
       await new Promise(resolve => setTimeout(resolve, 100));
     }
 
     return prices;
+  }
+
+  async getGuildActivity(guildId: string, page = 1): Promise<GuildActivityResponse> {
+    const url = `${IDLEMMO_BASE_URL}/v1/guild/${guildId}/activity?page=${page}`;
+    return this.fetch<GuildActivityResponse>(url);
+  }
+
+  async getAllGuildActivitySince(guildId: string, sinceDate: Date): Promise<ActivityEvent[]> {
+    const allEvents: ActivityEvent[] = [];
+    let page = 1;
+
+    while (true) {
+      const response = await this.getGuildActivity(guildId, page);
+      const events = response.activity;
+
+      if (!events || events.length === 0) break;
+
+      let reachedCutoff = false;
+      for (const event of events) {
+        const eventDate = new Date(event.created_at);
+        if (eventDate < sinceDate) {
+          reachedCutoff = true;
+          break;
+        }
+        allEvents.push(event);
+      }
+
+      if (reachedCutoff || !response.pagination.has_more) break;
+
+      page++;
+      // Avoid rate limiting between pages
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+
+    return allEvents;
   }
 }
