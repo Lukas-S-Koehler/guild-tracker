@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
-import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
+import { verifyAnyGuildAccess, isErrorResponse } from '@/lib/auth-helpers';
 
 /**
  * GET /api/members/activity-history?member_id=xxx
- * Returns last 7 days of activity for a member with gold donated and % of challenge
+ * Returns last 7 days of activity for a member (any authenticated guild member can view)
  */
 export async function GET(req: NextRequest) {
-  // Verify authentication (members can view)
-  const auth = await verifyAuth(req, 'MEMBER');
+  const auth = await verifyAnyGuildAccess(req);
   if (isErrorResponse(auth)) return auth;
 
   const { guildId } = auth;

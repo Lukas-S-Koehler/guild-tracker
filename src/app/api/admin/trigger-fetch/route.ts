@@ -48,6 +48,17 @@ export async function POST(req: NextRequest) {
       config.api_key
     );
 
+    // Record last_fetched_at in settings
+    const { data: existingConfig } = await adminSupabase
+      .from('guild_config')
+      .select('settings')
+      .eq('guild_id', guildId)
+      .single();
+    await adminSupabase
+      .from('guild_config')
+      .update({ settings: { ...(existingConfig?.settings || {}), last_fetched_at: new Date().toISOString() } })
+      .eq('guild_id', guildId);
+
     return NextResponse.json({ success: true, stored, processed, joins, leaves });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });

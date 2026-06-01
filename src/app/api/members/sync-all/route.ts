@@ -152,6 +152,17 @@ export async function POST(req: NextRequest) {
             member_count: members.length,
           });
           totalSynced += members.length;
+
+          // Update last_member_synced_at
+          const { data: existingConfig } = await supabase
+            .from('guild_config')
+            .select('settings')
+            .eq('guild_id', guild.id)
+            .single();
+          await supabase
+            .from('guild_config')
+            .update({ settings: { ...(existingConfig?.settings || {}), last_member_synced_at: new Date().toISOString() } })
+            .eq('guild_id', guild.id);
         }
 
         // Small delay to avoid rate limiting

@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 
+export const SUPER_ADMIN_EMAIL = 'motivationluki@gmail.com';
+
 export interface AuthResult {
   user: { id: string; email?: string };
   guildId: string;
   role: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER';
+  isSuperAdmin?: boolean;
 }
 
 /**
@@ -146,6 +149,81 @@ export async function verifyGuildLeader(
   }
 
   return auth;
+}
+
+/**
+ * Verify user is super admin (motivationluki@gmail.com) OR a LEADER of the requested guild.
+ * Returns isSuperAdmin=true if super admin.
+ */
+export async function verifyAdminOrLeader(
+  request: Request
+): Promise<(AuthResult & { isSuperAdmin: boolean }) | NextResponse> {
+  const supabase = createServerClient(request);
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) {
+    return NextResponse.json({ error: 'Unauthorized - Please sign in' }, { status: 401 });
+  }
+
+  const isSuperAdmin = user.email === SUPER_ADMIN_EMAIL;
+  const guildId = request.headers.get('x-guild-id') || '';
+
+  if (isSuperAdmin) {
+    return { user: { id: user.id, email: user.email }, guildId, role: 'LEADER', isSuperAdmin: true };
+  }
+
+  if (!guildId) {
+    return NextResponse.json({ error: 'Bad Request - No guild selected' }, { status: 400 });
+  }
+
+  const { data: membership } = await supabase
+    .from('guild_leaders')
+    .select('role')
+    .eq('user_id', user.id)
+    .eq('guild_id', guildId)
+    .single();
+
+  if (!membership || membership.role !== 'LEADER') {
+    return NextResponse.json({ error: 'Forbidden - Admin or guild leader required' }, { status: 403 });
+  }
+
+  return { user: { id: user.id, email: user.email }, guildId, role: 'LEADER', isSuperAdmin: false };
+}
+
+/**
+ * Verify user is authenticated and belongs to at least one guild.
+ * Allows viewing any guild's data — does NOT require membership in the requested guild.
+ * Use for cross-guild read endpoints (activity, members).
+ */
+export async function verifyAnyGuildAccess(
+  request: Request
+): Promise<AuthResult | NextResponse> {
+  const supabase = createServerClient(request);
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) {
+    return NextResponse.json({ error: 'Unauthorized - Please sign in' }, { status: 401 });
+  }
+
+  const guildId = request.headers.get('x-guild-id');
+  if (!guildId) {
+    return NextResponse.json({ error: 'Bad Request - No guild selected' }, { status: 400 });
+  }
+
+  const { data: membership } = await supabase
+    .from('guild_leaders')
+    .select('role')
+    .eq('user_id', user.id)
+    .limit(1)
+    .maybeSingle();
+
+  if (!membership) {
+    return NextResponse.json({ error: 'Forbidden - No guild access' }, { status: 403 });
+  }
+
+  return {
+    user: { id: user.id, email: user.email },
+    guildId,
+    role: membership.role as 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER',
+  };
 }
 
 /**

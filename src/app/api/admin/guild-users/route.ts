@@ -1,57 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
-import { verifyGuildLeader, isErrorResponse } from '@/lib/auth-helpers';
-
-/**
- * GET /api/admin/guild-users
- * List all users who have access to the current guild
- */
-export async function GET(req: NextRequest) {
-  const auth = await verifyGuildLeader(req, 'Dream Bandits');
-  if (isErrorResponse(auth)) return auth;
-
-  const { guildId } = auth;
-  const supabase = createServerClient(req);
-
-  // Get all users in this guild with their details
-  const { data: guildUsers, error } = await supabase
-    .from('guild_leaders')
-    .select(`
-      user_id,
-      role,
-      joined_at,
-      users:user_id (
-        email,
-        raw_user_meta_data
-      )
-    `)
-    .eq('guild_id', guildId)
-    .order('joined_at', { ascending: true });
-
-  if (error) {
-    console.error('[Admin] Error fetching guild users:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  // Format the response
-  const formattedUsers = guildUsers?.map((gu: any) => ({
-    user_id: gu.user_id,
-    email: gu.users?.email || 'Unknown',
-    display_name: gu.users?.raw_user_meta_data?.display_name || gu.users?.email?.split('@')[0] || 'Unknown',
-    role: gu.role,
-    joined_at: gu.joined_at,
-  })) || [];
-
-  return NextResponse.json(formattedUsers);
-}
+import { verifyAdminOrLeader, isErrorResponse } from '@/lib/auth-helpers';
 
 /**
  * POST /api/admin/guild-users
- * Add a user to any guild (by email)
- * Requires target_guild_id in body to specify which guild to add to
+ * Add a user to a guild by email or user_id.
+ * Super admin: can assign any role including LEADER.
+ * Guild leader: can only assign DEPUTY or OFFICER to their own guild.
  */
 export async function POST(req: NextRequest) {
-  const auth = await verifyGuildLeader(req, 'Dream Bandits');
+  const auth = await verifyAdminOrLeader(req);
   if (isErrorResponse(auth)) return auth;
 
   const supabase = createServerClient(req);
@@ -72,34 +30,40 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
     }
 
+    // Non-super-admin leaders can only manage their own guild and cannot assign LEADER
+    if (!auth.isSuperAdmin) {
+      if (target_guild_id !== auth.guildId) {
+        return NextResponse.json({ error: 'Forbidden - You can only manage your own guild' }, { status: 403 });
+      }
+      if (role === 'LEADER') {
+        return NextResponse.json({ error: 'Forbidden - Only super admin can assign LEADER role' }, { status: 403 });
+      }
+    }
+
     let userId: string;
 
     if (user_id) {
-      // If user_id is provided directly, use it
       userId = user_id;
     } else {
-      // Try to find user by email using auth.users (requires RPC or service role)
-      // For now, we'll use a workaround with a database function
       const { data: foundUsers, error: rpcError } = await supabase
         .rpc('find_user_by_email', { search_email: email.toLowerCase() });
 
       if (rpcError) {
         console.error('[Admin] Error finding user:', rpcError);
         return NextResponse.json({
-          error: 'Could not find user. Please ask them to provide their user ID from their profile, or contact support.'
+          error: 'Could not search for user. Please ask them to provide their user ID from their profile.',
         }, { status: 500 });
       }
 
       if (!foundUsers || foundUsers.length === 0) {
         return NextResponse.json({
-          error: 'User not found. They need to sign up first at /signup'
+          error: 'User not found. They need to sign up first at /signup',
         }, { status: 404 });
       }
 
       userId = foundUsers[0].id;
     }
 
-    // Check if user is already in this guild
     const { data: existing } = await supabase
       .from('guild_leaders')
       .select('id')
@@ -108,29 +72,19 @@ export async function POST(req: NextRequest) {
       .limit(1);
 
     if (existing && existing.length > 0) {
-      return NextResponse.json({
-        error: 'User is already a member of this guild'
-      }, { status: 400 });
+      return NextResponse.json({ error: 'User is already a member of this guild' }, { status: 400 });
     }
 
-    // Add user to guild
     const { error: insertError } = await supabase
       .from('guild_leaders')
-      .insert({
-        guild_id: target_guild_id,
-        user_id: userId,
-        role: role,
-      });
+      .insert({ guild_id: target_guild_id, user_id: userId, role });
 
     if (insertError) {
       console.error('[Admin] Error adding user to guild:', insertError);
       return NextResponse.json({ error: 'Failed to add user to guild' }, { status: 500 });
     }
 
-    return NextResponse.json({
-      success: true,
-      message: `User ${email} added to guild with role ${role}`
-    });
+    return NextResponse.json({ success: true, message: `User added to guild with role ${role}` });
   } catch (error) {
     console.error('[Admin] Error processing request:', error);
     return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
@@ -139,11 +93,11 @@ export async function POST(req: NextRequest) {
 
 /**
  * PATCH /api/admin/guild-users
- * Update a user's role in any guild
- * Requires target_guild_id in body
+ * Update a user's role.
+ * Super admin: any role. Guild leader: DEPUTY/OFFICER only, own guild only.
  */
 export async function PATCH(req: NextRequest) {
-  const auth = await verifyGuildLeader(req, 'Dream Bandits');
+  const auth = await verifyAdminOrLeader(req);
   if (isErrorResponse(auth)) return auth;
 
   const supabase = createServerClient(req);
@@ -160,7 +114,15 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
     }
 
-    // Update user's role
+    if (!auth.isSuperAdmin) {
+      if (target_guild_id !== auth.guildId) {
+        return NextResponse.json({ error: 'Forbidden - You can only manage your own guild' }, { status: 403 });
+      }
+      if (role === 'LEADER') {
+        return NextResponse.json({ error: 'Forbidden - Only super admin can assign LEADER role' }, { status: 403 });
+      }
+    }
+
     const { error: updateError } = await supabase
       .from('guild_leaders')
       .update({ role })
@@ -172,10 +134,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to update user role' }, { status: 500 });
     }
 
-    return NextResponse.json({
-      success: true,
-      message: `User role updated to ${role}`
-    });
+    return NextResponse.json({ success: true, message: `User role updated to ${role}` });
   } catch (error) {
     console.error('[Admin] Error processing request:', error);
     return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
@@ -184,14 +143,13 @@ export async function PATCH(req: NextRequest) {
 
 /**
  * DELETE /api/admin/guild-users
- * Remove a user from any guild
- * Query params: user_id, target_guild_id
+ * Remove a user from a guild.
+ * Super admin: any guild. Guild leader: own guild only.
  */
 export async function DELETE(req: NextRequest) {
-  const auth = await verifyGuildLeader(req, 'Dream Bandits');
+  const auth = await verifyAdminOrLeader(req);
   if (isErrorResponse(auth)) return auth;
 
-  const { user } = auth;
   const supabase = createServerClient(req);
 
   try {
@@ -203,14 +161,14 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'user_id and target_guild_id are required' }, { status: 400 });
     }
 
-    // Prevent removing yourself
-    if (userIdToRemove === user.id) {
-      return NextResponse.json({
-        error: 'Cannot remove yourself from the guild'
-      }, { status: 400 });
+    if (!auth.isSuperAdmin && targetGuildId !== auth.guildId) {
+      return NextResponse.json({ error: 'Forbidden - You can only manage your own guild' }, { status: 403 });
     }
 
-    // Remove user from guild
+    if (userIdToRemove === auth.user.id) {
+      return NextResponse.json({ error: 'Cannot remove yourself from the guild' }, { status: 400 });
+    }
+
     const { error: deleteError } = await supabase
       .from('guild_leaders')
       .delete()
@@ -222,10 +180,7 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to remove user from guild' }, { status: 500 });
     }
 
-    return NextResponse.json({
-      success: true,
-      message: 'User removed from guild'
-    });
+    return NextResponse.json({ success: true, message: 'User removed from guild' });
   } catch (error) {
     console.error('[Admin] Error processing request:', error);
     return NextResponse.json({ error: 'Invalid request' }, { status: 400 });

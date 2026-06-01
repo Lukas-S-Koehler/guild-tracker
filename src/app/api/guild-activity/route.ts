@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
-import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
+import { verifyAnyGuildAccess, isErrorResponse } from '@/lib/auth-helpers';
 
 // GET /api/guild-activity?date=YYYY-MM-DD
-// Returns processed daily activity for the current guild and date
+// Returns processed daily activity for any guild (any authenticated guild member can view)
 export async function GET(req: NextRequest) {
-  const auth = await verifyAuth(req, 'MEMBER');
+  const auth = await verifyAnyGuildAccess(req);
   if (isErrorResponse(auth)) return auth;
 
   const { guildId } = auth;

@@ -11,12 +11,21 @@ interface GuildMembership {
   joined_at: string;
 }
 
+const SUPER_ADMIN_EMAIL = 'motivationluki@gmail.com';
+
+const ROLE_PRIORITY: Record<string, number> = { LEADER: 3, DEPUTY: 2, OFFICER: 1, MEMBER: 0 };
+
+function sortGuildsByRole(guilds: GuildMembership[]): GuildMembership[] {
+  return [...guilds].sort((a, b) => (ROLE_PRIORITY[b.role] ?? 0) - (ROLE_PRIORITY[a.role] ?? 0));
+}
+
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   guilds: GuildMembership[];
   currentGuild: GuildMembership | null;
   setCurrentGuild: (guild: GuildMembership | null) => void;
+  isSuperAdmin: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string, displayName?: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
@@ -138,15 +147,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 joined_at: g.joined_at,
               }));
 
-              setGuilds(transformedGuilds);
-              hasLoadedInitialGuilds.current = true; // Mark that we've loaded guilds
+              const sortedGuilds = sortGuildsByRole(transformedGuilds);
+              setGuilds(sortedGuilds);
+              hasLoadedInitialGuilds.current = true;
 
-              // Try to restore current guild from localStorage
+              // Default to saved guild or highest-role guild
               const savedGuildId = localStorage.getItem('currentGuildId');
-              const savedGuild = transformedGuilds.find((g) => g.guild_id === savedGuildId);
-
-              // Set current guild to saved guild or first available guild
-              setCurrentGuildState(savedGuild || transformedGuilds[0]);
+              const savedGuild = sortedGuilds.find((g) => g.guild_id === savedGuildId);
+              setCurrentGuildState(savedGuild || sortedGuilds[0]);
             } else {
               console.log('[AuthContext] No guilds found for user');
               // No guilds found
@@ -341,12 +349,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return guilds.some(g => g.guild_name === guildName && g.role === 'LEADER');
   };
 
+  const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
+
   const value = {
     user,
-    loading: loading || isLoadingGuilds, // Include guild loading in overall loading state
+    loading: loading || isLoadingGuilds,
     guilds,
     currentGuild,
     setCurrentGuild,
+    isSuperAdmin,
     signIn,
     signUp,
     signOut,

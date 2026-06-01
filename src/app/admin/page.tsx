@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, UserPlus, Trash2, Shield, Crown, Users, AlertCircle, Check, ChevronDown, ChevronRight, Settings, RefreshCw, History } from 'lucide-react';
 import { useApiClient } from '@/lib/api-client';
+import { useAuth } from '@/contexts/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 
 interface GuildMember {
@@ -42,9 +43,14 @@ interface Building {
   name: string;
 }
 
-function GuildSettingsSection({ guildId, guildName }: { guildId: string; guildName: string }) {
+const BACKFILL_DISABLED_GUILDS = new Set(['111', '554', '1184', '292']);
+
+function GuildSettingsSection({ guildId, guildName, currentMinLevel }: { guildId: string; guildName: string; currentMinLevel: number }) {
   const api = useApiClient();
+  const { currentGuild, isSuperAdmin } = useAuth();
+  const isLeaderOfThisGuild = isSuperAdmin || currentGuild?.guild_id === guildId;
   const [settings, setSettings] = useState<GuildSettings>({ api_key: '', donation_requirement: 5000, active_buildings: [] });
+  const [minLevel, setMinLevel] = useState<number>(currentMinLevel);
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -91,20 +97,27 @@ function GuildSettingsSection({ guildId, guildName }: { guildId: string; guildNa
   const handleSave = async () => {
     setSaving(true);
     try {
-      const res = await api.post('/api/config', {
-        guild_name: guildName,
-        guild_id: guildId,
-        api_key: settings.api_key || 'placeholder',
-        donation_requirement: settings.donation_requirement,
-        settings: {
+      const [configRes, metaRes] = await Promise.all([
+        api.post('/api/config', {
+          guild_name: guildName,
+          guild_id: guildId,
+          api_key: settings.api_key || 'placeholder',
           donation_requirement: settings.donation_requirement,
-          active_buildings: settings.active_buildings,
-        },
-      }, { guildId });
+          settings: {
+            donation_requirement: settings.donation_requirement,
+            active_buildings: settings.active_buildings,
+          },
+        }, { guildId }),
+        api.patch('/api/admin/guild-meta', { guild_id: guildId, min_level: minLevel }, { guildId }),
+      ]);
 
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Failed to save');
+      if (!configRes.ok) {
+        const data = await configRes.json();
+        throw new Error(data.error || 'Failed to save config');
+      }
+      if (!metaRes.ok) {
+        const data = await metaRes.json();
+        throw new Error(data.error || 'Failed to save guild meta');
       }
       showMsg('success', 'Settings saved');
     } catch (err) {
@@ -177,16 +190,18 @@ function GuildSettingsSection({ guildId, guildName }: { guildId: string; guildNa
       )}
 
       <div className="grid gap-3">
-        <div>
-          <Label className="text-xs text-muted-foreground">IdleMMO API Key (for automated fetching)</Label>
-          <Input
-            type="password"
-            value={settings.api_key}
-            onChange={e => setSettings(prev => ({ ...prev, api_key: e.target.value }))}
-            placeholder="Enter API key..."
-            className="mt-1"
-          />
-        </div>
+        {isLeaderOfThisGuild && (
+          <div>
+            <Label className="text-xs text-muted-foreground">IdleMMO API Key (for automated fetching)</Label>
+            <Input
+              type="password"
+              value={settings.api_key}
+              onChange={e => setSettings(prev => ({ ...prev, api_key: e.target.value }))}
+              placeholder="Enter API key..."
+              className="mt-1"
+            />
+          </div>
+        )}
 
         <div>
           <Label className="text-xs text-muted-foreground">Donation Requirement (gold)</Label>
@@ -194,6 +209,16 @@ function GuildSettingsSection({ guildId, guildName }: { guildId: string; guildNa
             type="number"
             value={settings.donation_requirement}
             onChange={e => setSettings(prev => ({ ...prev, donation_requirement: parseInt(e.target.value) || 5000 }))}
+            className="mt-1 w-40"
+          />
+        </div>
+
+        <div>
+          <Label className="text-xs text-muted-foreground">Min Level Required</Label>
+          <Input
+            type="number"
+            value={minLevel}
+            onChange={e => setMinLevel(parseInt(e.target.value) || 0)}
             className="mt-1 w-40"
           />
         </div>
@@ -227,10 +252,12 @@ function GuildSettingsSection({ guildId, guildName }: { guildId: string; guildNa
           {syncing ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
           Sync Members
         </Button>
-        <Button size="sm" variant="outline" onClick={handleBackfill} disabled={backfilling}>
-          {backfilling ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <History className="h-3 w-3 mr-1" />}
-          Backfill 90 Days
-        </Button>
+        {!BACKFILL_DISABLED_GUILDS.has(guildId) && (
+          <Button size="sm" variant="outline" onClick={handleBackfill} disabled={backfilling}>
+            {backfilling ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <History className="h-3 w-3 mr-1" />}
+            Backfill 90 Days
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -238,6 +265,7 @@ function GuildSettingsSection({ guildId, guildName }: { guildId: string; guildNa
 
 function AdminPageContent() {
   const api = useApiClient();
+  const { isSuperAdmin } = useAuth();
   const [guilds, setGuilds] = useState<Guild[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -397,7 +425,7 @@ function AdminPageContent() {
                       <span className="font-mono font-bold text-primary">{guild.nickname}</span>
                       <span>-</span>
                       <span>{guild.name}</span>
-                      <span className="text-sm text-muted-foreground font-normal">(Level {guild.min_level}+)</span>
+                      <span className="text-sm text-muted-foreground font-normal">(ID: {guild.id})</span>
                     </CardTitle>
                     <CardDescription>
                       {guild.member_count} member{guild.member_count !== 1 ? 's' : ''}
@@ -485,7 +513,7 @@ function AdminPageContent() {
                           <SelectItem value="MEMBER">Member</SelectItem>
                           <SelectItem value="OFFICER">Officer</SelectItem>
                           <SelectItem value="DEPUTY">Deputy</SelectItem>
-                          <SelectItem value="LEADER">Leader</SelectItem>
+                          {isSuperAdmin && <SelectItem value="LEADER">Leader</SelectItem>}
                         </SelectContent>
                       </Select>
                     </div>
@@ -504,7 +532,7 @@ function AdminPageContent() {
               {/* Guild Settings */}
               {showSettings === guild.id && (
                 <div className="mt-4">
-                  <GuildSettingsSection guildId={guild.id} guildName={guild.name} />
+                  <GuildSettingsSection guildId={guild.id} guildName={guild.name} currentMinLevel={guild.min_level} />
                 </div>
               )}
             </CardHeader>
@@ -523,7 +551,6 @@ function AdminPageContent() {
                       >
                         <div className="flex-1">
                           <p className="font-medium">{member.display_name}</p>
-                          <p className="text-xs text-muted-foreground">{member.email}</p>
                         </div>
 
                         <div className="flex items-center gap-3">
@@ -547,9 +574,11 @@ function AdminPageContent() {
                               <SelectItem value="DEPUTY">
                                 <div className="flex items-center gap-2"><Shield className="h-4 w-4 text-purple-500" />Deputy</div>
                               </SelectItem>
-                              <SelectItem value="LEADER">
-                                <div className="flex items-center gap-2"><Crown className="h-4 w-4 text-yellow-500" />Leader</div>
-                              </SelectItem>
+                              {isSuperAdmin && (
+                                <SelectItem value="LEADER">
+                                  <div className="flex items-center gap-2"><Crown className="h-4 w-4 text-yellow-500" />Leader</div>
+                                </SelectItem>
+                              )}
                             </SelectContent>
                           </Select>
 
@@ -612,7 +641,7 @@ function AdminPageContent() {
 
 export default function AdminPage() {
   return (
-    <ProtectedRoute requiredRole="LEADER" requiredGuildLeader="Dream Bandits">
+    <ProtectedRoute requiredRole="LEADER">
       <AdminPageContent />
     </ProtectedRoute>
   );

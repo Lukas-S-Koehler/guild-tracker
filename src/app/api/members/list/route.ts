@@ -1,11 +1,10 @@
 // app/api/members/list/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
-import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
+import { verifyAnyGuildAccess, isErrorResponse } from '@/lib/auth-helpers';
 
 export async function GET(req: NextRequest) {
-  // Verify authentication and get guild context
-  const authResult = await verifyAuth(req);
+  const authResult = await verifyAnyGuildAccess(req);
   if (isErrorResponse(authResult)) return authResult;
   const { guildId } = authResult;
 

@@ -1,67 +1,62 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, createAdminClient } from '@/lib/supabase-server';
-import { verifyGuildLeader, isErrorResponse } from '@/lib/auth-helpers';
+import { verifyAdminOrLeader, isErrorResponse } from '@/lib/auth-helpers';
 
 /**
  * GET /api/admin/all-guilds
- * Get overview of all guilds with their leadership
- * Only accessible to Dream Bandits leader
+ * Super admin: returns all guilds.
+ * Guild leader: returns only guilds where they are LEADER.
  */
 export async function GET(req: NextRequest) {
-  // Verify user is the Dream Bandits leader
-  const auth = await verifyGuildLeader(req, 'Dream Bandits');
+  const auth = await verifyAdminOrLeader(req);
   if (isErrorResponse(auth)) return auth;
 
   const supabase = createServerClient(req);
-  const adminClient = createAdminClient(); // Use admin client for auth.admin operations
+  const adminClient = createAdminClient();
 
   try {
-    // Get all guilds
-    const { data: guilds, error: guildsError } = await supabase
-      .from('guilds')
-      .select('*')
-      .order('display_order', { ascending: true });
+    let guildsQuery = supabase.from('guilds').select('*').order('display_order', { ascending: true });
 
+    let guildMembersQuery = supabase.from('guild_leaders').select('guild_id, user_id, role, joined_at');
+
+    // Non-super-admin leaders only see guilds where they are LEADER
+    if (!auth.isSuperAdmin) {
+      const { data: leaderGuilds } = await supabase
+        .from('guild_leaders')
+        .select('guild_id')
+        .eq('user_id', auth.user.id)
+        .eq('role', 'LEADER');
+
+      const leaderGuildIds = leaderGuilds?.map((g: any) => g.guild_id) || [];
+      if (leaderGuildIds.length === 0) {
+        return NextResponse.json([]);
+      }
+      guildsQuery = guildsQuery.in('id', leaderGuildIds);
+      guildMembersQuery = guildMembersQuery.in('guild_id', leaderGuildIds);
+    }
+
+    const { data: guilds, error: guildsError } = await guildsQuery;
     if (guildsError) {
-      console.error('[Admin] Error fetching guilds:', guildsError);
       return NextResponse.json({ error: 'Failed to fetch guilds' }, { status: 500 });
     }
 
-    // Get all guild leaders - we'll fetch user details separately
-    const { data: guildMembersRaw, error: membersError } = await supabase
-      .from('guild_leaders')
-      .select('guild_id, user_id, role, joined_at');
-
+    const { data: guildMembersRaw, error: membersError } = await guildMembersQuery;
     if (membersError) {
-      console.error('[Admin] Error fetching guild members:', membersError);
       return NextResponse.json({ error: 'Failed to fetch members' }, { status: 500 });
     }
 
-    // Get unique user IDs
-    const userIds = Array.from(new Set(guildMembersRaw?.map(m => m.user_id) || []));
-
-    // Fetch user details from auth.users using ADMIN CLIENT
     const { data: { users }, error: usersError } = await adminClient.auth.admin.listUsers();
-
-    if (usersError) {
-      console.error('[Admin] Error fetching users:', usersError);
-      console.error('[Admin] Error details:', usersError);
-      // Continue without user details rather than failing completely
-    } else {
-      console.log('[Admin] Successfully fetched', users?.length || 0, 'users');
+    const userMap = new Map<string, any>();
+    if (!usersError) {
+      users?.forEach(user => {
+        userMap.set(user.id, {
+          email: user.email,
+          display_name: user.user_metadata?.display_name || user.email?.split('@')[0] || 'Unknown',
+        });
+      });
     }
 
-    // Create user lookup map
-    const userMap = new Map<string, any>();
-    users?.forEach(user => {
-      userMap.set(user.id, {
-        email: user.email,
-        display_name: user.user_metadata?.display_name || user.email?.split('@')[0] || 'Unknown',
-      });
-    });
-
-    // Combine guild members with user details
-    const guildMembers = guildMembersRaw?.map(member => {
+    const guildMembers = guildMembersRaw?.map((member: any) => {
       const userDetails = userMap.get(member.user_id);
       return {
         guild_id: member.guild_id,
@@ -73,7 +68,6 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    // Group members by guild
     const guildMemberMap = new Map<string, any[]>();
     guildMembers?.forEach((member: any) => {
       if (!guildMemberMap.has(member.guild_id)) {
@@ -88,13 +82,12 @@ export async function GET(req: NextRequest) {
       });
     });
 
-    // Combine guilds with their members
-    const guildsWithMembers = guilds?.map((guild) => ({
+    const guildsWithMembers = guilds?.map((guild: any) => ({
       ...guild,
       members: guildMemberMap.get(guild.id) || [],
-      leader: guildMemberMap.get(guild.id)?.find(m => m.role === 'LEADER'),
-      deputy: guildMemberMap.get(guild.id)?.find(m => m.role === 'DEPUTY'),
-      officers: guildMemberMap.get(guild.id)?.filter(m => m.role === 'OFFICER') || [],
+      leader: guildMemberMap.get(guild.id)?.find((m: any) => m.role === 'LEADER'),
+      deputy: guildMemberMap.get(guild.id)?.find((m: any) => m.role === 'DEPUTY'),
+      officers: guildMemberMap.get(guild.id)?.filter((m: any) => m.role === 'OFFICER') || [],
       member_count: guildMemberMap.get(guild.id)?.length || 0,
     }));
 

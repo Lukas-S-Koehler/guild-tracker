@@ -160,6 +160,18 @@ export async function POST(req: NextRequest) {
     console.log("✅ Deactivated members who left the guild");
   }
 
+  // Update last_member_synced_at
+  const adminSupabase = (await import('@/lib/supabase-server')).createAdminClient();
+  const { data: existingConfig } = await adminSupabase
+    .from('guild_config')
+    .select('settings')
+    .eq('guild_id', guildId)
+    .single();
+  await adminSupabase
+    .from('guild_config')
+    .update({ settings: { ...(existingConfig?.settings || {}), last_member_synced_at: new Date().toISOString() } })
+    .eq('guild_id', guildId);
+
   console.log(`✅ SYNC COMPLETE — ${members.length} members synced`);
   console.log("=== SYNC MEMBERS END ===");
 

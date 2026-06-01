@@ -112,6 +112,17 @@ export async function POST(req: NextRequest) {
         .not('idlemmo_id', 'in', `(${syncedIds.map((id: string) => `"${id}"`).join(',')})`);
 
       results[guild_id] = { synced: members.length };
+
+      // Update last_member_synced_at
+      const { data: existingConfig } = await supabase
+        .from('guild_config')
+        .select('settings')
+        .eq('guild_id', guild_id)
+        .single();
+      await supabase
+        .from('guild_config')
+        .update({ settings: { ...(existingConfig?.settings || {}), last_member_synced_at: new Date().toISOString() } })
+        .eq('guild_id', guild_id);
     } catch (err) {
       results[guild_id] = { synced: 0, error: String(err) };
     }

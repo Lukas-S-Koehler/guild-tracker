@@ -17,7 +17,7 @@ import { ChevronDown, User, LogOut, Users, Shield, Crown } from 'lucide-react';
 
 export default function Navigation() {
   const pathname = usePathname();
-  const { user, currentGuild, guilds, setCurrentGuild, signOut, hasRole, isLeaderOf } = useAuth();
+  const { user, currentGuild, guilds, signOut, hasRole, isSuperAdmin } = useAuth();
 
   // Don't show navigation on auth pages
   if (pathname === '/login' || pathname === '/signup' || pathname === '/guilds') {
@@ -54,8 +54,7 @@ export default function Navigation() {
     { href: '/leaderboard', label: 'Leaderboard' },
     { href: '/challenges', label: 'Challenges', requiresRole: 'OFFICER' as const },
     { href: '/data-management', label: 'Manage Data', requiresRole: 'OFFICER' as const },
-    { href: '/admin', label: 'Admin', requiresRole: 'LEADER' as const, requiresGuildLeader: 'Dream Bandits' },
-    { href: '/setup', label: 'Settings' },
+    { href: '/admin', label: 'Admin', requiresRole: 'LEADER' as const },
   ];
 
   return (
@@ -71,12 +70,8 @@ export default function Navigation() {
             {user && currentGuild && (
               <div className="flex items-center gap-1 text-sm">
                 {navLinks.map((link) => {
-                  // Hide links if user doesn't have required role
-                  if (link.requiresRole && !hasRole(link.requiresRole)) {
-                    return null;
-                  }
-                  // Hide links that require specific guild leadership
-                  if (link.requiresGuildLeader && !isLeaderOf(link.requiresGuildLeader)) {
+                  // Super admin sees all nav links
+                  if (!isSuperAdmin && link.requiresRole && !hasRole(link.requiresRole)) {
                     return null;
                   }
 
@@ -98,37 +93,33 @@ export default function Navigation() {
               </div>
             )}
 
-            {/* Guild Switcher & User Menu */}
+            {/* Guild Indicator & User Menu */}
             {user && currentGuild ? (
               <div className="flex items-center gap-2">
-                {/* Guild Switcher */}
-                {guilds.length > 1 && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm" className="gap-2">
-                        <span className="font-medium">{currentGuild.guild_name}</span>
-                        <ChevronDown className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
+                {/* Guild List Display */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="gap-2">
+                      <span className="font-medium">{currentGuild.guild_name}</span>
+                      <Badge variant="outline" className={`${getRoleBadgeColor(currentGuild.role)} text-xs`}>
+                        {getRoleIcon(currentGuild.role)}
+                      </Badge>
+                      {guilds.length > 1 && <ChevronDown className="h-3 w-3" />}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  {guilds.length > 1 && (
                     <DropdownMenuContent align="end" className="w-56">
-                      <DropdownMenuLabel>Switch Guild</DropdownMenuLabel>
+                      <DropdownMenuLabel>My Guilds</DropdownMenuLabel>
                       <DropdownMenuSeparator />
                       {guilds.map((guild) => (
                         <DropdownMenuItem
                           key={guild.guild_id}
-                          onClick={() => setCurrentGuild(guild)}
-                          className={
-                            guild.guild_id === currentGuild.guild_id
-                              ? 'bg-accent'
-                              : ''
-                          }
+                          className={guild.guild_id === currentGuild.guild_id ? 'bg-accent' : ''}
+                          disabled
                         >
                           <div className="flex items-center justify-between w-full">
                             <span>{guild.guild_name}</span>
-                            <Badge
-                              variant="outline"
-                              className={getRoleBadgeColor(guild.role)}
-                            >
+                            <Badge variant="outline" className={getRoleBadgeColor(guild.role)}>
                               <span className="mr-1">{getRoleIcon(guild.role)}</span>
                               {guild.role}
                             </Badge>
@@ -136,8 +127,8 @@ export default function Navigation() {
                         </DropdownMenuItem>
                       ))}
                     </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
+                  )}
+                </DropdownMenu>
 
                 {/* User Menu */}
                 <DropdownMenu>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -10,6 +10,14 @@ import { formatGold, getToday } from '@/lib/utils';
 import { useApiClient } from '@/lib/api-client';
 import { useAuth } from '@/contexts/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
+
+interface GuildStatus {
+  id: string;
+  name: string;
+  nickname: string;
+  donation_requirement: number;
+  last_fetched_at: string | null;
+}
 
 interface DonationEntry {
   item_name: string;
@@ -37,8 +45,20 @@ interface ActivityLogEntry {
   donations: DonationEntry[];
 }
 
+function timeAgo(iso: string | null): string {
+  if (!iso) return 'never';
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
 function ActivityPageContent() {
-  const { guilds, currentGuild, hasRole } = useAuth();
+  const { currentGuild, hasRole } = useAuth();
+  const [allGuilds, setAllGuilds] = useState<GuildStatus[]>([]);
   const [selectedGuildId, setSelectedGuildId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(getToday());
   const [loading, setLoading] = useState(false);
@@ -47,17 +67,22 @@ function ActivityPageContent() {
   const [success, setSuccess] = useState<string | null>(null);
   const [activityLogs, setActivityLogs] = useState<ActivityLogEntry[]>([]);
   const [expandedMembers, setExpandedMembers] = useState<Set<string>>(new Set());
-  const [donationReq, setDonationReq] = useState(5000);
   const api = useApiClient();
 
   const isOfficer = hasRole('OFFICER');
 
-  // Init selected guild from currentGuild
+  // Load all guilds with status
   useEffect(() => {
-    if (!selectedGuildId && currentGuild) {
-      setSelectedGuildId(currentGuild.guild_id);
-    }
-  }, [currentGuild, selectedGuildId]);
+    api.get('/api/guilds/status').then(r => r.ok ? r.json() : []).then((data: GuildStatus[]) => {
+      if (!Array.isArray(data) || data.length === 0) return;
+      setAllGuilds(data);
+      if (!selectedGuildId) {
+        const def = data.find(g => g.id === currentGuild?.guild_id) || data[0];
+        setSelectedGuildId(def.id);
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentGuild?.guild_id]);
 
   const fetchActivity = useCallback(async (guildId: string, date: string) => {
     setLoading(true);
@@ -68,8 +93,7 @@ function ActivityPageContent() {
         const data = await res.json();
         throw new Error(data.error || 'Failed to load activity');
       }
-      const data = await res.json();
-      setActivityLogs(data);
+      setActivityLogs(await res.json());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load activity');
       setActivityLogs([]);
@@ -78,24 +102,11 @@ function ActivityPageContent() {
     }
   }, [api]);
 
-  const fetchDonationReq = useCallback(async (guildId: string) => {
-    try {
-      const res = await api.get('/api/config', { guildId });
-      if (res.ok) {
-        const data = await res.json();
-        setDonationReq(data.donation_requirement || 5000);
-      }
-    } catch {
-      // ignore
-    }
-  }, [api]);
-
   useEffect(() => {
     if (selectedGuildId && selectedDate) {
       fetchActivity(selectedGuildId, selectedDate);
-      fetchDonationReq(selectedGuildId);
     }
-  }, [selectedGuildId, selectedDate, fetchActivity, fetchDonationReq]);
+  }, [selectedGuildId, selectedDate, fetchActivity]);
 
   const handleFetchNow = async () => {
     if (!selectedGuildId) return;
@@ -109,13 +120,15 @@ function ActivityPageContent() {
         throw new Error(data.error || 'Fetch failed');
       }
       const data = await res.json();
-      setSuccess(`Fetched ${data.stored} events, processed ${data.processed} member logs. Reloading...`);
+      setSuccess(`Fetched ${data.stored} events, processed ${data.processed} logs. Reloading...`);
+      // Refresh guild status to update last_fetched_at
+      api.get('/api/guilds/status').then(r => r.ok ? r.json() : allGuilds).then(setAllGuilds);
       setTimeout(() => {
         fetchActivity(selectedGuildId, selectedDate);
         setSuccess(null);
       }, 1500);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to trigger fetch. Check server logs.');
+      setError(err instanceof Error ? err.message : 'Fetch failed. Check server logs.');
     } finally {
       setFetching(false);
     }
@@ -134,7 +147,8 @@ function ActivityPageContent() {
   const totalGold = activityLogs.reduce((s, l) => s + l.gold_donated + (l.deposits_gold || 0), 0);
   const metCount = activityLogs.filter(l => l.met_requirement).length;
 
-  const selectedGuild = guilds.find(g => g.guild_id === selectedGuildId);
+  const selectedGuild = allGuilds.find(g => g.id === selectedGuildId);
+  const donationReq = selectedGuild?.donation_requirement ?? 5000;
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -146,7 +160,7 @@ function ActivityPageContent() {
           </p>
         </div>
         {isOfficer && (
-          <Button variant="outline" onClick={handleFetchNow} disabled={fetching}>
+          <Button variant="outline" onClick={handleFetchNow} disabled={fetching || !selectedGuildId}>
             {fetching ? (
               <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Fetching...</>
             ) : (
@@ -171,21 +185,26 @@ function ActivityPageContent() {
       )}
 
       {/* Guild Tabs */}
-      <div className="flex gap-2 flex-wrap border-b pb-2">
-        {guilds.map(guild => (
-          <button
-            key={guild.guild_id}
-            onClick={() => setSelectedGuildId(guild.guild_id)}
-            className={`px-4 py-2 rounded-t-md text-sm font-medium transition-colors ${
-              selectedGuildId === guild.guild_id
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-            }`}
-          >
-            {guild.guild_name}
-          </button>
-        ))}
-      </div>
+      {allGuilds.length > 0 && (
+        <div className="flex gap-2 flex-wrap border-b pb-2">
+          {allGuilds.map(guild => (
+            <button
+              key={guild.id}
+              onClick={() => setSelectedGuildId(guild.id)}
+              className={`px-4 py-2 rounded-t-md text-sm font-medium transition-colors text-left ${
+                selectedGuildId === guild.id
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+              }`}
+            >
+              <div>{guild.name}</div>
+              <div className={`text-xs ${selectedGuildId === guild.id ? 'opacity-70' : 'opacity-50'}`}>
+                {guild.last_fetched_at ? timeAgo(guild.last_fetched_at) : 'never fetched'}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Date Picker + Summary */}
       <div className="flex items-center gap-4">
@@ -218,7 +237,7 @@ function ActivityPageContent() {
           <CardContent className="py-12 text-center text-muted-foreground">
             <p>No activity data for {selectedDate}.</p>
             <p className="text-sm mt-2">
-              Activity is fetched automatically daily at 1am UTC.
+              Activity is fetched automatically daily at 12:00 CET.
               {isOfficer && ' Use "Fetch Now" to trigger an immediate fetch.'}
             </p>
           </CardContent>
@@ -227,7 +246,7 @@ function ActivityPageContent() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle>{selectedGuild?.guild_name} — {selectedDate}</CardTitle>
+              <CardTitle>{selectedGuild?.name} — {selectedDate}</CardTitle>
               <div className="text-sm text-muted-foreground">
                 Req: {formatGold(donationReq)}
               </div>
