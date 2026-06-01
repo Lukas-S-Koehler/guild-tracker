@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
-import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
+import { verifyAdminOrLeader, isErrorResponse } from '@/lib/auth-helpers';
 import { getMemberApiKey } from '@/lib/member-api-key';
 
 /**
@@ -11,8 +11,7 @@ import { getMemberApiKey } from '@/lib/member-api-key';
 export async function POST(req: NextRequest) {
   console.log("=== SYNC MEMBERS START ===");
 
-  // Verify authentication and get guild context
-  const authResult = await verifyAuth(req);
+  const authResult = await verifyAdminOrLeader(req);
   if (isErrorResponse(authResult)) return authResult;
   const { guildId, user } = authResult;
 

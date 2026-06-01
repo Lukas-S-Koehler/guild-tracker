@@ -4,84 +4,61 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Settings, FileText, Copy, Swords, Coins, TrendingUp } from 'lucide-react';
-import { formatGold, formatDate, getToday } from '@/lib/utils';
+import { Loader2, Settings, Swords, Coins, TrendingUp, CheckCircle2, XCircle, Users } from 'lucide-react';
+import { formatGold, formatDate } from '@/lib/utils';
 import ProtectedRoute from '@/components/ProtectedRoute';
-import { useApiClient } from '@/lib/api-client';
 import { useAuth } from '@/contexts/AuthContext';
 
-interface DashboardStats {
-  hasConfig: boolean;
-  guildName: string;
-  activeMembersToday: number;
-  totalMembers: number;
+interface TodayLog {
+  id: string;
+  ign: string;
+  met_requirement: boolean;
+  raids: number;
+  gold: number;
+  guild_name: string;
+}
+
+interface UniversalStats {
   totalRaids: number;
   totalGold: number;
-  inactiveCount: number;
+  totalActiveMembers: number;
+  totalGuilds: number;
+}
+
+interface DashboardData {
+  today: TodayLog[];
+  stats: UniversalStats;
 }
 
 function DashboardPageContent() {
-  const api = useApiClient();
-  const { hasRole, loading: authLoading, currentGuild } = useAuth();
-  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const { hasRole, loading: authLoading, user } = useAuth();
+  const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Don't fetch until auth is loaded and we have a guild
-    if (authLoading || !currentGuild) {
+    if (authLoading || !user) {
       setLoading(authLoading);
       return;
     }
 
-    async function fetchStats() {
+    async function fetchDashboard() {
       setLoading(true);
       try {
-        const [configRes, todayLogsRes, allTimeRes, reportRes] = await Promise.all([
-          api.get('/api/config'),
-          api.get(`/api/activity?date=${getToday()}`),
-          api.get('/api/leaderboard?period=all'),
-          api.get('/api/reports/inactivity'),
-        ]);
-
-        const config = configRes.ok ? await configRes.json() : {};
-        const todayLogs = todayLogsRes.ok ? await todayLogsRes.json() : [];
-        const allTimeData = allTimeRes.ok ? await allTimeRes.json() : [];
-        const reportData = reportRes.ok ? await reportRes.json() : [];
-
-        const todayLogsArray = Array.isArray(todayLogs) ? todayLogs : [];
-        const allTimeArray = Array.isArray(allTimeData) ? allTimeData : [];
-        const reportArray = Array.isArray(reportData) ? reportData : [];
-
-        // Calculate all-time totals from leaderboard data
-        const totalRaids = allTimeArray.reduce((sum: number, entry: any) => sum + (entry.total_raids || 0), 0);
-        const totalGold = allTimeArray.reduce((sum: number, entry: any) => sum + (entry.total_gold || 0), 0);
-
-        setStats({
-          hasConfig: !!config?.api_key,
-          guildName: config?.guild_name || 'My Guild',
-          activeMembersToday: todayLogsArray.filter((l: { met_requirement: boolean }) => l.met_requirement).length,
-          totalMembers: allTimeArray.length,
-          totalRaids,
-          totalGold,
-          inactiveCount: reportArray.length,
+        const res = await fetch('/api/dashboard', {
+          headers: { 'Cache-Control': 'no-cache' },
         });
-      } catch (error) {
-        console.error('Failed to fetch stats:', error);
-        setStats({
-          hasConfig: false,
-          guildName: 'My Guild',
-          activeMembersToday: 0,
-          totalMembers: 0,
-          totalRaids: 0,
-          totalGold: 0,
-          inactiveCount: 0,
-        });
+        if (res.ok) {
+          setData(await res.json());
+        }
+      } catch (err) {
+        console.error('Dashboard fetch failed:', err);
       } finally {
         setLoading(false);
       }
     }
-    fetchStats();
-  }, [api, authLoading, currentGuild]);
+
+    fetchDashboard();
+  }, [authLoading, user]);
 
   if (loading) {
     return (
@@ -91,112 +68,21 @@ function DashboardPageContent() {
     );
   }
 
-  if (!stats?.hasConfig && hasRole('LEADER')) {
-    return (
-      <div className="max-w-md mx-auto mt-20">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Settings className="h-5 w-5" />
-              Setup Required
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-muted-foreground">
-              Add your IdleMMO API key to enable market price lookups for donations.
-            </p>
-            <Button asChild className="w-full">
-              <Link href="/setup">Configure API Key</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
+  // Group today's logs by guild
+  const byGuild = new Map<string, TodayLog[]>();
+  for (const log of data?.today ?? []) {
+    if (!byGuild.has(log.guild_name)) byGuild.set(log.guild_name, []);
+    byGuild.get(log.guild_name)!.push(log);
   }
+  const hasActivityToday = (data?.today.length ?? 0) > 0;
+  const totalMetToday = data?.today.filter(l => l.met_requirement).length ?? 0;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold">{stats?.guildName || 'Guild'} Tracker</h1>
+        <h1 className="text-3xl font-bold">Guild Dashboard</h1>
         <p className="text-muted-foreground mt-1">{formatDate(new Date())}</p>
-      </div>
-
-      {/* Main 3 Workflow Cards - Hero Section */}
-      <div className="grid md:grid-cols-3 gap-6">
-        {/* Activity Log */}
-        {hasRole('OFFICER') && (
-          <Card className="border-2 border-primary/20 hover:border-primary/40 transition-colors">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-xl">
-                <FileText className="h-6 w-6 text-primary" />
-                Activity Log
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Process daily activity from guild Discord to track member contributions
-              </p>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Active Today:</span>
-                  <span className="font-bold">{stats?.activeMembersToday}/{stats?.totalMembers}</span>
-                </div>
-              </div>
-              <Button asChild className="w-full" size="lg">
-                <Link href="/activity">Process Activity Log →</Link>
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Discord Output (Reports) */}
-        <Card className="border-2 border-primary/20 hover:border-primary/40 transition-colors">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-xl">
-              <Copy className="h-6 w-6 text-primary" />
-              Discord Output
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Generate formatted reports to copy and paste into Discord
-            </p>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Inactive Members:</span>
-                <span className="font-bold text-amber-600">{stats?.inactiveCount}</span>
-              </div>
-            </div>
-            <Button asChild className="w-full" size="lg">
-              <Link href="/reports">Generate Reports →</Link>
-            </Button>
-          </CardContent>
-        </Card>
-
-        {/* Settings */}
-        <Card className="border-2 border-primary/20 hover:border-primary/40 transition-colors">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-xl">
-              <Settings className="h-6 w-6 text-primary" />
-              Settings
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Configure guild requirements, API keys, and building tracking
-            </p>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Config:</span>
-                <span className="font-bold text-green-600">{stats?.hasConfig ? 'Ready' : 'Setup Needed'}</span>
-              </div>
-            </div>
-            <Button asChild className="w-full" size="lg" variant="outline">
-              <Link href="/setup">Open Settings →</Link>
-            </Button>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Guild Statistics */}
@@ -211,11 +97,20 @@ function DashboardPageContent() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-2xl">✅</span>
-                <span className="text-sm text-muted-foreground">Active Today</span>
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                <span className="text-sm text-muted-foreground">Met Today</span>
               </div>
-              <p className="text-3xl font-bold">{stats?.activeMembersToday}</p>
-              <p className="text-xs text-muted-foreground mt-1">of {stats?.totalMembers} members</p>
+              <p className="text-3xl font-bold">{totalMetToday}</p>
+              <p className="text-xs text-muted-foreground mt-1">of {data?.today.length ?? 0} logged</p>
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Users className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">Active Members</span>
+              </div>
+              <p className="text-3xl font-bold">{data?.stats.totalActiveMembers ?? 0}</p>
+              <p className="text-xs text-muted-foreground mt-1">across {data?.stats.totalGuilds ?? 0} guilds</p>
             </div>
 
             <div>
@@ -223,7 +118,7 @@ function DashboardPageContent() {
                 <Swords className="h-5 w-5 text-muted-foreground" />
                 <span className="text-sm text-muted-foreground">Total Raids</span>
               </div>
-              <p className="text-3xl font-bold">{stats?.totalRaids?.toLocaleString()}</p>
+              <p className="text-3xl font-bold">{data?.stats.totalRaids?.toLocaleString() ?? 0}</p>
               <p className="text-xs text-muted-foreground mt-1">all time</p>
             </div>
 
@@ -232,25 +127,89 @@ function DashboardPageContent() {
                 <Coins className="h-5 w-5 text-muted-foreground" />
                 <span className="text-sm text-muted-foreground">Total Gold</span>
               </div>
-              <p className="text-3xl font-bold">{formatGold(stats?.totalGold || 0)}</p>
+              <p className="text-3xl font-bold">{formatGold(data?.stats.totalGold ?? 0)}</p>
               <p className="text-xs text-muted-foreground mt-1">all time</p>
-            </div>
-
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-2xl">⚠️</span>
-                <span className="text-sm text-muted-foreground">Inactive</span>
-              </div>
-              <p className="text-3xl font-bold text-amber-600">{stats?.inactiveCount}</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                <Link href="/reports" className="hover:underline">View report →</Link>
-              </p>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Secondary Actions */}
+      {/* Today's Activity */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <span>Today&apos;s Activity</span>
+            {hasActivityToday && (
+              <span className="text-sm font-normal text-muted-foreground">
+                {totalMetToday}/{data?.today.length} met
+              </span>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!hasActivityToday ? (
+            <p className="text-muted-foreground text-sm text-center py-6">
+              No activity logged yet today.{' '}
+              {hasRole('OFFICER') && (
+                <Link href="/activity" className="underline">Process activity log →</Link>
+              )}
+            </p>
+          ) : (
+            <div className="space-y-6">
+              {Array.from(byGuild.entries()).map(([guildName, logs]) => {
+                const met = logs.filter(l => l.met_requirement);
+                const notMet = logs.filter(l => !l.met_requirement);
+                return (
+                  <div key={guildName}>
+                    <div className="flex items-center gap-3 mb-3">
+                      <span className="text-sm font-semibold">{guildName}</span>
+                      <span className="text-xs text-muted-foreground">{met.length}/{logs.length} met</span>
+                      <div className="flex-1 h-px bg-border" />
+                    </div>
+                    <div className="grid md:grid-cols-2 gap-4">
+                      {/* Met */}
+                      <div className="space-y-0.5">
+                        {met.length === 0 ? (
+                          <p className="text-xs text-muted-foreground px-2 py-1">None yet</p>
+                        ) : met.map(log => (
+                          <div key={log.id} className="flex items-center justify-between text-sm px-2 py-1 rounded hover:bg-muted/40">
+                            <div className="flex items-center gap-2">
+                              <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" />
+                              <span className="font-medium">{log.ign}</span>
+                            </div>
+                            <span className="text-muted-foreground text-xs">
+                              {formatGold(log.gold)}{log.raids > 0 && ` · ${log.raids}⚔`}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Not met */}
+                      <div className="space-y-0.5">
+                        {notMet.length === 0 ? (
+                          <p className="text-xs text-muted-foreground px-2 py-1">All met ✓</p>
+                        ) : notMet.map(log => (
+                          <div key={log.id} className="flex items-center justify-between text-sm px-2 py-1 rounded hover:bg-muted/40">
+                            <div className="flex items-center gap-2">
+                              <XCircle className="h-3 w-3 text-red-400 shrink-0" />
+                              <span className="text-muted-foreground">{log.ign}</span>
+                            </div>
+                            <span className="text-muted-foreground text-xs">
+                              {formatGold(log.gold)}{log.raids > 0 && ` · ${log.raids}⚔`}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Quick Links */}
       <Card>
         <CardHeader>
           <CardTitle>Quick Links</CardTitle>
@@ -281,9 +240,9 @@ function DashboardPageContent() {
 
           {hasRole('OFFICER') && (
             <Button asChild variant="outline" className="h-auto py-4">
-              <Link href="/data-management" className="flex flex-col items-center gap-2">
-                <span className="text-2xl">🗂️</span>
-                <span className="text-sm">Manage Data</span>
+              <Link href="/setup" className="flex flex-col items-center gap-2">
+                <Settings className="h-5 w-5" />
+                <span className="text-sm">Settings</span>
               </Link>
             </Button>
           )}

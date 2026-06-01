@@ -1,56 +1,128 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Copy, Check } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Loader2, Copy, Check, Send, X } from 'lucide-react';
 import { getInactivityEmoji, formatInactivityReport, copyToClipboard } from '@/lib/utils';
 import { useApiClient } from '@/lib/api-client';
+import { useAuth } from '@/contexts/AuthContext';
 import type { InactivityEntry } from '@/types';
 
 export default function ReportsPage() {
-  const [entries, setEntries] = useState<InactivityEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [copied, setCopied] = useState(false);
-  const [guildName, setGuildName] = useState('Guild');
+  const { guilds, currentGuild } = useAuth();
   const api = useApiClient();
 
+  const [selectedGuildId, setSelectedGuildId] = useState<string>('');
+  const [entries, setEntries] = useState<InactivityEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [guildName, setGuildName] = useState('Guild');
+  const [hasWebhook, setHasWebhook] = useState(false);
+
+  const [copied, setCopied] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sendResult, setSendResult] = useState<'ok' | 'err' | null>(null);
+
+  const [showWebhookInput, setShowWebhookInput] = useState(false);
+  const [webhookInput, setWebhookInput] = useState('');
+  const [savingWebhook, setSavingWebhook] = useState(false);
+  const [webhookError, setWebhookError] = useState<string | null>(null);
+
   useEffect(() => {
-    async function fetchData() {
+    if (currentGuild?.guild_id && !selectedGuildId) {
+      setSelectedGuildId(currentGuild.guild_id);
+    }
+  }, [currentGuild?.guild_id, selectedGuildId]);
+
+  const fetchData = useCallback(
+    async (guildId: string) => {
+      setLoading(true);
       try {
         const [reportRes, configRes] = await Promise.all([
-          api.get('/api/reports/inactivity'),
-          api.get('/api/config'),
+          api.get('/api/reports/inactivity', { guildId }),
+          api.get('/api/config', { guildId }),
         ]);
 
-        const reportData = await reportRes.json();
-        const configData = await configRes.json();
+        const reportData = reportRes.ok ? await reportRes.json() : [];
+        const configData = configRes.ok ? await configRes.json() : {};
 
         setEntries(Array.isArray(reportData) ? reportData : []);
-        if (configData.guild_name) {
-          setGuildName(configData.guild_name);
-        }
+        if (configData.guild_name) setGuildName(configData.guild_name);
+        setHasWebhook(!!(configData.settings?.discord_webhook_url));
       } catch (error) {
         console.error('Failed to fetch report:', error);
         setEntries([]);
       } finally {
         setLoading(false);
       }
+    },
+    [api]
+  );
+
+  useEffect(() => {
+    if (selectedGuildId) {
+      fetchData(selectedGuildId);
     }
-    fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [selectedGuildId, fetchData]);
+
+  const selectedGuildMembership = guilds.find((g) => g.guild_id === selectedGuildId);
+  const canManageDiscord = selectedGuildMembership
+    ? ['OFFICER', 'DEPUTY', 'LEADER'].includes(selectedGuildMembership.role)
+    : false;
 
   const handleCopy = async () => {
     const text = formatInactivityReport(
-      entries.map(e => ({ ign: e.ign, category: e.category })),
+      entries.map((e) => ({ ign: e.ign, category: e.category })),
       guildName
     );
     const ok = await copyToClipboard(text);
     if (ok) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleSendToDiscord = async () => {
+    setSending(true);
+    setSendResult(null);
+    try {
+      const res = await api.post('/api/discord/send', {}, { guildId: selectedGuildId });
+      setSendResult(res.ok ? 'ok' : 'err');
+    } catch {
+      setSendResult('err');
+    } finally {
+      setSending(false);
+      setTimeout(() => setSendResult(null), 3000);
+    }
+  };
+
+  const handleSaveWebhook = async () => {
+    setWebhookError(null);
+    if (!webhookInput.startsWith('https://discord.com/api/webhooks/')) {
+      setWebhookError('Must be a Discord webhook URL (https://discord.com/api/webhooks/...)');
+      return;
+    }
+    setSavingWebhook(true);
+    try {
+      const res = await api.post(
+        '/api/discord/webhook',
+        { webhook_url: webhookInput },
+        { guildId: selectedGuildId }
+      );
+      if (res.ok) {
+        setHasWebhook(true);
+        setShowWebhookInput(false);
+        setWebhookInput('');
+      } else {
+        const data = await res.json();
+        setWebhookError(data.error || 'Failed to save webhook');
+      }
+    } catch {
+      setWebhookError('Network error saving webhook');
+    } finally {
+      setSavingWebhook(false);
     }
   };
 
@@ -65,13 +137,13 @@ export default function ReportsPage() {
   const getWarningLevelColor = (warning_level: string) => {
     switch (warning_level) {
       case 'safe':
-        return 'bg-green-500/20 text-green-500 border-green-500/50'; // 1d: Safe
+        return 'bg-green-500/20 text-green-500 border-green-500/50';
       case 'warn1':
-        return 'bg-yellow-500/20 text-yellow-500 border-yellow-500/50'; // 2d: Private warning
+        return 'bg-yellow-500/20 text-yellow-500 border-yellow-500/50';
       case 'warn2':
-        return 'bg-orange-500/20 text-orange-500 border-orange-500/50'; // 3d: Private + optional public
+        return 'bg-orange-500/20 text-orange-500 border-orange-500/50';
       case 'kick':
-        return 'bg-red-500/20 text-red-500 border-red-500/50'; // 4d+: Kick
+        return 'bg-red-500/20 text-red-500 border-red-500/50';
       default:
         return 'bg-gray-500/20 text-gray-500 border-gray-500/50';
     }
@@ -90,6 +162,8 @@ export default function ReportsPage() {
     }
   };
 
+  const multiGuild = guilds.length > 1;
+
   return (
     <div className="space-y-6">
       <div>
@@ -99,21 +173,127 @@ export default function ReportsPage() {
         </p>
       </div>
 
+      {/* Guild selector — only shown when user belongs to multiple guilds */}
+      {multiGuild && (
+        <div className="flex gap-2 flex-wrap">
+          {guilds.map((guild) => (
+            <Button
+              key={guild.guild_id}
+              variant={selectedGuildId === guild.guild_id ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setSelectedGuildId(guild.guild_id)}
+            >
+              {guild.guild_name}
+            </Button>
+          ))}
+        </div>
+      )}
+
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <div>
-              <CardTitle>Inactive Members</CardTitle>
+              <CardTitle>
+                Inactive Members{multiGuild ? ` — ${guildName}` : ''}
+              </CardTitle>
               <CardDescription>
-                Based on daily tracker data (excludes Leaders & Deputies)
+                Based on daily tracker data (excludes Leaders &amp; Deputies)
               </CardDescription>
             </div>
-            <Button variant="outline" onClick={handleCopy} disabled={loading || entries.length === 0}>
-              {copied ? <Check className="h-4 w-4 mr-1" /> : <Copy className="h-4 w-4 mr-1" />}
-              {copied ? 'Copied!' : 'Copy for Discord'}
-            </Button>
+            <div className="flex gap-2 flex-wrap">
+              <Button
+                variant="outline"
+                onClick={handleCopy}
+                disabled={loading || entries.length === 0}
+              >
+                {copied ? (
+                  <Check className="h-4 w-4 mr-1" />
+                ) : (
+                  <Copy className="h-4 w-4 mr-1" />
+                )}
+                {copied ? 'Copied!' : 'Copy for Discord'}
+              </Button>
+
+              {canManageDiscord && (
+                <Button
+                  variant={
+                    sendResult === 'ok'
+                      ? 'default'
+                      : sendResult === 'err'
+                      ? 'destructive'
+                      : 'outline'
+                  }
+                  onClick={
+                    hasWebhook
+                      ? handleSendToDiscord
+                      : () => setShowWebhookInput(true)
+                  }
+                  disabled={sending || (hasWebhook && (loading || entries.length === 0))}
+                >
+                  {sending ? (
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4 mr-1" />
+                  )}
+                  {sending
+                    ? 'Sending…'
+                    : sendResult === 'ok'
+                    ? 'Sent!'
+                    : sendResult === 'err'
+                    ? 'Failed'
+                    : hasWebhook
+                    ? 'Send to Discord'
+                    : 'Setup Discord'}
+                </Button>
+              )}
+            </div>
           </div>
+
+          {/* Webhook setup inline */}
+          {showWebhookInput && canManageDiscord && (
+            <div className="mt-4 space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Paste a Discord webhook URL. Create one in Discord: Channel Settings → Integrations → Webhooks.
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="https://discord.com/api/webhooks/..."
+                  value={webhookInput}
+                  onChange={(e) => setWebhookInput(e.target.value)}
+                  className="flex-1"
+                />
+                <Button onClick={handleSaveWebhook} disabled={savingWebhook}>
+                  {savingWebhook ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => {
+                    setShowWebhookInput(false);
+                    setWebhookInput('');
+                    setWebhookError(null);
+                  }}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              {webhookError && (
+                <p className="text-xs text-red-500">{webhookError}</p>
+              )}
+            </div>
+          )}
+
+          {/* Reconfigure webhook link */}
+          {hasWebhook && canManageDiscord && !showWebhookInput && (
+            <button
+              className="text-xs text-muted-foreground underline mt-2 text-left"
+              onClick={() => setShowWebhookInput(true)}
+            >
+              Change webhook URL
+            </button>
+          )}
         </CardHeader>
+
         <CardContent>
           {loading ? (
             <div className="flex justify-center py-8">
@@ -166,7 +346,8 @@ export default function ReportsPage() {
 
               <div className="pt-4 border-t">
                 <p className="text-sm text-muted-foreground">
-                  Total inactive: <span className="font-bold text-foreground">{entries.length}</span>
+                  Total inactive:{' '}
+                  <span className="font-bold text-foreground">{entries.length}</span>
                 </p>
               </div>
             </div>
@@ -191,8 +372,20 @@ export default function ReportsPage() {
             <li><span className="text-orange-500">3 days</span>: Private warning + optional public</li>
             <li><span className="text-red-500">4+ days</span>: Kick from guild</li>
           </ul>
-          <p className="mt-2 text-xs">Note: Leaders and Deputies are excluded from inactivity tracking. New members are tracked from their join date.</p>
+          <p className="mt-2 text-xs">
+            Note: Leaders and Deputies are excluded from inactivity tracking. New members are tracked from their join date.
+          </p>
         </div>
+        {canManageDiscord && (
+          <div>
+            <p className="font-medium mb-1">🔔 Discord Integration</p>
+            <p>
+              {hasWebhook
+                ? 'Webhook configured. Use "Send to Discord" to post the report to your channel.'
+                : 'Click "Setup Discord" to configure a webhook and post reports directly to your Discord channel.'}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

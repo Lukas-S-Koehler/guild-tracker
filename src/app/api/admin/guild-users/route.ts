@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
+import { createServerClient, createAdminClient } from '@/lib/supabase-server';
 import { verifyAdminOrLeader, isErrorResponse } from '@/lib/auth-helpers';
 
 /**
@@ -13,6 +13,7 @@ export async function POST(req: NextRequest) {
   if (isErrorResponse(auth)) return auth;
 
   const supabase = createServerClient(req);
+  const db = auth.isSuperAdmin ? createAdminClient() : supabase;
 
   try {
     const body = await req.json();
@@ -64,7 +65,7 @@ export async function POST(req: NextRequest) {
       userId = foundUsers[0].id;
     }
 
-    const { data: existing } = await supabase
+    const { data: existing } = await db
       .from('guild_leaders')
       .select('id')
       .eq('guild_id', target_guild_id)
@@ -75,7 +76,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'User is already a member of this guild' }, { status: 400 });
     }
 
-    const { error: insertError } = await supabase
+    const { error: insertError } = await db
       .from('guild_leaders')
       .insert({ guild_id: target_guild_id, user_id: userId, role });
 
@@ -101,6 +102,7 @@ export async function PATCH(req: NextRequest) {
   if (isErrorResponse(auth)) return auth;
 
   const supabase = createServerClient(req);
+  const db = auth.isSuperAdmin ? createAdminClient() : supabase;
 
   try {
     const body = await req.json();
@@ -123,7 +125,7 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    const { error: updateError } = await supabase
+    const { error: updateError } = await db
       .from('guild_leaders')
       .update({ role })
       .eq('guild_id', target_guild_id)
@@ -151,6 +153,7 @@ export async function DELETE(req: NextRequest) {
   if (isErrorResponse(auth)) return auth;
 
   const supabase = createServerClient(req);
+  const db = auth.isSuperAdmin ? createAdminClient() : supabase;
 
   try {
     const { searchParams } = new URL(req.url);
@@ -165,11 +168,11 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden - You can only manage your own guild' }, { status: 403 });
     }
 
-    if (userIdToRemove === auth.user.id) {
+    if (userIdToRemove === auth.user.id && !auth.isSuperAdmin) {
       return NextResponse.json({ error: 'Cannot remove yourself from the guild' }, { status: 400 });
     }
 
-    const { error: deleteError } = await supabase
+    const { error: deleteError } = await db
       .from('guild_leaders')
       .delete()
       .eq('guild_id', targetGuildId)

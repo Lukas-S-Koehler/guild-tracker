@@ -26,6 +26,9 @@ export default function ProtectedRoute({ children, requiredRole, requiredGuildLe
       return;
     }
 
+    // Super admin bypasses all role/guild checks
+    if (isSuperAdmin) return;
+
     // User has no guilds at all - show a message instead of redirecting
     if (guilds.length === 0) {
       return; // Will show "no guilds" message below
@@ -37,9 +40,6 @@ export default function ProtectedRoute({ children, requiredRole, requiredGuildLe
       router.push('/guilds');
       return;
     }
-
-    // Super admin bypasses all role/guild checks
-    if (isSuperAdmin) return;
 
     // Check role requirement
     if (requiredRole && !hasRole(requiredRole)) {
@@ -67,6 +67,11 @@ export default function ProtectedRoute({ children, requiredRole, requiredGuildLe
   // Not authenticated
   if (!user) {
     return null; // Will redirect
+  }
+
+  // Super admin bypasses all checks
+  if (isSuperAdmin) {
+    return <>{children}</>;
   }
 
   // User has no guilds - show helpful message

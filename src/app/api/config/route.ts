@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
-import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
+import { verifyAdminOrLeader, isErrorResponse } from '@/lib/auth-helpers';
 
 const DEFAULT_DONATION_REQUIREMENT = 5000;
 
 // GET CONFIG
 export async function GET(req: NextRequest) {
-  // Verify authentication (members can view config)
-  const auth = await verifyAuth(req, 'MEMBER');
+  const auth = await verifyAdminOrLeader(req);
   if (isErrorResponse(auth)) return auth;
 
   try {
@@ -48,8 +47,7 @@ export async function GET(req: NextRequest) {
 
 // SAVE CONFIG
 export async function POST(req: NextRequest) {
-  // Verify authentication (only leaders can update config)
-  const auth = await verifyAuth(req, 'LEADER');
+  const auth = await verifyAdminOrLeader(req);
   if (isErrorResponse(auth)) return auth;
 
   try {
@@ -65,8 +63,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Ensure user can only update their own guild
-    if (guild_id !== auth.guildId) {
+    if (!auth.isSuperAdmin && guild_id !== auth.guildId) {
       return NextResponse.json(
         { error: 'You can only update your own guild config' },
         { status: 403 }
