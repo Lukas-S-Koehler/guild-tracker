@@ -117,9 +117,9 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Fetch recent warnings to avoid duplicate warns
+      // Fetch warnings from last 24h only — prevent same-run duplicates, allow daily escalation
       const recentSince = new Date(today);
-      recentSince.setUTCDate(recentSince.getUTCDate() - 7);
+      recentSince.setUTCDate(recentSince.getUTCDate() - 1);
       const { data: recentWarnings } = await supabase
         .from('warnings')
         .select('member_id, warning_level, created_at')
@@ -127,14 +127,11 @@ export async function POST(req: NextRequest) {
         .in('member_id', memberIds)
         .gte('created_at', recentSince.toISOString());
 
-      // Map: member_id → highest warning_level warned in last 7 days
-      const recentlyWarnedLevel = new Map<string, string>();
+      // Set of "member_id:level" warned in last 24h — skip exact duplicates only
+      const recentlyWarnedSet = new Set<string>();
       const levelOrder = { warn1: 1, warn2: 2, kick: 3 };
       for (const w of recentWarnings ?? []) {
-        const current = recentlyWarnedLevel.get(w.member_id);
-        if (!current || levelOrder[w.warning_level as keyof typeof levelOrder] > levelOrder[current as keyof typeof levelOrder]) {
-          recentlyWarnedLevel.set(w.member_id, w.warning_level);
-        }
+        recentlyWarnedSet.add(`${w.member_id}:${w.warning_level}`);
       }
 
       const memberSet = new Set(memberIds);
@@ -179,18 +176,17 @@ export async function POST(req: NextRequest) {
         const { warning_level } = getWarningInfo(daysInactive, period);
         if (warning_level === 'safe') continue;
 
+        // Filter junk accounts (same as reports page)
+        const ignLower = member.ign?.toLowerCase() ?? '';
+        if (!member.ign || ignLower.includes('raw activity') || ignLower.includes('log')) continue;
+
         // Add to full inactivity report (all inactive, regardless of warn status)
         inactiveReport.push({ ign: member.ign, daysInactive, warning_level, discord_id: member.discord_id ?? null });
 
-        // Check if already warned at this level or higher in last 7 days
-        const alreadyWarnedLevel = recentlyWarnedLevel.get(member.id);
-        if (alreadyWarnedLevel) {
-          const alreadyOrder = levelOrder[alreadyWarnedLevel as keyof typeof levelOrder] ?? 0;
-          const currentOrder = levelOrder[warning_level as keyof typeof levelOrder] ?? 0;
-          if (alreadyOrder >= currentOrder) {
-            skipped++;
-            continue;
-          }
+        // Skip only if warned at this exact level in last 24h (prevent duplicates, allow escalation)
+        if (recentlyWarnedSet.has(`${member.id}:${warning_level}`)) {
+          skipped++;
+          continue;
         }
 
         // Send DM if Discord ID is mapped and bot token exists
