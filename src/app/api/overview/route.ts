@@ -124,7 +124,7 @@ export async function GET(req: NextRequest) {
   // Fetch active members
   const { data: members, error: membersError } = await supabase
     .from('members')
-    .select('id, ign, position, avatar_url, discord_id, first_seen, last_seen, is_active')
+    .select('id, ign, position, avatar_url, discord_id, first_seen, last_seen, is_active, hashed_id')
     .eq('current_guild_id', guildId)
     .eq('is_active', true);
 
@@ -349,10 +349,26 @@ export async function GET(req: NextRequest) {
     return result;
   };
 
+  const ADMIN_HASHED_ID = '6aDoyRnLyEey9LpV5AGX';
+  const adminMember = members.find((m) => m.hashed_id === ADMIN_HASHED_ID);
+  const adminMemberId = adminMember?.id;
+  // Admin may be representative or an alt — find the whole account group
+  const adminRepresentativeId = adminMemberId
+    ? (altToMain.get(adminMemberId) ?? adminMemberId)
+    : undefined;
+  const adminAccountIds = new Set<string>();
+  if (adminRepresentativeId) {
+    adminAccountIds.add(adminRepresentativeId);
+    for (const altId of mainToAlts.get(adminRepresentativeId) ?? []) {
+      adminAccountIds.add(altId);
+    }
+  }
+
   const resultMembers: OverviewMember[] = members
     .filter((m) => {
       if (!m.ign || m.ign.toLowerCase().includes('raw activity') || m.ign.toLowerCase().includes('log')) return false;
       if (m.position === 'LEADER' || m.position === 'DEPUTY') return false;
+      if (adminAccountIds.has(m.id)) return false;
       return true;
     })
     .map((member) => {

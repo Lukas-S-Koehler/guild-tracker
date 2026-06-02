@@ -38,7 +38,7 @@ export default function LeaderboardPage() {
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<Period>('week');
   const [guildFilter, setGuildFilter] = useState<string>('all');
-  const [merged, setMerged] = useState(true);
+  const [merged, setMerged] = useState(false);
   const [copied, setCopied] = useState(false);
   const api = useApiClient();
 

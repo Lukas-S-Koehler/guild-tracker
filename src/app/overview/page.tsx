@@ -230,21 +230,43 @@ function AltRow({
   );
 }
 
+interface GuildOption {
+  id: string;
+  name: string;
+  nickname: string;
+}
+
 function OverviewPageContent() {
-  const { guilds, currentGuild, hasRole } = useAuth();
+  const { guilds, currentGuild, isSuperAdmin, hasRole } = useAuth();
   const api = useApiClient();
 
+  const [allGuilds, setAllGuilds] = useState<GuildOption[]>([]);
   const [selectedGuildId, setSelectedGuildId] = useState<string>('');
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [autoWarning, setAutoWarning] = useState(false);
   const [autoWarnResult, setAutoWarnResult] = useState<'ok' | 'err' | null>(null);
 
+  // Load all guilds (super admin sees all; others see their own)
   useEffect(() => {
-    if (currentGuild?.guild_id && !selectedGuildId) {
-      setSelectedGuildId(currentGuild.guild_id);
+    if (isSuperAdmin) {
+      api.get('/api/guilds/status').then(r => r.ok ? r.json() : []).then((data: GuildOption[]) => {
+        if (!Array.isArray(data) || data.length === 0) return;
+        setAllGuilds(data);
+        if (!selectedGuildId) {
+          const def = data.find((g: GuildOption) => g.id === currentGuild?.guild_id) || data[0];
+          setSelectedGuildId(def.id);
+        }
+      });
+    } else {
+      const mapped: GuildOption[] = guilds.map(g => ({ id: g.guild_id, name: g.guild_name, nickname: g.guild_name }));
+      setAllGuilds(mapped);
+      if (!selectedGuildId && currentGuild?.guild_id) {
+        setSelectedGuildId(currentGuild.guild_id);
+      }
     }
-  }, [currentGuild?.guild_id, selectedGuildId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSuperAdmin, currentGuild?.guild_id]);
 
   const fetchData = useCallback(
     async (guildId: string) => {
@@ -270,11 +292,15 @@ function OverviewPageContent() {
   }, [selectedGuildId, fetchData]);
 
   const selectedMembership = guilds.find((g) => g.guild_id === selectedGuildId);
-  const canManage = selectedMembership
+  const canManage = isSuperAdmin || (selectedMembership
     ? ['OFFICER', 'DEPUTY', 'LEADER'].includes(selectedMembership.role)
-    : hasRole('OFFICER');
+    : hasRole('OFFICER'));
 
-  const handleAutoWarn = async () => {
+  const handleForceWarn = async () => {
+    const confirmed = window.confirm(
+      'Force-Warn will immediately send warnings to all inactive members — the daily cron already does this automatically each night. Run it now anyway?'
+    );
+    if (!confirmed) return;
     setAutoWarning(true);
     setAutoWarnResult(null);
     try {
@@ -289,7 +315,6 @@ function OverviewPageContent() {
     }
   };
 
-  const multiGuild = guilds.length > 1;
   const period = data?.config.period ?? 'daily';
   const columns = data?.columns ?? [];
   const members = data?.members ?? [];
@@ -303,16 +328,16 @@ function OverviewPageContent() {
       </div>
 
       {/* Guild selector */}
-      {multiGuild && (
+      {allGuilds.length > 1 && (
         <div className="flex gap-2 flex-wrap">
-          {guilds.map((g) => (
+          {allGuilds.map((g) => (
             <Button
-              key={g.guild_id}
-              variant={selectedGuildId === g.guild_id ? 'default' : 'outline'}
+              key={g.id}
+              variant={selectedGuildId === g.id ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setSelectedGuildId(g.guild_id)}
+              onClick={() => setSelectedGuildId(g.id)}
             >
-              {g.guild_name}
+              {g.nickname || g.name}
             </Button>
           ))}
         </div>
@@ -338,7 +363,7 @@ function OverviewPageContent() {
         {canManage && (
           <Button
             variant={autoWarnResult === 'ok' ? 'default' : autoWarnResult === 'err' ? 'destructive' : 'outline'}
-            onClick={handleAutoWarn}
+            onClick={handleForceWarn}
             disabled={autoWarning || loading}
           >
             {autoWarning ? (
@@ -346,7 +371,7 @@ function OverviewPageContent() {
             ) : (
               <AlertTriangle className="h-4 w-4 mr-1" />
             )}
-            {autoWarning ? 'Warning…' : autoWarnResult === 'ok' ? 'Warned!' : autoWarnResult === 'err' ? 'Failed' : 'Auto-Warn'}
+            {autoWarning ? 'Warning…' : autoWarnResult === 'ok' ? 'Warned!' : autoWarnResult === 'err' ? 'Failed' : 'Force Warn'}
           </Button>
         )}
       </div>
