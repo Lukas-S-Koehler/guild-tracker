@@ -74,8 +74,7 @@ function ActivityPageContent() {
 
   const isOfficer = hasRole('OFFICER');
 
-  // Load all guilds with status
-  useEffect(() => {
+  const refreshGuildStatus = useCallback(() => {
     api.get('/api/guilds/status').then(r => r.ok ? r.json() : []).then((data: GuildStatus[]) => {
       if (!Array.isArray(data) || data.length === 0) return;
       setAllGuilds(data);
@@ -86,6 +85,14 @@ function ActivityPageContent() {
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentGuild?.guild_id]);
+
+  // Load all guilds with status + refresh when tab regains focus (cron may have run)
+  useEffect(() => {
+    refreshGuildStatus();
+    const onFocus = () => refreshGuildStatus();
+    document.addEventListener('visibilitychange', onFocus);
+    return () => document.removeEventListener('visibilitychange', onFocus);
+  }, [refreshGuildStatus]);
 
   const fetchActivity = useCallback(async (guildId: string, date: string) => {
     setLoading(true);
@@ -124,8 +131,7 @@ function ActivityPageContent() {
       }
       const data = await res.json();
       setSuccess(`Fetched ${data.stored} events, processed ${data.processed} logs. Reloading...`);
-      // Refresh guild status to update last_fetched_at
-      api.get('/api/guilds/status').then(r => r.ok ? r.json() : allGuilds).then(setAllGuilds);
+      refreshGuildStatus();
       setTimeout(() => {
         fetchActivity(selectedGuildId, selectedDate);
         setSuccess(null);
