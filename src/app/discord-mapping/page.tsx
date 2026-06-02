@@ -170,26 +170,21 @@ function DiscordMappingContent() {
       });
 
       if (toPropagate.length > 0) {
-        const patchResults = await Promise.allSettled(
-          toPropagate.map(alt => {
-            const mainId = altToMainLocal.get(alt.id)!;
-            const main = memberMapLocal.get(mainId)!;
-            return patchMember(alt.id, guildId, main.discord_id, main.discord_username).then(() => ({
-              id: alt.id,
-              discord_id: main.discord_id,
-              discord_username: main.discord_username,
-            }));
-          })
-        );
-
-        // Update local members data with propagated values
+        // Update local state immediately (optimistic), then patch DB best-effort
         const propagated = new Map<string, { discord_id: string | null; discord_username: string | null }>();
-        for (const r of patchResults) {
-          if (r.status === 'fulfilled') {
-            propagated.set(r.value.id, { discord_id: r.value.discord_id, discord_username: r.value.discord_username });
-          }
+        for (const alt of toPropagate) {
+          const mainId = altToMainLocal.get(alt.id)!;
+          const main = memberMapLocal.get(mainId)!;
+          propagated.set(alt.id, { discord_id: main.discord_id, discord_username: main.discord_username });
         }
         membersData = membersData.map(m => propagated.has(m.id) ? { ...m, ...propagated.get(m.id) } : m);
+
+        await Promise.allSettled(
+          toPropagate.map(alt => {
+            const vals = propagated.get(alt.id)!;
+            return patchMember(alt.id, guildId, vals.discord_id, vals.discord_username);
+          })
+        );
 
         // Update aggregate stats for newly mapped alts
         const newlyMapped = patchResults.filter(r => r.status === 'fulfilled').length;

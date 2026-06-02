@@ -1,7 +1,7 @@
 // app/api/members/list/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
-import { verifyAuthOrPublic, verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
+import { verifyAuthOrPublic, verifySuperAdminOrRole, isErrorResponse } from '@/lib/auth-helpers';
 
 // GET /api/members/list — public, no auth required
 export async function GET(req: NextRequest) {
@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
 
 // PATCH /api/members/list?member_id=... — update discord mapping fields
 export async function PATCH(req: NextRequest) {
-  const auth = await verifyAuth(req, 'OFFICER');
+  const auth = await verifySuperAdminOrRole(req, 'OFFICER');
   if (isErrorResponse(auth)) return auth;
 
   const supabase = createAdminClient();
