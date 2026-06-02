@@ -75,6 +75,19 @@ interface AltCharacterResponse {
   endpoint_updates_at: string;
 }
 
+export interface GuildMember {
+  hashed_id: string;
+  name: string;
+  rank?: string;
+  total_level?: number;
+  joined_at?: string;
+}
+
+interface GuildMembersResponse {
+  members: GuildMember[];
+  pagination?: { current_page: number; has_more: boolean; next_page: number | null };
+}
+
 export class IdleMMOApi {
   private apiKey: string;
 
@@ -176,6 +189,49 @@ export class IdleMMOApi {
     const url = `${IDLEMMO_BASE_URL}/v1/character/${hashedCharId}/characters`;
     const data = await this.fetch<AltCharacterResponse>(url);
     return data.characters ?? [];
+  }
+
+  async getGuildMembers(guildId: string, page = 1): Promise<GuildMembersResponse> {
+    const url = `${IDLEMMO_BASE_URL}/v1/guild/${guildId}/members?page=${page}`;
+    return this.fetch<GuildMembersResponse>(url);
+  }
+
+  async getAllGuildMembers(guildId: string): Promise<GuildMember[]> {
+    const all: GuildMember[] = [];
+    let page = 1;
+    while (true) {
+      try {
+        const res = await this.getGuildMembers(guildId, page);
+        const members = res.members ?? [];
+        all.push(...members);
+        if (!res.pagination?.has_more || members.length === 0) break;
+        page++;
+        await new Promise(r => setTimeout(r, 500));
+      } catch {
+        break;
+      }
+    }
+    return all;
+  }
+
+  // Builds name→hashed_id map by fetching all activity pages for a guild
+  async buildHashedIdMapFromActivity(guildId: string, maxPages = 50): Promise<Map<string, string>> {
+    const map = new Map<string, string>();
+    for (let page = 1; page <= maxPages; page++) {
+      try {
+        const res = await this.getGuildActivity(guildId, page);
+        for (const e of res.activity ?? []) {
+          if (e.character?.name && e.character?.hashed_id) {
+            map.set(e.character.name.toLowerCase(), e.character.hashed_id);
+          }
+        }
+        if (!res.pagination?.has_more) break;
+        await new Promise(r => setTimeout(r, 500));
+      } catch {
+        break;
+      }
+    }
+    return map;
   }
 
   async getAllGuildActivitySince(guildId: string, sinceDate: Date): Promise<ActivityEvent[]> {

@@ -606,6 +606,224 @@ function AltCharactersSection({ guildId }: { guildId: string }) {
   );
 }
 
+interface MemberOverviewRow {
+  id: string;
+  ign: string;
+  guild_id: string;
+  guild_name: string;
+  guild_nickname: string;
+  hashed_id: string | null;
+  discord_id: string | null;
+  alts_found: number;
+  alts_matched: number;
+}
+
+interface GuildOverviewStat {
+  guild_id: string;
+  guild_name: string;
+  guild_nickname: string;
+  total: number;
+  with_hashed_id: number;
+  without_hashed_id: number;
+  with_alts: number;
+}
+
+interface OverviewData {
+  members: MemberOverviewRow[];
+  guild_stats: GuildOverviewStat[];
+  totals: { members: number; with_hashed_id: number; without_hashed_id: number; with_alts: number; alts_matched: number };
+}
+
+function SuperAdminPanel() {
+  const [backfilling, setBackfilling] = useState(false);
+  const [syncingAlts, setSyncingAlts] = useState(false);
+  const [loadingOverview, setLoadingOverview] = useState(false);
+  const [overview, setOverview] = useState<OverviewData | null>(null);
+  const [showOverview, setShowOverview] = useState(false);
+  const [overviewFilter, setOverviewFilter] = useState<'all' | 'missing' | 'alts'>('all');
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const showMsg = (type: 'success' | 'error', text: string) => {
+    setMessage({ type, text });
+    setTimeout(() => setMessage(null), 8000);
+  };
+
+  const loadOverview = async () => {
+    setLoadingOverview(true);
+    try {
+      const res = await fetch('/api/admin/hashed-id-overview');
+      const data = await res.json();
+      if (res.ok) {
+        setOverview(data);
+        setShowOverview(true);
+      } else {
+        showMsg('error', data.error || 'Failed to load overview');
+      }
+    } catch { showMsg('error', 'Network error'); }
+    finally { setLoadingOverview(false); }
+  };
+
+  const handleBackfillAll = async () => {
+    if (!confirm('Backfill hashed IDs for ALL guilds? Calls IdleMMO API for each guild — may take a few minutes.')) return;
+    setBackfilling(true);
+    try {
+      const res = await fetch('/api/admin/backfill-hashed-ids', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      const data = await res.json();
+      if (res.ok) {
+        const msg = `Updated ${data.updated} hashed IDs. Still missing: ${data.still_missing}${data.still_missing > 0 ? ` (${data.still_missing_names?.slice(0, 5).join(', ')}${data.still_missing > 5 ? '…' : ''})` : ''}`;
+        showMsg('success', msg);
+        if (showOverview) await loadOverview();
+      } else {
+        showMsg('error', data.error || 'Backfill failed');
+      }
+    } catch { showMsg('error', 'Network error'); }
+    finally { setBackfilling(false); }
+  };
+
+  const handleSyncAltsAll = async () => {
+    if (!confirm('Sync alt characters for ALL members with a hashed ID? Calls IdleMMO API per member — may take several minutes.')) return;
+    setSyncingAlts(true);
+    try {
+      const res = await fetch('/api/admin/sync-alts-all', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      const data = await res.json();
+      if (res.ok) {
+        showMsg('success', `Processed ${data.processed}/${data.total_members_with_hashed_id} members, ${data.alts_found} alts found${data.error_count > 0 ? `, ${data.error_count} errors` : ''}`);
+        if (showOverview) await loadOverview();
+      } else {
+        showMsg('error', data.error || 'Sync failed');
+      }
+    } catch { showMsg('error', 'Network error'); }
+    finally { setSyncingAlts(false); }
+  };
+
+  const filteredMembers = overview?.members.filter(m => {
+    if (overviewFilter === 'missing') return !m.hashed_id;
+    if (overviewFilter === 'alts') return m.alts_found > 0;
+    return true;
+  }) ?? [];
+
+  return (
+    <Card className="border-yellow-500/30 bg-yellow-500/5">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Crown className="h-4 w-4 text-yellow-500" />
+          Super Admin — All Guilds
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {message && (
+          <div className={`flex items-start gap-2 p-2 rounded text-sm ${message.type === 'success' ? 'bg-green-500/10 text-green-600' : 'bg-destructive/10 text-destructive'}`}>
+            {message.type === 'success' ? <Check className="h-3 w-3 shrink-0 mt-0.5" /> : <AlertCircle className="h-3 w-3 shrink-0 mt-0.5" />}
+            {message.text}
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" onClick={handleBackfillAll} disabled={backfilling || syncingAlts}>
+            {backfilling ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+            Backfill All Hashed IDs
+          </Button>
+          <Button size="sm" variant="outline" onClick={handleSyncAltsAll} disabled={syncingAlts || backfilling}>
+            {syncingAlts ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+            Sync All Alts
+          </Button>
+          <Button size="sm" variant="outline" onClick={showOverview ? () => setShowOverview(false) : loadOverview} disabled={loadingOverview}>
+            {loadingOverview ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+            {showOverview ? 'Hide Overview' : 'Show Overview'}
+          </Button>
+        </div>
+
+        <p className="text-xs text-muted-foreground">
+          Uses your IdleMMO API key. Run Backfill first, then Sync Alts.
+        </p>
+
+        {showOverview && overview && (
+          <div className="space-y-4">
+            {/* Totals */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+              {[
+                { label: 'Members', value: overview.totals.members, color: '' },
+                { label: 'Hashed ID', value: overview.totals.with_hashed_id, color: 'text-green-500' },
+                { label: 'Missing ID', value: overview.totals.without_hashed_id, color: overview.totals.without_hashed_id > 0 ? 'text-orange-400' : 'text-green-500' },
+                { label: 'Have Alts', value: overview.totals.with_alts, color: 'text-blue-400' },
+                { label: 'Alts Matched', value: overview.totals.alts_matched, color: 'text-blue-400' },
+              ].map(s => (
+                <div key={s.label} className="p-2 border rounded bg-background text-center">
+                  <div className={`text-xl font-bold ${s.color}`}>{s.value}</div>
+                  <div className="text-xs text-muted-foreground">{s.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Per-guild stats */}
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-2">Per Guild</p>
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {overview.guild_stats.map(g => (
+                  <div key={g.guild_id} className="flex items-center gap-2 text-xs py-1 border-b border-border/50">
+                    <span className="font-mono font-bold text-primary w-12 shrink-0">{g.guild_nickname || g.guild_id}</span>
+                    <span className="text-muted-foreground w-32 truncate shrink-0">{g.guild_name}</span>
+                    <span className="text-green-500 shrink-0">{g.with_hashed_id}✓</span>
+                    {g.without_hashed_id > 0 && <span className="text-orange-400 shrink-0">{g.without_hashed_id} missing</span>}
+                    {g.with_alts > 0 && <span className="text-blue-400 shrink-0">{g.with_alts} alts</span>}
+                    <div className="flex-1 bg-muted rounded-full h-1.5">
+                      <div
+                        className="bg-green-500 h-1.5 rounded-full"
+                        style={{ width: `${Math.round((g.with_hashed_id / g.total) * 100)}%` }}
+                      />
+                    </div>
+                    <span className="text-muted-foreground shrink-0">{Math.round((g.with_hashed_id / g.total) * 100)}%</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Member list */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <p className="text-xs font-medium text-muted-foreground">Members</p>
+                <div className="flex gap-1">
+                  {(['all', 'missing', 'alts'] as const).map(f => (
+                    <button
+                      key={f}
+                      onClick={() => setOverviewFilter(f)}
+                      className={`px-2 py-0.5 rounded text-xs ${overviewFilter === f ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/80'}`}
+                    >
+                      {f === 'all' ? `All (${overview.members.length})` : f === 'missing' ? `Missing ID (${overview.totals.without_hashed_id})` : `Has Alts (${overview.totals.with_alts})`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-0.5 max-h-64 overflow-y-auto">
+                {filteredMembers.map(m => (
+                  <div key={m.id} className="flex items-center gap-2 text-xs py-1 px-1 rounded hover:bg-muted/50">
+                    <span className={`h-2 w-2 rounded-full shrink-0 ${m.hashed_id ? 'bg-green-500' : 'bg-orange-400'}`} />
+                    <span className="font-medium w-28 truncate shrink-0">{m.ign}</span>
+                    <span className="text-muted-foreground w-16 truncate shrink-0 font-mono">{m.guild_nickname || m.guild_id}</span>
+                    {m.hashed_id
+                      ? <span className="text-green-500/70 font-mono text-[10px] truncate flex-1">{m.hashed_id.slice(0, 12)}…</span>
+                      : <span className="text-orange-400 flex-1">no hashed_id</span>
+                    }
+                    {m.discord_id && <span className="text-blue-400 shrink-0 text-[10px]">discord✓</span>}
+                    {m.alts_found > 0 && (
+                      <span className={`shrink-0 text-[10px] ${m.alts_matched > 0 ? 'text-blue-400' : 'text-muted-foreground'}`}>
+                        {m.alts_matched}/{m.alts_found} alts
+                      </span>
+                    )}
+                  </div>
+                ))}
+                {filteredMembers.length === 0 && (
+                  <p className="text-xs text-muted-foreground py-2 text-center">No members match this filter</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function AdminPageContent() {
   const api = useApiClient();
   const { isSuperAdmin } = useAuth();
@@ -731,6 +949,8 @@ function AdminPageContent() {
         <h1 className="text-2xl font-bold">Leadership Management</h1>
         <p className="text-muted-foreground">Manage leadership and settings across all Dream guilds</p>
       </div>
+
+      {isSuperAdmin && <SuperAdminPanel />}
 
       {error && (
         <div className="flex items-center gap-2 p-4 bg-destructive/10 text-destructive rounded-lg">

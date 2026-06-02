@@ -305,8 +305,26 @@ export async function verifyAuthOrPublic(
 }
 
 /**
+ * Verify the request is from the super admin (no guild ID required).
+ * Use for global admin operations that span all guilds.
+ */
+export async function verifySuperAdmin(
+  request: Request
+): Promise<{ user: { id: string; email?: string } } | NextResponse> {
+  const supabase = createServerClient(request);
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) {
+    return NextResponse.json({ error: 'Unauthorized - Please sign in' }, { status: 401 });
+  }
+  if (user.email !== SUPER_ADMIN_EMAIL) {
+    return NextResponse.json({ error: 'Forbidden - Super admin only' }, { status: 403 });
+  }
+  return { user: { id: user.id, email: user.email } };
+}
+
+/**
  * Helper to check if a value is a NextResponse (error response)
  */
-export function isErrorResponse(value: AuthResult | NextResponse): value is NextResponse {
+export function isErrorResponse(value: AuthResult | NextResponse | { user: { id: string; email?: string } }): value is NextResponse {
   return value instanceof NextResponse;
 }

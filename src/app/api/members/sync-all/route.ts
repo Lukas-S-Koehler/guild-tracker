@@ -126,6 +126,8 @@ export async function POST(req: NextRequest) {
             synced_at: new Date().toISOString(),
             // Set first_seen to today if new to this guild
             ...(isNewToGuild ? { first_seen: today } : {}),
+            // Populate hashed_id from API response when available
+            ...(m.hashed_id ? { hashed_id: m.hashed_id } : {}),
           };
         });
 

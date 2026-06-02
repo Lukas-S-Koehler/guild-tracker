@@ -5,14 +5,16 @@ import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand } from '
 const INTERACTION_TYPE_PING = 1;
 const INTERACTION_TYPE_COMMAND = 2;
 
-// GET /api/discord/interactions/register — register /warn command (one-time setup)
+// GET /api/discord/interactions
+// ?action=register → register /warn slash command (one-time setup)
+// no params → health check (Discord pre-validates endpoint with GET)
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  if (searchParams.get('action') !== 'register') {
-    return NextResponse.json({ error: 'Use ?action=register' }, { status: 400 });
+  if (searchParams.get('action') === 'register') {
+    const result = await registerWarnCommand();
+    return NextResponse.json(result);
   }
-  const result = await registerWarnCommand();
-  return NextResponse.json(result);
+  return NextResponse.json({ ok: true });
 }
 
 // POST /api/discord/interactions — handle Discord slash commands
