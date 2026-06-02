@@ -190,10 +190,10 @@ export async function POST(req: NextRequest) {
         // Send DM if Discord ID is mapped and bot token exists
         let dmSent = false;
         let dmError: string | null = null;
+        const levelLabel = warning_level === 'warn1' ? '⚠️ Warning' : warning_level === 'warn2' ? '⚠️⚠️ Final Warning' : '🚫 Kick Notice';
 
         if (member.discord_id && botToken) {
-          const levelLabel = warning_level === 'warn1' ? '⚠️ Warning' : warning_level === 'warn2' ? '⚠️⚠️ Final Warning' : '🚫 Kick Notice';
-          const dmMsg = `${levelLabel}\nYou have received an automated warning in **${guildName}** for inactivity (${daysInactive} days inactive).\nPlease ensure you meet the activity requirements to remain in the guild.`;
+          const dmMsg = `${levelLabel}\nYour character **${member.ign}** in **${guildName}** has been flagged for inactivity (${daysInactive} days inactive).\nPlease ensure you meet the activity requirements to remain in the guild.`;
           const result = await sendDirectMessage(member.discord_id, dmMsg);
           dmSent = result.ok;
           dmError = result.error ?? null;
@@ -212,6 +212,19 @@ export async function POST(req: NextRequest) {
           discord_dm_sent: dmSent,
           discord_dm_error: dmError,
         });
+
+        // Post per-member log line to warn log channel
+        const warnLogChannelId = process.env.DISCORD_WARN_LOG_CHANNEL_ID ?? '1444817080204529694';
+        if (botToken) {
+          const dmStatus = member.discord_id
+            ? (dmSent ? '✅ DM sent' : `❌ DM failed: ${dmError ?? 'unknown'}`)
+            : '❌ No Discord ID';
+          const logLine = `${levelLabel} **${member.ign}** · Guild: **${guildName}** · ${daysInactive} days inactive · ${dmStatus}`;
+          const channelResult = await postToChannel(warnLogChannelId, logLine);
+          if (!channelResult.ok) {
+            console.error(`[auto-warn] Channel post failed for ${member.ign}:`, channelResult.error);
+          }
+        }
       }
 
       // Post summary to Discord log channel

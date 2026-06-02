@@ -48,8 +48,7 @@ export default function Navigation() {
 
   const navLinks: { href: string; label: string; requiresRole?: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER'; requiresSuperAdmin?: boolean }[] = [
     { href: '/', label: 'Dashboard' },
-    { href: '/activity', label: 'Activity' },
-    { href: '/reports', label: 'Discord Output' },
+    { href: '/overview', label: 'Overview' },
     { href: '/warnings', label: 'Warnings' },
     { href: '/members', label: 'Members' },
     { href: '/leaderboard', label: 'Leaderboard' },

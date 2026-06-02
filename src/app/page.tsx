@@ -247,6 +247,20 @@ function DashboardPageContent() {
               </Link>
             </Button>
           )}
+
+          <Button asChild variant="outline" className="h-auto py-4">
+            <Link href="/activity" className="flex flex-col items-center gap-2">
+              <span className="text-2xl">📅</span>
+              <span className="text-sm">Activity</span>
+            </Link>
+          </Button>
+
+          <Button asChild variant="outline" className="h-auto py-4">
+            <Link href="/reports" className="flex flex-col items-center gap-2">
+              <span className="text-2xl">📊</span>
+              <span className="text-sm">Inactivity Report</span>
+            </Link>
+          </Button>
         </CardContent>
       </Card>
     </div>
