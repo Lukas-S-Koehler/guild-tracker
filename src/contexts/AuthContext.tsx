@@ -121,79 +121,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setIsLoadingGuilds(true);
 
           try {
-            // Fetch user's guilds directly - using separate queries to avoid join issues
             console.log('[AuthContext] Fetching guilds for user:', currentUser.id);
-
-            // Step 1: Fetch guild_leaders records
-            const { data: userGuildLeaders, error: leadersError } = await supabase
-              .from('guild_leaders')
-              .select('guild_id, role, joined_at')
-              .eq('user_id', currentUser.id)
-              .order('joined_at', { ascending: true });
-
-            console.log('[AuthContext] Guild leaders query result:', { userGuildLeaders, leadersError });
-
+            const res = await fetch('/api/auth/memberships');
             if (!mounted) return;
-
-            if (leadersError) {
-              console.error('[AuthContext] Error fetching guild leaders:', leadersError);
-              console.error('[AuthContext] Error details:', {
-                message: leadersError.message,
-                code: leadersError.code,
-                details: leadersError.details,
-                hint: leadersError.hint
-              });
-              setGuilds([]);
-            } else if (userGuildLeaders && Array.isArray(userGuildLeaders) && userGuildLeaders.length > 0) {
-              console.log('[AuthContext] Found guild leaders:', userGuildLeaders);
-
-              // Step 2: Fetch guild names for these guild IDs
-              const guildIds = userGuildLeaders.map(g => g.guild_id);
-              const { data: guildsData, error: guildsError } = await supabase
-                .from('guilds')
-                .select('id, name, is_active')
-                .in('id', guildIds);
-
-              console.log('[AuthContext] Guilds data:', { guildsData, guildsError });
-
-              if (guildsError) {
-                console.error('[AuthContext] Error fetching guilds:', guildsError);
-                setGuilds([]);
-                return;
-              }
-
-              // Create a map of guild_id -> guild info
-              const guildInfoMap = new Map<string, { name: string; is_active: boolean }>();
-              guildsData?.forEach(g => guildInfoMap.set(g.id, { name: g.name, is_active: g.is_active ?? true }));
-
-              // Transform the data to match GuildMembership interface
-              const transformedGuilds: GuildMembership[] = userGuildLeaders.map((g: any) => ({
-                guild_id: g.guild_id,
-                guild_name: guildInfoMap.get(g.guild_id)?.name || 'Unknown Guild',
-                role: g.role as 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER',
-                joined_at: g.joined_at,
-                is_active: guildInfoMap.get(g.guild_id)?.is_active ?? true,
-              }));
-
-              const sortedGuilds = sortGuildsByRole(transformedGuilds);
-              setGuilds(sortedGuilds);
+            const data: GuildMembership[] = res.ok ? await res.json() : [];
+            const sorted = sortGuildsByRole(data);
+            setGuilds(sorted);
+            if (sorted.length > 0) {
               hasLoadedInitialGuilds.current = true;
-
-              // Default to saved guild or highest-role guild
               const savedGuildId = localStorage.getItem('currentGuildId');
-              const savedGuild = sortedGuilds.find((g) => g.guild_id === savedGuildId);
-              setCurrentGuildState(savedGuild || sortedGuilds[0]);
+              const savedGuild = sorted.find(g => g.guild_id === savedGuildId);
+              setCurrentGuildState(savedGuild || sorted[0]);
             } else {
-              console.log('[AuthContext] No guilds found for user');
-              // No guilds found
-              setGuilds([]);
               setCurrentGuildState(null);
             }
           } catch (fetchError) {
             console.error('[AuthContext] Error fetching guilds:', fetchError);
             if (mounted) setGuilds([]);
           } finally {
-            // Always clear loading state — even if unmounted, stuck isLoadingGuilds causes infinite spinner
             setIsLoadingGuilds(false);
             loadingGuildsRef = false;
           }
@@ -242,76 +187,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setIsLoadingGuilds(true);
 
           try {
-            // Fetch user's guilds directly - using separate queries to avoid join issues
             console.log('[AuthContext] Fetching guilds for user:', session.user.id);
-
-            // Step 1: Fetch guild_leaders records
-            const { data: userGuildLeaders, error: leadersError } = await supabase
-              .from('guild_leaders')
-              .select('guild_id, role, joined_at')
-              .eq('user_id', session.user.id)
-              .order('joined_at', { ascending: true });
-
-            console.log('[AuthContext] Guild leaders query result:', { userGuildLeaders, leadersError });
-
+            const res = await fetch('/api/auth/memberships');
             if (!mounted) return;
-
-            if (leadersError) {
-              console.error('[AuthContext] Error fetching guild leaders:', leadersError);
-              console.error('[AuthContext] Error details:', {
-                message: leadersError.message,
-                code: leadersError.code,
-                details: leadersError.details,
-                hint: leadersError.hint
-              });
-              setGuilds([]);
-            } else if (userGuildLeaders && Array.isArray(userGuildLeaders) && userGuildLeaders.length > 0) {
-              console.log('[AuthContext] Found guild leaders:', userGuildLeaders);
-
-              // Step 2: Fetch guild info for these guild IDs
-              const guildIds = userGuildLeaders.map(g => g.guild_id);
-              const { data: guildsData, error: guildsError } = await supabase
-                .from('guilds')
-                .select('id, name, is_active')
-                .in('id', guildIds);
-
-              console.log('[AuthContext] Guilds data:', { guildsData, guildsError });
-
-              if (guildsError) {
-                console.error('[AuthContext] Error fetching guilds:', guildsError);
-                setGuilds([]);
-                return;
-              }
-
-              // Create a map of guild_id -> guild info
-              const guildInfoMap2 = new Map<string, { name: string; is_active: boolean }>();
-              guildsData?.forEach(g => guildInfoMap2.set(g.id, { name: g.name, is_active: g.is_active ?? true }));
-
-              // Transform the data to match GuildMembership interface
-              const transformedGuilds: GuildMembership[] = userGuildLeaders.map((g: any) => ({
-                guild_id: g.guild_id,
-                guild_name: guildInfoMap2.get(g.guild_id)?.name || 'Unknown Guild',
-                role: g.role as 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER',
-                joined_at: g.joined_at,
-                is_active: guildInfoMap2.get(g.guild_id)?.is_active ?? true,
-              }));
-
-              setGuilds(transformedGuilds);
-              hasLoadedInitialGuilds.current = true; // Mark that we've loaded guilds
-
+            const data: GuildMembership[] = res.ok ? await res.json() : [];
+            const sorted = sortGuildsByRole(data);
+            setGuilds(sorted);
+            if (sorted.length > 0) {
+              hasLoadedInitialGuilds.current = true;
               const savedGuildId = localStorage.getItem('currentGuildId');
-              const savedGuild = transformedGuilds.find((g) => g.guild_id === savedGuildId);
-              setCurrentGuildState(savedGuild || transformedGuilds[0]);
+              const savedGuild = sorted.find(g => g.guild_id === savedGuildId);
+              setCurrentGuildState(savedGuild || sorted[0]);
             } else {
-              console.log('[AuthContext] No guilds found for user');
-              setGuilds([]);
               setCurrentGuildState(null);
             }
           } catch (fetchError) {
             console.error('[AuthContext] Error fetching guilds:', fetchError);
             if (mounted) setGuilds([]);
           } finally {
-            // Always clear loading — stuck isLoadingGuilds causes infinite spinner
             setIsLoadingGuilds(false);
             loadingGuildsRef = false;
           }

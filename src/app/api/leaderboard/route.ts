@@ -39,18 +39,28 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(entries.map((e) => ({ ...e, alt_count: 0, alt_igns: [] })));
   }
 
-  // Merge alt characters: group entries by account via member_alts
-  // Fetch alt links for all members in this result set
   const memberIds = entries.map((e) => e.id);
   if (memberIds.length === 0) return NextResponse.json([]);
 
+  // Fetch alt links for members in result set
   const { data: altLinks } = await supabase
     .from('member_alts')
-    .select('member_id, alt_member_id, alt_ign')
+    .select('member_id, alt_member_id, alt_ign, alt_hashed_id')
     .in('member_id', memberIds);
 
-  // Build union-find groups: canonically group alts together
-  // member_id → canonical id (lowest in group)
+  // Fetch character_id for all members (lowest = main account)
+  const { data: memberCharIds } = await supabase
+    .from('members')
+    .select('id, character_id')
+    .in('id', memberIds);
+
+  const charIdMap = new Map<string, number>(
+    (memberCharIds ?? [])
+      .filter((m) => m.character_id != null)
+      .map((m) => [m.id, m.character_id as number])
+  );
+
+  // Union-find: group alts together
   const parent = new Map<string, string>();
 
   function find(id: string): string {
@@ -65,11 +75,13 @@ export async function GET(req: NextRequest) {
   function union(a: string, b: string) {
     const ra = find(a);
     const rb = find(b);
-    if (ra !== rb) {
-      // smaller string wins as canonical
-      if (ra < rb) parent.set(rb, ra);
-      else parent.set(ra, rb);
-    }
+    if (ra === rb) return;
+    // Canonical = member with lower character_id (= main account)
+    // Fall back to string sort if character_id unknown
+    const charA = charIdMap.get(ra) ?? Infinity;
+    const charB = charIdMap.get(rb) ?? Infinity;
+    if (charA <= charB) parent.set(rb, ra);
+    else parent.set(ra, rb);
   }
 
   for (const link of altLinks ?? []) {
@@ -87,16 +99,32 @@ export async function GET(req: NextRequest) {
     groups.set(canonical, group);
   }
 
-  // Build merged entries: canonical member is highest activity_score in group
+  // Build merged entries: main = member with lowest character_id in group
   const merged_entries = Array.from(groups.values()).map((group) => {
-    group.sort((a, b) => b.activity_score - a.activity_score);
+    // Sort by character_id ascending (main first), fall back to activity_score desc
+    group.sort((a, b) => {
+      const cA = charIdMap.get(a.id) ?? Infinity;
+      const cB = charIdMap.get(b.id) ?? Infinity;
+      if (cA !== cB) return cA - cB;
+      return b.activity_score - a.activity_score;
+    });
     const main = group[0];
     const alts = group.slice(1);
 
-    // Also include named alts from member_alts table that aren't tracked members
-    const namedAlts = (altLinks ?? [])
-      .filter((l) => find(l.member_id) === find(main.id) && !memberIds.includes(l.alt_member_id ?? ''))
-      .map((l) => l.alt_ign);
+    // Named alts: untracked chars linked from any member in this group
+    // Deduplicate by alt_hashed_id to avoid counting same char multiple times
+    const seenHashedIds = new Set<string>(group.map((e) => e.id)); // not needed but guard
+    const namedAltsMap = new Map<string, string>(); // hashed_id → ign
+
+    for (const link of altLinks ?? []) {
+      if (find(link.member_id) !== find(main.id)) continue;
+      if (memberIds.includes(link.alt_member_id ?? '')) continue; // tracked member, counted in alts[]
+      if (link.alt_hashed_id) {
+        namedAltsMap.set(link.alt_hashed_id, link.alt_ign);
+      }
+    }
+
+    const namedAltIgns = Array.from(namedAltsMap.values());
 
     return {
       ...main,
@@ -104,8 +132,8 @@ export async function GET(req: NextRequest) {
       total_gold: group.reduce((s, e) => s + (e.total_gold ?? 0), 0),
       activity_score: group.reduce((s, e) => s + (e.activity_score ?? 0), 0),
       days_active: Math.max(...group.map((e) => e.days_active ?? 0)),
-      alt_count: alts.length + namedAlts.length,
-      alt_igns: [...alts.map((a) => a.ign), ...namedAlts],
+      alt_count: alts.length + namedAltIgns.length,
+      alt_igns: [...alts.map((a) => a.ign), ...namedAltIgns],
     };
   });
 

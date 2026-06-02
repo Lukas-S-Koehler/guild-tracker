@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Check, AlertCircle, Search, Info, MessageSquare, HelpCircle, Link2, Crown } from 'lucide-react';
+import { Loader2, Check, AlertCircle, Search, Info, MessageSquare, HelpCircle, Link2, Crown, BarChart2 } from 'lucide-react';
 import { useApiClient } from '@/lib/api-client';
 import { useAuth } from '@/contexts/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -97,37 +97,54 @@ function DiscordMappingContent() {
   const statsLoaded = useRef(false);
 
   useEffect(() => {
-    // Reset so stats reload when guilds list changes (e.g. super admin fetch completes)
     statsLoaded.current = false;
     setAllStats(null);
     setPerGuildStats([]);
-  }, [accessibleGuilds.length]);
+  }, [isSuperAdmin, accessibleGuilds.length]);
 
   useEffect(() => {
-    if (statsLoaded.current || accessibleGuilds.length === 0) return;
+    if (statsLoaded.current) return;
     statsLoaded.current = true;
     setLoadingStats(true);
-    Promise.all(
-      accessibleGuilds.map(g =>
-        api.get('/api/members/list', { guildId: g.guild_id })
-          .then(r => r.ok ? r.json() : [])
-          .catch(() => [] as GuildMemberDiscord[])
-      )
-    ).then(results => {
-      let total = 0;
-      let mapped = 0;
-      const stats: GuildStat[] = accessibleGuilds.map((g, i) => {
-        const list: GuildMemberDiscord[] = Array.isArray(results[i]) ? results[i] : [];
-        const gMapped = list.filter(m => m.discord_id).length;
-        total += list.length;
-        mapped += gMapped;
-        return { guild_id: g.guild_id, guild_name: g.guild_name, total: list.length, mapped: gMapped };
-      });
-      setAllStats({ total, mapped });
-      setPerGuildStats(stats);
-    }).finally(() => setLoadingStats(false));
+
+    if (isSuperAdmin) {
+      // Super admin: fetch per accessible-guild via members/list
+      if (accessibleGuilds.length === 0) { setLoadingStats(false); return; }
+      Promise.all(
+        accessibleGuilds.map(g =>
+          api.get('/api/members/list', { guildId: g.guild_id })
+            .then(r => r.ok ? r.json() : [])
+            .catch(() => [] as GuildMemberDiscord[])
+        )
+      ).then(results => {
+        let total = 0;
+        let mapped = 0;
+        const stats: GuildStat[] = accessibleGuilds.map((g, i) => {
+          const list: GuildMemberDiscord[] = Array.isArray(results[i]) ? results[i] : [];
+          const gMapped = list.filter(m => m.discord_id).length;
+          total += list.length;
+          mapped += gMapped;
+          return { guild_id: g.guild_id, guild_name: g.guild_name, total: list.length, mapped: gMapped };
+        });
+        setAllStats({ total, mapped });
+        setPerGuildStats(stats);
+      }).finally(() => setLoadingStats(false));
+    } else {
+      // Officer+: fetch aggregate stats from guild-stats endpoint (all guilds, counts only)
+      fetch('/api/discord/guild-stats')
+        .then(r => r.ok ? r.json() : [])
+        .then((data: GuildStat[]) => {
+          const stats: GuildStat[] = Array.isArray(data) ? data : [];
+          const total = stats.reduce((s, g) => s + g.total, 0);
+          const mapped = stats.reduce((s, g) => s + g.mapped, 0);
+          setAllStats({ total, mapped });
+          setPerGuildStats(stats);
+        })
+        .catch(() => setLoadingStats(false))
+        .finally(() => setLoadingStats(false));
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accessibleGuilds.length]);
+  }, [isSuperAdmin, accessibleGuilds.length]);
 
   const patchMember = useCallback(async (memberId: string, guildId: string, discord_id: string | null, discord_username: string | null) => {
     return api.patch(`/api/members/list?member_id=${memberId}`, { discord_id, discord_username }, { guildId });
@@ -297,7 +314,9 @@ function DiscordMappingContent() {
     (m.discord_username ?? '').toLowerCase().includes(search.toLowerCase())
   );
 
-  if (accessibleGuilds.length === 0) {
+  const accessibleGuildIds = new Set(accessibleGuilds.map(g => g.guild_id));
+
+  if (accessibleGuilds.length === 0 && !isSuperAdmin) {
     return (
       <div className="max-w-4xl mx-auto text-center py-16 text-muted-foreground">
         No guilds with Officer+ access found.
@@ -338,70 +357,89 @@ function DiscordMappingContent() {
         )}
       </div>
 
-      {/* Super admin overview */}
-      {isSuperAdmin && (
-        <Card className="border-yellow-500/30 bg-yellow-500/5">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Crown className="h-4 w-4 text-yellow-500" />
-              All Guilds Overview
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pb-4 space-y-3">
-            {loadingStats ? (
-              <div className="flex justify-center py-4">
-                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+      {/* All guilds overview — visible to all officer+ */}
+      <Card className={isSuperAdmin ? 'border-yellow-500/30 bg-yellow-500/5' : 'border-border bg-muted/20'}>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            {isSuperAdmin
+              ? <Crown className="h-4 w-4 text-yellow-500" />
+              : <BarChart2 className="h-4 w-4 text-muted-foreground" />
+            }
+            All Guilds Overview
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pb-4 space-y-3">
+          {loadingStats ? (
+            <div className="flex justify-center py-4">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <>
+              {/* Totals row */}
+              <div className="grid grid-cols-4 gap-2 text-center">
+                {[
+                  { label: 'Guilds', value: perGuildStats.length, color: '' },
+                  { label: 'Members', value: allStats?.total ?? 0, color: '' },
+                  { label: 'Mapped', value: allStats?.mapped ?? 0, color: 'text-green-500' },
+                  { label: 'Unmapped', value: (allStats?.total ?? 0) - (allStats?.mapped ?? 0), color: (allStats?.total ?? 0) - (allStats?.mapped ?? 0) > 0 ? 'text-orange-400' : 'text-green-500' },
+                ].map(s => (
+                  <div key={s.label} className="p-2 rounded border bg-background">
+                    <div className={`text-lg font-bold ${s.color}`}>{s.value}</div>
+                    <div className="text-xs text-muted-foreground">{s.label}</div>
+                  </div>
+                ))}
               </div>
-            ) : (
-              <>
-                {/* Totals row */}
-                <div className="grid grid-cols-4 gap-2 text-center">
-                  {[
-                    { label: 'Guilds', value: perGuildStats.length, color: '' },
-                    { label: 'Members', value: allStats?.total ?? 0, color: '' },
-                    { label: 'Mapped', value: allStats?.mapped ?? 0, color: 'text-green-500' },
-                    { label: 'Unmapped', value: (allStats?.total ?? 0) - (allStats?.mapped ?? 0), color: (allStats?.total ?? 0) - (allStats?.mapped ?? 0) > 0 ? 'text-orange-400' : 'text-green-500' },
-                  ].map(s => (
-                    <div key={s.label} className="p-2 rounded border bg-background">
-                      <div className={`text-lg font-bold ${s.color}`}>{s.value}</div>
-                      <div className="text-xs text-muted-foreground">{s.label}</div>
-                    </div>
-                  ))}
-                </div>
 
-                {/* Per-guild breakdown */}
-                <div className="space-y-1.5 max-h-56 overflow-y-auto">
-                  {perGuildStats
-                    .slice()
-                    .sort((a, b) => (a.mapped / Math.max(a.total, 1)) - (b.mapped / Math.max(b.total, 1)))
-                    .map(g => {
-                      const pct = g.total > 0 ? Math.round((g.mapped / g.total) * 100) : 0;
-                      return (
-                        <button
-                          key={g.guild_id}
-                          className="w-full flex items-center gap-2 text-xs py-1 px-2 rounded hover:bg-muted/50 transition-colors text-left"
-                          onClick={() => { setSelectedGuildId(g.guild_id); setSearch(''); }}
-                        >
-                          <span className="font-medium w-32 truncate shrink-0">{g.guild_name}</span>
-                          <span className="text-green-500 shrink-0 w-8 text-right">{g.mapped}</span>
-                          <span className="text-muted-foreground shrink-0">/</span>
-                          <span className="text-muted-foreground shrink-0 w-6">{g.total}</span>
-                          <div className="flex-1 bg-muted rounded-full h-1.5 min-w-0">
-                            <div
-                              className={`h-1.5 rounded-full transition-all ${pct === 100 ? 'bg-green-500' : pct > 50 ? 'bg-blue-500' : 'bg-orange-400'}`}
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                          <span className="text-muted-foreground shrink-0 w-8 text-right">{pct}%</span>
-                        </button>
-                      );
-                    })}
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      )}
+              {/* Per-guild breakdown */}
+              <div className="space-y-1.5 max-h-56 overflow-y-auto">
+                {perGuildStats
+                  .slice()
+                  .sort((a, b) => (a.mapped / Math.max(a.total, 1)) - (b.mapped / Math.max(b.total, 1)))
+                  .map(g => {
+                    const pct = g.total > 0 ? Math.round((g.mapped / g.total) * 100) : 0;
+                    const canAccess = accessibleGuildIds.has(g.guild_id);
+                    return canAccess ? (
+                      <button
+                        key={g.guild_id}
+                        className="w-full flex items-center gap-2 text-xs py-1 px-2 rounded hover:bg-muted/50 transition-colors text-left"
+                        onClick={() => { setSelectedGuildId(g.guild_id); setSearch(''); }}
+                      >
+                        <span className="font-medium w-32 truncate shrink-0">{g.guild_name}</span>
+                        <span className="text-green-500 shrink-0 w-8 text-right">{g.mapped}</span>
+                        <span className="text-muted-foreground shrink-0">/</span>
+                        <span className="text-muted-foreground shrink-0 w-6">{g.total}</span>
+                        <div className="flex-1 bg-muted rounded-full h-1.5 min-w-0">
+                          <div
+                            className={`h-1.5 rounded-full transition-all ${pct === 100 ? 'bg-green-500' : pct > 50 ? 'bg-blue-500' : 'bg-orange-400'}`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                        <span className="text-muted-foreground shrink-0 w-8 text-right">{pct}%</span>
+                      </button>
+                    ) : (
+                      <div
+                        key={g.guild_id}
+                        className="w-full flex items-center gap-2 text-xs py-1 px-2 rounded text-left opacity-60 cursor-default"
+                      >
+                        <span className="font-medium w-32 truncate shrink-0">{g.guild_name}</span>
+                        <span className="text-green-500 shrink-0 w-8 text-right">{g.mapped}</span>
+                        <span className="text-muted-foreground shrink-0">/</span>
+                        <span className="text-muted-foreground shrink-0 w-6">{g.total}</span>
+                        <div className="flex-1 bg-muted rounded-full h-1.5 min-w-0">
+                          <div
+                            className={`h-1.5 rounded-full transition-all ${pct === 100 ? 'bg-green-500' : pct > 50 ? 'bg-blue-500' : 'bg-orange-400'}`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                        <span className="text-muted-foreground shrink-0 w-8 text-right">{pct}%</span>
+                      </div>
+                    );
+                  })}
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Aggregate stats */}
       <div className="grid grid-cols-3 gap-3">
@@ -414,7 +452,7 @@ function DiscordMappingContent() {
             )}
             <div className="text-xs text-muted-foreground mt-0.5">
               Total Members
-              {accessibleGuilds.length > 1 && <span className="ml-1 opacity-60">({accessibleGuilds.length} guilds)</span>}
+              {perGuildStats.length > 1 && <span className="ml-1 opacity-60">({perGuildStats.length} guilds)</span>}
             </div>
           </CardContent>
         </Card>

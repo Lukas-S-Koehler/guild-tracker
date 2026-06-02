@@ -38,7 +38,6 @@ export async function POST(req: NextRequest) {
   const supabase = createAdminClient();
   const { guildId } = auth;
 
-  // Get API key for this guild
   const { data: config } = await supabase
     .from('guild_config')
     .select('api_key')
@@ -51,15 +50,14 @@ export async function POST(req: NextRequest) {
 
   const api = new IdleMMOApi(config.api_key);
 
-  // Fetch all active members with a hashed_id
-  const { data: members } = await supabase
+  const { data: guildMembers } = await supabase
     .from('members')
-    .select('id, ign, hashed_id')
+    .select('id, ign, hashed_id, character_id')
     .eq('current_guild_id', guildId)
     .eq('is_active', true)
     .not('hashed_id', 'is', null);
 
-  if (!members || members.length === 0) {
+  if (!guildMembers || guildMembers.length === 0) {
     return NextResponse.json({
       processed: 0,
       alts_found: 0,
@@ -67,7 +65,7 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Fetch all tracked members' hashed_ids for cross-referencing
+  // All tracked members globally for cross-referencing alt_member_id
   const { data: allMembers } = await supabase
     .from('members')
     .select('id, ign, hashed_id, current_guild_id')
@@ -79,41 +77,71 @@ export async function POST(req: NextRequest) {
   );
 
   let processed = 0;
-  let altsFound = 0;
   const errors: string[] = [];
 
-  for (const member of members) {
-    if (!member.hashed_id) continue;
+  type ApiChar = { id: number; hashed_id: string; name: string };
+  type GuildMember = typeof guildMembers[number];
+  const accountGroups = new Map<string, { chars: ApiChar[]; trackedMembers: GuildMember[] }>();
 
+  // Phase 1: fetch API data, populate character_id, group by account
+  for (const member of guildMembers) {
+    if (!member.hashed_id) continue;
     try {
-      const alts = await api.getCharacterAlts(member.hashed_id);
+      const chars = await api.getCharacterAlts(member.hashed_id);
       processed++;
 
-      // Filter out the member themselves
-      const otherAlts = alts.filter((a) => a.hashed_id !== member.hashed_id);
-      altsFound += otherAlts.length;
-
-      for (const alt of otherAlts) {
-        const altMember = hashedIdToMember.get(alt.hashed_id);
-
-        await supabase.from('member_alts').upsert(
-          {
-            member_id: member.id,
-            alt_ign: alt.name,
-            alt_hashed_id: alt.hashed_id,
-            alt_member_id: altMember?.id ?? null,
-            fetched_at: new Date().toISOString(),
-          },
-          { onConflict: 'member_id,alt_hashed_id' }
-        );
+      const selfChar = chars.find((c) => c.hashed_id === member.hashed_id);
+      if (selfChar && member.character_id !== selfChar.id) {
+        await supabase.from('members').update({ character_id: selfChar.id }).eq('id', member.id);
+        member.character_id = selfChar.id;
       }
 
-      // Brief rate-limit pause
+      const minId = chars.reduce((m, c) => Math.min(m, c.id), Infinity);
+      const key = String(minId);
+
+      if (!accountGroups.has(key)) {
+        accountGroups.set(key, { chars, trackedMembers: [] });
+      }
+      const group = accountGroups.get(key)!;
+      if (chars.length > group.chars.length) group.chars = chars;
+      group.trackedMembers.push(member);
+
       await new Promise((r) => setTimeout(r, 200));
     } catch (err) {
       errors.push(`${member.ign}: ${String(err)}`);
     }
   }
 
-  return NextResponse.json({ processed, alts_found: altsFound, errors });
+  // Phase 2: write clean, canonical alt links
+  let totalAltLinks = 0;
+
+  for (const { chars, trackedMembers } of Array.from(accountGroups.values())) {
+    trackedMembers.sort((a: GuildMember, b: GuildMember) => (a.character_id ?? 999999) - (b.character_id ?? 999999));
+    const representative = trackedMembers[0];
+
+    const groupMemberIds = trackedMembers.map((m: GuildMember) => m.id);
+    await supabase.from('member_alts').delete().in('member_id', groupMemberIds);
+
+    const otherChars = chars.filter((c: ApiChar) => c.hashed_id !== representative.hashed_id);
+    totalAltLinks += otherChars.length;
+
+    for (const char of otherChars) {
+      const altMember = hashedIdToMember.get(char.hashed_id);
+      await supabase.from('member_alts').insert({
+        member_id: representative.id,
+        alt_ign: char.name,
+        alt_hashed_id: char.hashed_id,
+        alt_character_id: char.id,
+        alt_member_id: altMember?.id ?? null,
+        fetched_at: new Date().toISOString(),
+      });
+    }
+  }
+
+  return NextResponse.json({
+    processed,
+    accounts_grouped: accountGroups.size,
+    alt_links_written: totalAltLinks,
+    errors,
+  });
 }
