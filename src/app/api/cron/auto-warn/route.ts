@@ -139,6 +139,9 @@ export async function POST(req: NextRequest) {
 
       const memberSet = new Set(memberIds);
 
+      // Collect all inactive members for the full inactivity report
+      const inactiveReport: Array<{ ign: string; daysInactive: number; warning_level: string; discord_id: string | null }> = [];
+
       for (const member of members) {
         let lastDate = lastActivityMap.get(member.id);
 
@@ -175,6 +178,9 @@ export async function POST(req: NextRequest) {
 
         const { warning_level } = getWarningInfo(daysInactive, period);
         if (warning_level === 'safe') continue;
+
+        // Add to full inactivity report (all inactive, regardless of warn status)
+        inactiveReport.push({ ign: member.ign, daysInactive, warning_level, discord_id: member.discord_id ?? null });
 
         // Check if already warned at this level or higher in last 7 days
         const alreadyWarnedLevel = recentlyWarnedLevel.get(member.id);
@@ -213,24 +219,51 @@ export async function POST(req: NextRequest) {
           discord_dm_error: dmError,
         });
 
-        // Post per-member log line to warn log channel
-        const warnLogChannelId = process.env.DISCORD_WARN_LOG_CHANNEL_ID ?? '1444817080204529694';
-        if (botToken) {
+        // Post per-member DM confirmation to warn log channel
+        const warnLogChannelId = process.env.DISCORD_WARN_LOG_CHANNEL_ID;
+        if (warnLogChannelId && botToken) {
           const dmStatus = member.discord_id
             ? (dmSent ? '✅ DM sent' : `❌ DM failed: ${dmError ?? 'unknown'}`)
             : '❌ No Discord ID';
           const logLine = `${levelLabel} **${member.ign}** · Guild: **${guildName}** · ${daysInactive} days inactive · ${dmStatus}`;
           const channelResult = await postToChannel(warnLogChannelId, logLine);
           if (!channelResult.ok) {
-            console.error(`[auto-warn] Channel post failed for ${member.ign}:`, channelResult.error);
+            console.error(`[auto-warn] Warn log post failed for ${member.ign}:`, channelResult.error);
           }
         }
       }
 
-      // Post summary to Discord log channel
-      if (logChannelId && botToken && (warned > 0 || noDiscord > 0)) {
-        const summaryMsg = `**${guildName} — Auto-Warn Complete**\n✉️ DMs sent: ${warned}\n⚠️ No Discord ID: ${noDiscord}\n⏭️ Already warned: ${skipped}`;
-        await postToChannel(logChannelId, summaryMsg);
+      // Post full inactivity report to guild log channel
+      if (logChannelId && botToken && inactiveReport.length > 0) {
+        const kickList = inactiveReport.filter((m) => m.warning_level === 'kick').sort((a, b) => b.daysInactive - a.daysInactive);
+        const warn2List = inactiveReport.filter((m) => m.warning_level === 'warn2').sort((a, b) => b.daysInactive - a.daysInactive);
+        const warn1List = inactiveReport.filter((m) => m.warning_level === 'warn1').sort((a, b) => b.daysInactive - a.daysInactive);
+
+        const lines: string[] = [`**${guildName} — Inactivity Report**`];
+        if (kickList.length) {
+          lines.push(`\n🚫 **Kick Notice** (${kickList.length})`);
+          kickList.forEach((m) => lines.push(`• **${m.ign}** — ${m.daysInactive}d inactive${m.discord_id ? '' : ' · ❌ no Discord'}`));
+        }
+        if (warn2List.length) {
+          lines.push(`\n⚠️⚠️ **Final Warning** (${warn2List.length})`);
+          warn2List.forEach((m) => lines.push(`• **${m.ign}** — ${m.daysInactive}d inactive${m.discord_id ? '' : ' · ❌ no Discord'}`));
+        }
+        if (warn1List.length) {
+          lines.push(`\n⚠️ **Warning** (${warn1List.length})`);
+          warn1List.forEach((m) => lines.push(`• **${m.ign}** — ${m.daysInactive}d inactive${m.discord_id ? '' : ' · ❌ no Discord'}`));
+        }
+
+        // Chunk into messages under 2000 chars
+        let chunk = '';
+        for (const line of lines) {
+          if ((chunk + '\n' + line).length > 1900) {
+            await postToChannel(logChannelId, chunk.trim());
+            chunk = line;
+          } else {
+            chunk = chunk ? chunk + '\n' + line : line;
+          }
+        }
+        if (chunk) await postToChannel(logChannelId, chunk.trim());
       }
 
       summary.push({ guild: guildName, warned, skipped, no_discord: noDiscord });
