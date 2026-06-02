@@ -349,26 +349,17 @@ export async function GET(req: NextRequest) {
     return result;
   };
 
-  const ADMIN_HASHED_ID = '6aDoyRnLyEey9LpV5AGX';
-  const adminMember = members.find((m) => m.hashed_id === ADMIN_HASHED_ID);
-  const adminMemberId = adminMember?.id;
-  // Admin may be representative or an alt — find the whole account group
-  const adminRepresentativeId = adminMemberId
-    ? (altToMain.get(adminMemberId) ?? adminMemberId)
-    : undefined;
-  const adminAccountIds = new Set<string>();
-  if (adminRepresentativeId) {
-    adminAccountIds.add(adminRepresentativeId);
-    for (const altId of mainToAlts.get(adminRepresentativeId) ?? []) {
-      adminAccountIds.add(altId);
-    }
-  }
+  const ADMIN_HASHED_IDS = new Set([
+    '6aDoyRnLyEey9LpV5AGX',
+    'AB1E9poQq7VOKYnakeJj',
+    'o31P7kZL6Z31BLveGxXO',
+  ]);
 
   const resultMembers: OverviewMember[] = members
     .filter((m) => {
       if (!m.ign || m.ign.toLowerCase().includes('raw activity') || m.ign.toLowerCase().includes('log')) return false;
       if (m.position === 'LEADER' || m.position === 'DEPUTY') return false;
-      if (adminAccountIds.has(m.id)) return false;
+      if (m.hashed_id && ADMIN_HASHED_IDS.has(m.hashed_id)) return false;
       return true;
     })
     .map((member) => {
