@@ -1,16 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient, createAdminClient } from '@/lib/supabase-server';
+import { createAdminClient } from '@/lib/supabase-server';
 
-// GET /api/guilds/status
-// Returns all guilds with donation_requirement and last_fetched_at
-// Any authenticated user can call this regardless of guild membership
+// GET /api/guilds/status — public, no auth required
 export async function GET(req: NextRequest) {
-  const supabase = createServerClient(req);
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
   const admin = createAdminClient();
 
   const [guildsResult, configsResult, memberSyncResult] = await Promise.all([

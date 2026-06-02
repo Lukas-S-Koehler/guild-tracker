@@ -28,18 +28,27 @@ export function getToday(): string {
   return new Date().toISOString().split('T')[0];
 }
 
+// Returns yesterday if before cron time (11:00 UTC), else today.
+// Avoids showing empty activity page in morning before cron runs.
+export function getLastCompletedDay(): string {
+  const now = new Date();
+  if (now.getUTCHours() < 11) {
+    const y = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
+    return y.toISOString().split('T')[0];
+  }
+  return now.toISOString().split('T')[0];
+}
+
 export function getWeekStart(): string {
-  const date = new Date();
-  const day = date.getDay();
-  const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-  date.setDate(diff);
-  return date.toISOString().split('T')[0];
+  const now = new Date();
+  const day = now.getUTCDay();
+  const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - day + (day === 0 ? -6 : 1)));
+  return monday.toISOString().split('T')[0];
 }
 
 export function getMonthStart(): string {
-  const date = new Date();
-  date.setDate(1);
-  return date.toISOString().split('T')[0];
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().split('T')[0];
 }
 
 export function calculateActivityScore(raids: number, goldDonated: number): number {

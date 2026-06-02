@@ -31,12 +31,12 @@ interface DashboardData {
 }
 
 function DashboardPageContent() {
-  const { hasRole, loading: authLoading, user } = useAuth();
+  const { hasRole, loading: authLoading, currentGuild } = useAuth();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (authLoading || !user) {
+    if (authLoading || !currentGuild) {
       setLoading(authLoading);
       return;
     }
@@ -58,7 +58,7 @@ function DashboardPageContent() {
     }
 
     fetchDashboard();
-  }, [authLoading, user]);
+  }, [authLoading, currentGuild]);
 
   if (loading) {
     return (

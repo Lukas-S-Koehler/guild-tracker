@@ -12,17 +12,20 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children, requiredRole, requiredGuildLeader }: ProtectedRouteProps) {
-  const { user, loading, currentGuild, guilds, hasRole, isLeaderOf, isSuperAdmin, signOut } = useAuth();
+  const { user, loading, currentGuild, guilds, hasRole, isLeaderOf, isSuperAdmin, isGuest, signOut } = useAuth();
   const router = useRouter();
   const [isRedirecting, setIsRedirecting] = useState(false);
 
   useEffect(() => {
     if (loading) return;
 
-    // Not authenticated - redirect to login
+    // Guest mode — only MEMBER routes allowed, and only if a guild is loaded
     if (!user) {
-      setIsRedirecting(true);
-      router.push('/login');
+      const isGuestAllowed = requiredRole === 'MEMBER' && !requiredGuildLeader && currentGuild;
+      if (!isGuestAllowed) {
+        setIsRedirecting(true);
+        router.push('/login');
+      }
       return;
     }
 
@@ -62,6 +65,11 @@ export default function ProtectedRoute({ children, requiredRole, requiredGuildLe
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
+  }
+
+  // Guest mode — allow MEMBER routes
+  if (!user && requiredRole === 'MEMBER' && !requiredGuildLeader && currentGuild) {
+    return <>{children}</>;
   }
 
   // Not authenticated

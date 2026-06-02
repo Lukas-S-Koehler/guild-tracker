@@ -1,18 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
-import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
+import { createAdminClient } from '@/lib/supabase-server';
+import { verifyAuthOrPublic, isErrorResponse } from '@/lib/auth-helpers';
 
-/**
- * GET /api/activity/history
- * Returns activity logs grouped by date for the current guild
- */
+// GET /api/activity/history — public, no auth required
 export async function GET(req: NextRequest) {
-  // Verify authentication (members can view)
-  const auth = await verifyAuth(req, 'MEMBER');
+  const auth = await verifyAuthOrPublic(req);
   if (isErrorResponse(auth)) return auth;
 
   const { guildId } = auth;
-  const supabase = createServerClient(req);
+  const supabase = createAdminClient();
 
   // Get all daily_logs for this guild, grouped by date
   const { data: logs, error } = await supabase

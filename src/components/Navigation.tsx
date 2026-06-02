@@ -17,7 +17,7 @@ import { ChevronDown, User, LogOut, Users, Shield, Crown } from 'lucide-react';
 
 export default function Navigation() {
   const pathname = usePathname();
-  const { user, currentGuild, guilds, signOut, hasRole, isSuperAdmin } = useAuth();
+  const { user, currentGuild, guilds, signOut, hasRole, isSuperAdmin, isGuest, setCurrentGuild } = useAuth();
 
   // Don't show navigation on auth pages
   if (pathname === '/login' || pathname === '/signup' || pathname === '/guilds') {
@@ -46,15 +46,15 @@ export default function Navigation() {
     }
   };
 
-  const navLinks = [
+  const navLinks: { href: string; label: string; requiresRole?: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER'; requiresSuperAdmin?: boolean }[] = [
     { href: '/', label: 'Dashboard' },
     { href: '/activity', label: 'Activity' },
     { href: '/reports', label: 'Discord Output' },
     { href: '/members', label: 'Members' },
     { href: '/leaderboard', label: 'Leaderboard' },
-    { href: '/challenges', label: 'Challenges', requiresRole: 'OFFICER' as const },
-    { href: '/data-management', label: 'Manage Data', requiresRole: 'OFFICER' as const },
-    { href: '/admin', label: 'Admin', requiresRole: 'LEADER' as const },
+    { href: '/challenges', label: 'Challenges', requiresRole: 'OFFICER' },
+    { href: '/data-management', label: 'Manage Data', requiresSuperAdmin: true },
+    { href: '/admin', label: 'Admin', requiresRole: 'LEADER' },
   ];
 
   return (
@@ -67,13 +67,11 @@ export default function Navigation() {
 
           <div className="flex items-center gap-4">
             {/* Navigation Links */}
-            {user && currentGuild && (
+            {currentGuild && (
               <div className="flex items-center gap-1 text-sm">
                 {navLinks.map((link) => {
-                  // Super admin sees all nav links
-                  if (!isSuperAdmin && link.requiresRole && !hasRole(link.requiresRole)) {
-                    return null;
-                  }
+                  if (link.requiresSuperAdmin && !isSuperAdmin) return null;
+                  if (!isSuperAdmin && link.requiresRole && !hasRole(link.requiresRole)) return null;
 
                   const isActive = pathname === link.href;
                   return (
@@ -94,35 +92,40 @@ export default function Navigation() {
             )}
 
             {/* Guild Indicator & User Menu */}
-            {user && currentGuild ? (
+            {currentGuild ? (
               <div className="flex items-center gap-2">
-                {/* Guild List Display */}
+                {/* Guild selector */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" size="sm" className="gap-2">
                       <span className="font-medium">{currentGuild.guild_name}</span>
-                      <Badge variant="outline" className={`${getRoleBadgeColor(currentGuild.role)} text-xs`}>
-                        {getRoleIcon(currentGuild.role)}
-                      </Badge>
+                      {!isGuest && (
+                        <Badge variant="outline" className={`${getRoleBadgeColor(currentGuild.role)} text-xs`}>
+                          {getRoleIcon(currentGuild.role)}
+                        </Badge>
+                      )}
                       {guilds.length > 1 && <ChevronDown className="h-3 w-3" />}
                     </Button>
                   </DropdownMenuTrigger>
                   {guilds.length > 1 && (
                     <DropdownMenuContent align="end" className="w-56">
-                      <DropdownMenuLabel>My Guilds</DropdownMenuLabel>
+                      <DropdownMenuLabel>{isGuest ? 'Select Guild' : 'My Guilds'}</DropdownMenuLabel>
                       <DropdownMenuSeparator />
                       {guilds.map((guild) => (
                         <DropdownMenuItem
                           key={guild.guild_id}
                           className={guild.guild_id === currentGuild.guild_id ? 'bg-accent' : ''}
-                          disabled
+                          onClick={isGuest ? () => setCurrentGuild(guild) : undefined}
+                          disabled={!isGuest}
                         >
                           <div className="flex items-center justify-between w-full">
                             <span>{guild.guild_name}</span>
-                            <Badge variant="outline" className={getRoleBadgeColor(guild.role)}>
-                              <span className="mr-1">{getRoleIcon(guild.role)}</span>
-                              {guild.role}
-                            </Badge>
+                            {!isGuest && (
+                              <Badge variant="outline" className={getRoleBadgeColor(guild.role)}>
+                                <span className="mr-1">{getRoleIcon(guild.role)}</span>
+                                {guild.role}
+                              </Badge>
+                            )}
                           </div>
                         </DropdownMenuItem>
                       ))}
@@ -130,34 +133,40 @@ export default function Navigation() {
                   )}
                 </DropdownMenu>
 
-                {/* User Menu */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm" className="gap-2">
-                      <User className="h-4 w-4" />
-                      <ChevronDown className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56">
-                    <DropdownMenuLabel>
-                      <div className="flex flex-col gap-1">
-                        <span className="text-sm">{user.email}</span>
-                        <Badge
-                          variant="outline"
-                          className={`w-fit ${getRoleBadgeColor(currentGuild.role)}`}
-                        >
-                          <span className="mr-1">{getRoleIcon(currentGuild.role)}</span>
-                          {currentGuild.role}
-                        </Badge>
-                      </div>
-                    </DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => signOut()}>
-                      <LogOut className="h-4 w-4 mr-2" />
-                      Sign Out
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                {/* User menu or Sign In */}
+                {isGuest ? (
+                  <Link href="/login">
+                    <Button size="sm">Sign In</Button>
+                  </Link>
+                ) : (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm" className="gap-2">
+                        <User className="h-4 w-4" />
+                        <ChevronDown className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <DropdownMenuLabel>
+                        <div className="flex flex-col gap-1">
+                          <span className="text-sm">{user?.email}</span>
+                          <Badge
+                            variant="outline"
+                            className={`w-fit ${getRoleBadgeColor(currentGuild.role)}`}
+                          >
+                            <span className="mr-1">{getRoleIcon(currentGuild.role)}</span>
+                            {currentGuild.role}
+                          </Badge>
+                        </div>
+                      </DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => signOut()}>
+                        <LogOut className="h-4 w-4 mr-2" />
+                        Sign Out
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
               </div>
             ) : !user && pathname !== '/login' && pathname !== '/signup' ? (
               <div className="flex items-center gap-2">

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Check, AlertCircle, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
-import { formatGold, getToday } from '@/lib/utils';
+import { formatGold, getLastCompletedDay } from '@/lib/utils';
 import { useApiClient } from '@/lib/api-client';
 import { useAuth } from '@/contexts/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -60,7 +60,7 @@ function ActivityPageContent() {
   const { currentGuild, hasRole } = useAuth();
   const [allGuilds, setAllGuilds] = useState<GuildStatus[]>([]);
   const [selectedGuildId, setSelectedGuildId] = useState<string | null>(null);
-  const [selectedDate, setSelectedDate] = useState(getToday());
+  const [selectedDate, setSelectedDate] = useState(getLastCompletedDay());
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -26,6 +26,7 @@ interface AuthContextType {
   currentGuild: GuildMembership | null;
   setCurrentGuild: (guild: GuildMembership | null) => void;
   isSuperAdmin: boolean;
+  isGuest: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string, displayName?: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
@@ -88,6 +89,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (!mounted) return;
         setUser(currentUser);
+
+        if (!currentUser) {
+          // Guest mode — load guilds list so guests have a default guild
+          try {
+            const res = await fetch('/api/guilds');
+            if (res.ok) {
+              const allGuilds = await res.json();
+              if (mounted && Array.isArray(allGuilds) && allGuilds.length > 0) {
+                const guestGuilds: GuildMembership[] = allGuilds.map((g: any) => ({
+                  guild_id: g.id,
+                  guild_name: g.nickname || g.name,
+                  role: 'MEMBER' as const,
+                  joined_at: '',
+                }));
+                setGuilds(guestGuilds);
+                const savedGuildId = localStorage.getItem('currentGuildId');
+                const savedGuild = guestGuilds.find(g => g.guild_id === savedGuildId);
+                setCurrentGuildState(savedGuild || guestGuilds[0]);
+              }
+            }
+          } catch {
+            // ignore — guest with no guild context
+          }
+        }
 
         if (currentUser && !loadingGuildsRef) {
           loadingGuildsRef = true;
@@ -169,10 +194,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setIsLoadingGuilds(false);
             loadingGuildsRef = false;
           }
-        } else if (!currentUser) {
-          // Not logged in
-          setGuilds([]);
-          setCurrentGuildState(null);
         }
       } catch (error) {
         console.error('[AuthContext] Error loading user:', error);
@@ -336,6 +357,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const hasRole = (requiredRole: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER') => {
+    // Guests have MEMBER-level read access only
+    if (!user) return requiredRole === 'MEMBER';
     if (!currentGuild) return false;
 
     const roleHierarchy = { MEMBER: 0, OFFICER: 1, DEPUTY: 2, LEADER: 3 };
@@ -350,6 +373,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
+  const isGuest = !user;
 
   const value = {
     user,
@@ -358,6 +382,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     currentGuild,
     setCurrentGuild,
     isSuperAdmin,
+    isGuest,
     signIn,
     signUp,
     signOut,

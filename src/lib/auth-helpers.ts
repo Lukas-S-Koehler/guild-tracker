@@ -227,6 +227,84 @@ export async function verifyAnyGuildAccess(
 }
 
 /**
+ * Verify super admin OR a user with sufficient role in the requested guild.
+ * Super admin bypasses guild membership check entirely.
+ */
+export async function verifySuperAdminOrRole(
+  request: Request,
+  requiredRole: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER'
+): Promise<AuthResult | NextResponse> {
+  const supabase = createServerClient(request);
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) {
+    return NextResponse.json({ error: 'Unauthorized - Please sign in' }, { status: 401 });
+  }
+
+  const guildId = request.headers.get('x-guild-id');
+  if (!guildId) {
+    return NextResponse.json({ error: 'Bad Request - No guild selected' }, { status: 400 });
+  }
+
+  if (user.email === SUPER_ADMIN_EMAIL) {
+    return { user: { id: user.id, email: user.email }, guildId, role: 'LEADER' };
+  }
+
+  const { data: membership, error: membershipError } = await supabase
+    .from('guild_leaders')
+    .select('role')
+    .eq('user_id', user.id)
+    .eq('guild_id', guildId)
+    .single();
+
+  if (membershipError || !membership) {
+    return NextResponse.json({ error: 'Forbidden - You do not have access to this guild' }, { status: 403 });
+  }
+
+  const roleHierarchy = { MEMBER: 0, OFFICER: 1, DEPUTY: 2, LEADER: 3 };
+  const userRoleLevel = roleHierarchy[membership.role as keyof typeof roleHierarchy];
+  const requiredRoleLevel = roleHierarchy[requiredRole];
+
+  if (userRoleLevel < requiredRoleLevel) {
+    return NextResponse.json({ error: `Forbidden - ${requiredRole} role required` }, { status: 403 });
+  }
+
+  return { user: { id: user.id, email: user.email }, guildId, role: membership.role as 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER' };
+}
+
+/**
+ * Allow unauthenticated (guest) access with MEMBER role for public read endpoints.
+ * Authenticated users get their actual role.
+ */
+export async function verifyAuthOrPublic(
+  request: Request
+): Promise<AuthResult | NextResponse> {
+  const supabase = createServerClient(request);
+  const { data: { user } } = await supabase.auth.getUser();
+
+  const guildId = request.headers.get('x-guild-id') || '';
+
+  if (!user) {
+    return { user: { id: 'guest' }, guildId, role: 'MEMBER' };
+  }
+
+  if (guildId) {
+    const { data: membership } = await supabase
+      .from('guild_leaders')
+      .select('role')
+      .eq('user_id', user.id)
+      .eq('guild_id', guildId)
+      .single();
+    return {
+      user: { id: user.id, email: user.email },
+      guildId,
+      role: (membership?.role ?? 'MEMBER') as 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER',
+    };
+  }
+
+  return { user: { id: user.id, email: user.email }, guildId, role: 'MEMBER' };
+}
+
+/**
  * Helper to check if a value is a NextResponse (error response)
  */
 export function isErrorResponse(value: AuthResult | NextResponse): value is NextResponse {

@@ -1,13 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
-import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
+import { createAdminClient } from '@/lib/supabase-server';
 
+// GET /api/leaderboard — public, no auth required
 export async function GET(req: NextRequest) {
-  // Verify authentication (members can view leaderboard)
-  const auth = await verifyAuth(req, 'MEMBER');
-  if (isErrorResponse(auth)) return auth;
-
-  const supabase = createServerClient(req);
+  const supabase = createAdminClient();
   const { searchParams } = new URL(req.url);
 
   const period = searchParams.get('period') || 'week';

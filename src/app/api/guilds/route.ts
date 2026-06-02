@@ -1,15 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
-import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
+import { createAdminClient } from '@/lib/supabase-server';
 
+// GET /api/guilds — public, no auth required
 export async function GET(req: NextRequest) {
-  // Verify authentication (any member can view guilds list)
-  const authResult = await verifyAuth(req, 'MEMBER');
-  if (isErrorResponse(authResult)) return authResult;
+  const supabase = createAdminClient();
 
-  const supabase = createServerClient(req);
-
-  // Get all guilds ordered by display_order
   const { data: guilds, error } = await supabase
     .from('guilds')
     .select('*')

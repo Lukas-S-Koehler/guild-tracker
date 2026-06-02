@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
-import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
+import { createAdminClient } from '@/lib/supabase-server';
+import { verifyAuthOrPublic, isErrorResponse } from '@/lib/auth-helpers';
 
+// GET /api/reports/inactivity — public, no auth required
 export async function GET(req: NextRequest) {
-  // Verify authentication (members can view reports)
-  const auth = await verifyAuth(req, 'MEMBER');
+  const auth = await verifyAuthOrPublic(req);
   if (isErrorResponse(auth)) return auth;
 
   const { guildId } = auth;
-  const supabase = createServerClient(req);
+  const supabase = createAdminClient();
 
   // Query members in the current guild with their latest activity
   const { data: members, error: membersError } = await supabase

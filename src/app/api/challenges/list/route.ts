@@ -1,11 +1,10 @@
 // app/api/challenges/list/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
-import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
+import { verifySuperAdminOrRole, isErrorResponse } from '@/lib/auth-helpers';
 
 export async function GET(req: NextRequest) {
-  // Verify authentication (members can view challenges)
-  const auth = await verifyAuth(req, 'MEMBER');
+  const auth = await verifySuperAdminOrRole(req, 'MEMBER');
   if (isErrorResponse(auth)) return auth;
 
   const supabase = createServerClient(req);

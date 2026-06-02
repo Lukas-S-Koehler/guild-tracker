@@ -1,16 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient, createAdminClient } from '@/lib/supabase-server';
+import { createAdminClient } from '@/lib/supabase-server';
 
-// GET /api/members/list-all
-// Returns all active members across all guilds with guild info
-// Any authenticated user can call this
+// GET /api/members/list-all — public, no auth required
 export async function GET(req: NextRequest) {
-  const supabase = createServerClient(req);
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
   const admin = createAdminClient();
 
   const { data, error: membersError } = await admin

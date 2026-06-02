@@ -1,16 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient, createAdminClient } from '@/lib/supabase-server';
+import { createAdminClient } from '@/lib/supabase-server';
 
 // GET /api/dashboard
-// Universal dashboard data across all guilds.
-// Auth: any authenticated user (no guild header needed).
+// Universal dashboard data across all guilds. Public — no auth required.
 export async function GET(req: NextRequest) {
-  const supabase = createServerClient(req);
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
   const admin = createAdminClient();
   const today = new Date().toISOString().substring(0, 10);
 

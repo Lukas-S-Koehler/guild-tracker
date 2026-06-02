@@ -1,16 +1,16 @@
 // app/api/members/list/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
-import { verifyAnyGuildAccess, isErrorResponse } from '@/lib/auth-helpers';
+import { createAdminClient } from '@/lib/supabase-server';
+import { verifyAuthOrPublic, isErrorResponse } from '@/lib/auth-helpers';
 
+// GET /api/members/list — public, no auth required
 export async function GET(req: NextRequest) {
-  const authResult = await verifyAnyGuildAccess(req);
+  const authResult = await verifyAuthOrPublic(req);
   if (isErrorResponse(authResult)) return authResult;
   const { guildId } = authResult;
 
-  const supabase = createServerClient(req);
+  const supabase = createAdminClient();
 
-  // Get members with guild information (only active members)
   const { data, error } = await supabase
     .from('members')
     .select(`

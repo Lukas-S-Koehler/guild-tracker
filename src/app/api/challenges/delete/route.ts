@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
-import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
+import { verifySuperAdminOrRole, isErrorResponse } from '@/lib/auth-helpers';
 
 /**
  * DELETE /api/challenges/delete
  * Delete challenges by dates
  */
 export async function POST(req: NextRequest) {
-  // Verify authentication (officers and leaders can delete)
-  const auth = await verifyAuth(req, 'OFFICER');
+  const auth = await verifySuperAdminOrRole(req, 'OFFICER');
   if (isErrorResponse(auth)) return auth;
 
   const { guildId } = auth;
