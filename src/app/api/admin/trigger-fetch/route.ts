@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, createAdminClient } from '@/lib/supabase-server';
-import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
+import { verifySuperAdminOrRole, isErrorResponse } from '@/lib/auth-helpers';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { storeActivityEvents, processActivityEvents } from '@/lib/activity-processor';
 
 // POST /api/admin/trigger-fetch
 // Officers can manually trigger an activity fetch for their current guild
 export async function POST(req: NextRequest) {
-  const auth = await verifyAuth(req, 'OFFICER');
+  const auth = await verifySuperAdminOrRole(req, 'OFFICER');
   if (isErrorResponse(auth)) return auth;
 
   const { guildId } = auth;

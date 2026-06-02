@@ -125,7 +125,8 @@ export async function processActivityEvents(
         } catch {
           priceMap[itemName] = 0;
         }
-        await new Promise(r => setTimeout(r, 100));
+        // 3.1s between items: each item = 2 API calls, keeps total under 20 req/min
+        await new Promise(r => setTimeout(r, 3100));
       }
     }
   }
@@ -137,7 +138,7 @@ export async function processActivityEvents(
     .eq('guild_id', guildId)
     .single();
 
-  const donationReq = config?.settings?.donation_requirement || 5000;
+  const donationReq = config?.settings?.donation_requirement ?? 5000;
 
   // Fetch active buildings for valid deposit items
   const activeBuildings: string[] = config?.settings?.active_buildings || [];

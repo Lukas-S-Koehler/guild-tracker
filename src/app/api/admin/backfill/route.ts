@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
   if (isErrorResponse(auth)) return auth;
 
   const body = await req.json().catch(() => ({}));
-  const { guild_id, days = 90 } = body as { guild_id?: string; days?: number };
+  const { guild_id, days = 30 } = body as { guild_id?: string; days?: number };
 
   if (!guild_id) {
     return NextResponse.json({ error: 'guild_id required' }, { status: 400 });
@@ -42,6 +42,16 @@ export async function POST(req: NextRequest) {
 
     const stored = await storeActivityEvents(allEvents, guild_id, supabase);
     const { processed, joins, leaves } = await processActivityEvents(allEvents, guild_id, supabase, config.api_key);
+
+    const { data: existingConfig } = await supabase
+      .from('guild_config')
+      .select('settings')
+      .eq('guild_id', guild_id)
+      .single();
+    await supabase
+      .from('guild_config')
+      .update({ settings: { ...(existingConfig?.settings || {}), last_fetched_at: new Date().toISOString() } })
+      .eq('guild_id', guild_id);
 
     return NextResponse.json({
       success: true,

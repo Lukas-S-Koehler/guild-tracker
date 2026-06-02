@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
+import { createServerClient, createAdminClient } from '@/lib/supabase-server';
 import { verifyAdminOrLeader, isErrorResponse } from '@/lib/auth-helpers';
 
 /**
@@ -11,11 +11,11 @@ export async function PATCH(req: NextRequest) {
   const auth = await verifyAdminOrLeader(req);
   if (isErrorResponse(auth)) return auth;
 
-  const supabase = createServerClient(req);
+  const supabase = auth.isSuperAdmin ? createAdminClient() : createServerClient(req);
 
   try {
     const body = await req.json();
-    const { guild_id, min_level } = body;
+    const { guild_id, min_level, is_active } = body;
 
     if (!guild_id) {
       return NextResponse.json({ error: 'guild_id is required' }, { status: 400 });
@@ -27,6 +27,7 @@ export async function PATCH(req: NextRequest) {
 
     const updateData: Record<string, any> = {};
     if (min_level !== undefined) updateData.min_level = Number(min_level);
+    if (is_active !== undefined) updateData.is_active = Boolean(is_active);
 
     if (Object.keys(updateData).length === 0) {
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 });

@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
-import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
+import { verifySuperAdminOrRole, isErrorResponse } from '@/lib/auth-helpers';
 
 /**
  * GET /api/guild-buildings
  * Returns all available guild buildings with their resource requirements
  */
 export async function GET(req: NextRequest) {
-  // Verify authentication (members can view)
-  const auth = await verifyAuth(req, 'MEMBER');
+  const auth = await verifySuperAdminOrRole(req, 'MEMBER');
   if (isErrorResponse(auth)) return auth;
 
   const supabase = createServerClient(req);

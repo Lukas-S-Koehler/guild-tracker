@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
+import { createServerClient, createAdminClient } from '@/lib/supabase-server';
 import { verifyAdminOrLeader, isErrorResponse } from '@/lib/auth-helpers';
 
 const DEFAULT_DONATION_REQUIREMENT = 5000;
@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   if (isErrorResponse(auth)) return auth;
 
   try {
-    const supabase = createServerClient(req);
+    const supabase = auth.isSuperAdmin ? createAdminClient() : createServerClient(req);
 
     const { data, error } = await supabase
       .from('guild_config')
@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
       guild_id: data.guild_id,
       api_key: data.api_key,
       donation_requirement:
-        data.settings?.donation_requirement || DEFAULT_DONATION_REQUIREMENT,
+        data.settings?.donation_requirement ?? DEFAULT_DONATION_REQUIREMENT,
       settings: data.settings || {},
     });
 
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
   if (isErrorResponse(auth)) return auth;
 
   try {
-    const supabase = createServerClient(req);
+    const supabase = auth.isSuperAdmin ? createAdminClient() : createServerClient(req);
     const body = await req.json();
 
     const { guild_name, guild_id, api_key, donation_requirement, settings } = body;
@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
     const newSettings = {
       ...(existing?.settings || {}),
       ...(settings || {}),
-      donation_requirement: donation_requirement || DEFAULT_DONATION_REQUIREMENT,
+      donation_requirement: donation_requirement ?? DEFAULT_DONATION_REQUIREMENT,
     };
 
     const saveData = {

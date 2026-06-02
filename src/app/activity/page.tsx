@@ -60,7 +60,7 @@ function timeAgo(iso: string | null): string {
 }
 
 function ActivityPageContent() {
-  const { currentGuild, hasRole } = useAuth();
+  const { currentGuild, hasRole, isSuperAdmin } = useAuth();
   const [allGuilds, setAllGuilds] = useState<GuildStatus[]>([]);
   const [selectedGuildId, setSelectedGuildId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(getLastCompletedDay());
@@ -72,7 +72,7 @@ function ActivityPageContent() {
   const [expandedMembers, setExpandedMembers] = useState<Set<string>>(new Set());
   const api = useApiClient();
 
-  const isOfficer = hasRole('OFFICER');
+  const isOfficer = isSuperAdmin || hasRole('OFFICER');
 
   const refreshGuildStatus = useCallback(() => {
     api.get('/api/guilds/status').then(r => r.ok ? r.json() : []).then((data: GuildStatus[]) => {
@@ -89,7 +89,7 @@ function ActivityPageContent() {
   // Load all guilds with status + refresh when tab regains focus (cron may have run)
   useEffect(() => {
     refreshGuildStatus();
-    const onFocus = () => refreshGuildStatus();
+    const onFocus = () => { if (document.visibilityState === 'visible') refreshGuildStatus(); };
     document.addEventListener('visibilitychange', onFocus);
     return () => document.removeEventListener('visibilitychange', onFocus);
   }, [refreshGuildStatus]);

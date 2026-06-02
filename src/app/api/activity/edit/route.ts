@@ -45,7 +45,7 @@ export async function PATCH(req: NextRequest) {
       .eq('guild_id', guildId)
       .single();
 
-    const donationReq = config?.settings?.donation_requirement || 5000;
+    const donationReq = config?.settings?.donation_requirement ?? 5000;
 
     // Simple gold-based check
     // Officers editing manually can see met_requirement and adjust as needed

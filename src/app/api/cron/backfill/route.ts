@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}));
-  const { guild_id, days = 90 } = body as { guild_id?: string; days?: number };
+  const { guild_id, days = 30 } = body as { guild_id?: string; days?: number };
 
   const supabase = createAdminClient();
 
@@ -60,6 +60,11 @@ export async function POST(req: NextRequest) {
       results[gId] = { stored, processed, pages };
     } catch (err) {
       results[gId] = { stored: 0, processed: 0, pages: 0, error: String(err) };
+    }
+
+    // Let rate limit window reset between guilds
+    if (guilds.indexOf(guild) < guilds.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 60000));
     }
   }
 

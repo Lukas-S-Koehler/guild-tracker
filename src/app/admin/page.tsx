@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -24,6 +25,7 @@ interface Guild {
   name: string;
   nickname: string;
   min_level: number;
+  is_active: boolean;
   display_order: number;
   members: GuildMember[];
   leader?: GuildMember;
@@ -43,14 +45,15 @@ interface Building {
   name: string;
 }
 
-const BACKFILL_DISABLED_GUILDS = new Set(['111', '554', '1184', '292']);
+const BACKFILL_DISABLED_GUILDS = new Set(['111', '554', '1184', '292', '171', '735', '751', '785', '845', '1106', '955']);
 
-function GuildSettingsSection({ guildId, guildName, currentMinLevel }: { guildId: string; guildName: string; currentMinLevel: number }) {
+function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsActive }: { guildId: string; guildName: string; currentMinLevel: number; currentIsActive: boolean }) {
   const api = useApiClient();
   const { currentGuild, isSuperAdmin } = useAuth();
   const isLeaderOfThisGuild = isSuperAdmin || currentGuild?.guild_id === guildId;
   const [settings, setSettings] = useState<GuildSettings>({ api_key: '', donation_requirement: 5000, active_buildings: [] });
   const [minLevel, setMinLevel] = useState<number>(currentMinLevel);
+  const [isActive, setIsActive] = useState<boolean>(currentIsActive);
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -71,7 +74,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel }: { guildId
           const data = await configRes.json();
           setSettings({
             api_key: data.api_key || '',
-            donation_requirement: data.donation_requirement || 5000,
+            donation_requirement: data.donation_requirement ?? 5000,
             active_buildings: data.settings?.active_buildings || [],
           });
         }
@@ -108,7 +111,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel }: { guildId
             active_buildings: settings.active_buildings,
           },
         }, { guildId }),
-        api.patch('/api/admin/guild-meta', { guild_id: guildId, min_level: minLevel }, { guildId }),
+        api.patch('/api/admin/guild-meta', { guild_id: guildId, min_level: minLevel, is_active: isActive }, { guildId }),
       ]);
 
       if (!configRes.ok) {
@@ -208,7 +211,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel }: { guildId
           <Input
             type="number"
             value={settings.donation_requirement}
-            onChange={e => setSettings(prev => ({ ...prev, donation_requirement: parseInt(e.target.value) || 5000 }))}
+            onChange={e => setSettings(prev => ({ ...prev, donation_requirement: e.target.value === '' ? 0 : (parseInt(e.target.value) || 0) }))}
             className="mt-1 w-40"
           />
         </div>
@@ -221,6 +224,19 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel }: { guildId
             onChange={e => setMinLevel(parseInt(e.target.value) || 0)}
             className="mt-1 w-40"
           />
+        </div>
+
+        <div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isActive}
+              onChange={e => setIsActive(e.target.checked)}
+              className="rounded"
+            />
+            <span className="text-sm">Guild is active</span>
+          </label>
+          <p className="text-xs text-muted-foreground mt-0.5">Inactive guilds are visually marked in the UI</p>
         </div>
 
         {buildings.length > 0 && (
@@ -426,6 +442,9 @@ function AdminPageContent() {
                       <span>-</span>
                       <span>{guild.name}</span>
                       <span className="text-sm text-muted-foreground font-normal">(ID: {guild.id})</span>
+                      {!(guild.is_active ?? true) && (
+                        <Badge variant="outline" className="text-xs bg-orange-500/10 text-orange-500 border-orange-500/50">Inactive</Badge>
+                      )}
                     </CardTitle>
                     <CardDescription>
                       {guild.member_count} member{guild.member_count !== 1 ? 's' : ''}
@@ -532,7 +551,7 @@ function AdminPageContent() {
               {/* Guild Settings */}
               {showSettings === guild.id && (
                 <div className="mt-4">
-                  <GuildSettingsSection guildId={guild.id} guildName={guild.name} currentMinLevel={guild.min_level} />
+                  <GuildSettingsSection guildId={guild.id} guildName={guild.name} currentMinLevel={guild.min_level} currentIsActive={guild.is_active ?? true} />
                 </div>
               )}
             </CardHeader>

@@ -9,6 +9,7 @@ interface GuildMembership {
   guild_name: string;
   role: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER';
   joined_at: string;
+  is_active: boolean;
 }
 
 const SUPER_ADMIN_EMAIL = 'motivationluki@gmail.com';
@@ -102,6 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   guild_name: g.nickname || g.name,
                   role: 'MEMBER' as const,
                   joined_at: '',
+                  is_active: g.is_active ?? true,
                 }));
                 setGuilds(guestGuilds);
                 const savedGuildId = localStorage.getItem('currentGuildId');
@@ -149,7 +151,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               const guildIds = userGuildLeaders.map(g => g.guild_id);
               const { data: guildsData, error: guildsError } = await supabase
                 .from('guilds')
-                .select('id, name')
+                .select('id, name, is_active')
                 .in('id', guildIds);
 
               console.log('[AuthContext] Guilds data:', { guildsData, guildsError });
@@ -160,16 +162,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 return;
               }
 
-              // Create a map of guild_id -> guild_name
-              const guildNameMap = new Map<string, string>();
-              guildsData?.forEach(g => guildNameMap.set(g.id, g.name));
+              // Create a map of guild_id -> guild info
+              const guildInfoMap = new Map<string, { name: string; is_active: boolean }>();
+              guildsData?.forEach(g => guildInfoMap.set(g.id, { name: g.name, is_active: g.is_active ?? true }));
 
               // Transform the data to match GuildMembership interface
               const transformedGuilds: GuildMembership[] = userGuildLeaders.map((g: any) => ({
                 guild_id: g.guild_id,
-                guild_name: guildNameMap.get(g.guild_id) || 'Unknown Guild',
+                guild_name: guildInfoMap.get(g.guild_id)?.name || 'Unknown Guild',
                 role: g.role as 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER',
                 joined_at: g.joined_at,
+                is_active: guildInfoMap.get(g.guild_id)?.is_active ?? true,
               }));
 
               const sortedGuilds = sortGuildsByRole(transformedGuilds);
@@ -265,11 +268,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             } else if (userGuildLeaders && Array.isArray(userGuildLeaders) && userGuildLeaders.length > 0) {
               console.log('[AuthContext] Found guild leaders:', userGuildLeaders);
 
-              // Step 2: Fetch guild names for these guild IDs
+              // Step 2: Fetch guild info for these guild IDs
               const guildIds = userGuildLeaders.map(g => g.guild_id);
               const { data: guildsData, error: guildsError } = await supabase
                 .from('guilds')
-                .select('id, name')
+                .select('id, name, is_active')
                 .in('id', guildIds);
 
               console.log('[AuthContext] Guilds data:', { guildsData, guildsError });
@@ -280,16 +283,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 return;
               }
 
-              // Create a map of guild_id -> guild_name
-              const guildNameMap = new Map<string, string>();
-              guildsData?.forEach(g => guildNameMap.set(g.id, g.name));
+              // Create a map of guild_id -> guild info
+              const guildInfoMap2 = new Map<string, { name: string; is_active: boolean }>();
+              guildsData?.forEach(g => guildInfoMap2.set(g.id, { name: g.name, is_active: g.is_active ?? true }));
 
               // Transform the data to match GuildMembership interface
               const transformedGuilds: GuildMembership[] = userGuildLeaders.map((g: any) => ({
                 guild_id: g.guild_id,
-                guild_name: guildNameMap.get(g.guild_id) || 'Unknown Guild',
+                guild_name: guildInfoMap2.get(g.guild_id)?.name || 'Unknown Guild',
                 role: g.role as 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER',
                 joined_at: g.joined_at,
+                is_active: guildInfoMap2.get(g.guild_id)?.is_active ?? true,
               }));
 
               setGuilds(transformedGuilds);

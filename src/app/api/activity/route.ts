@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     .single();
 
   // Your schema stores donation_requirement in settings JSONB
-  const donationReq = config?.settings?.donation_requirement || 5000;
+  const donationReq = config?.settings?.donation_requirement ?? 5000;
 
   let saved = 0;
 

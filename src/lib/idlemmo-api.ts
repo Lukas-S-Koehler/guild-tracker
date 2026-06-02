@@ -70,7 +70,7 @@ export class IdleMMOApi {
     this.apiKey = apiKey;
   }
 
-  private async fetch<T>(url: string): Promise<T> {
+  private async fetch<T>(url: string, retries = 3): Promise<T> {
     const res = await fetch(url, {
       headers: {
         'Authorization': `Bearer ${this.apiKey}`,
@@ -79,6 +79,12 @@ export class IdleMMOApi {
       },
       cache: 'no-store',
     });
+
+    if (res.status === 429 && retries > 0) {
+      const retryAfter = parseInt(res.headers.get('retry-after') || '5', 10);
+      await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+      return this.fetch<T>(url, retries - 1);
+    }
 
     if (!res.ok) {
       throw new Error(`API Error: ${res.status} ${res.statusText}`);
@@ -177,8 +183,8 @@ export class IdleMMOApi {
       if (reachedCutoff || !response.pagination.has_more) break;
 
       page++;
-      // Avoid rate limiting between pages
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // 3.1s between pages keeps under 20 req/min rate limit
+      await new Promise(resolve => setTimeout(resolve, 3100));
     }
 
     return allEvents;

@@ -103,30 +103,38 @@ export default function GuildsPage() {
         </CardHeader>
         <CardContent>
           <div className="grid gap-4">
-            {guilds.map((guild) => (
-              <Card
-                key={guild.guild_id}
-                className="cursor-pointer hover:bg-accent/50 transition-colors"
-                onClick={() => handleSelectGuild(guild)}
-              >
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-lg">{guild.guild_name}</h3>
-                      <p className="text-sm text-muted-foreground">
-                        Member since {new Date(guild.joined_at).toLocaleDateString()}
-                      </p>
+            {guilds.map((guild) => {
+              const isActive = guild.is_active ?? true;
+              return (
+                <Card
+                  key={guild.guild_id}
+                  className={`cursor-pointer transition-colors ${isActive ? 'hover:bg-accent/50' : 'opacity-60 hover:bg-accent/30'}`}
+                  onClick={() => handleSelectGuild(guild)}
+                >
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <h3 className={`font-semibold text-lg ${!isActive ? 'text-muted-foreground' : ''}`}>{guild.guild_name}</h3>
+                          {!isActive && (
+                            <Badge variant="outline" className="text-xs bg-orange-500/10 text-orange-500 border-orange-500/50">Inactive</Badge>
+                          )}
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Member since {new Date(guild.joined_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className={getRoleBadgeColor(guild.role)}>
+                          <span className="mr-1">{getRoleIcon(guild.role)}</span>
+                          {guild.role}
+                        </Badge>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className={getRoleBadgeColor(guild.role)}>
-                        <span className="mr-1">{getRoleIcon(guild.role)}</span>
-                        {guild.role}
-                      </Badge>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
 
           <div className="mt-6 pt-6 border-t">
