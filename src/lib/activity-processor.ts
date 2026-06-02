@@ -24,7 +24,9 @@ function isDonationEvent(type: string, text: string): boolean {
 }
 
 function eventDateUTC(createdAt: string): string {
-  return createdAt.substring(0, 10); // 'YYYY-MM-DD'
+  const d = new Date(createdAt);
+  d.setUTCMinutes(d.getUTCMinutes() - 710); // shift day boundary to 11:50 UTC
+  return d.toISOString().substring(0, 10);
 }
 
 export async function processActivityEvents(

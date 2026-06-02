@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 
+export const dynamic = 'force-dynamic';
+
 // GET /api/guilds — public, no auth required
 export async function GET(req: NextRequest) {
   const supabase = createAdminClient();
