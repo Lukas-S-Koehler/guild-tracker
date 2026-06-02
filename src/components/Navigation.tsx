@@ -50,6 +50,7 @@ export default function Navigation() {
     { href: '/', label: 'Dashboard' },
     { href: '/activity', label: 'Activity' },
     { href: '/reports', label: 'Discord Output' },
+    { href: '/warnings', label: 'Warnings' },
     { href: '/members', label: 'Members' },
     { href: '/leaderboard', label: 'Leaderboard' },
     { href: '/challenges', label: 'Challenges', requiresRole: 'OFFICER' },

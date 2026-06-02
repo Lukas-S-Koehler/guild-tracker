@@ -108,4 +108,59 @@ export interface InactivityEntry {
   days_inactive: number;
   category: string;
   warning_level: 'safe' | 'warn1' | 'warn2' | 'kick';
+  has_alts?: boolean;
+  alt_covered?: boolean;
+  discord_id?: string | null;
+}
+
+// Alt characters
+export interface MemberAlt {
+  id: string;
+  member_id: string;
+  alt_ign: string;
+  alt_hashed_id: string;
+  alt_member_id: string | null;
+  fetched_at: string;
+}
+
+export interface AltCharacter {
+  id: number;
+  hashed_id: string;
+  name: string;
+  class: string;
+  total_level: number;
+  created_at: string;
+}
+
+// Warnings
+export interface Warning {
+  id: string;
+  member_id: string;
+  guild_id: string;
+  warning_level: 'warn1' | 'warn2' | 'kick';
+  reason: string | null;
+  is_auto: boolean;
+  discord_dm_sent: boolean;
+  discord_dm_error: string | null;
+  warned_by_discord_id: string | null;
+  warned_by_ign: string | null;
+  created_at: string;
+  // Joined
+  members?: { ign: string; discord_id: string | null };
+  guilds?: { name: string; nickname: string };
+}
+
+// Leaderboard (extended with alt merging)
+export interface LeaderboardEntryMerged {
+  id: string;
+  ign: string;
+  guild_nickname: string;
+  guild_name: string;
+  current_guild_id: string;
+  total_raids: number;
+  total_gold: number;
+  activity_score: number;
+  days_active: number;
+  alt_count: number;
+  alt_igns: string[];
 }

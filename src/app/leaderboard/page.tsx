@@ -28,6 +28,8 @@ interface LeaderboardEntry {
   total_gold: number;
   activity_score: number;
   days_active: number;
+  alt_count?: number;
+  alt_igns?: string[];
 }
 
 export default function LeaderboardPage() {
@@ -36,6 +38,7 @@ export default function LeaderboardPage() {
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<Period>('week');
   const [guildFilter, setGuildFilter] = useState<string>('all');
+  const [merged, setMerged] = useState(true);
   const [copied, setCopied] = useState(false);
   const api = useApiClient();
 
@@ -58,10 +61,9 @@ export default function LeaderboardPage() {
     async function fetchLeaderboard() {
       setLoading(true);
       try {
-        const url = guildFilter === 'all'
-          ? `/api/leaderboard?period=${period}`
-          : `/api/leaderboard?period=${period}&guild=${guildFilter}`;
-        const res = await api.get(url);
+        const params = new URLSearchParams({ period, merged: String(merged) });
+        if (guildFilter !== 'all') params.set('guild', guildFilter);
+        const res = await api.get(`/api/leaderboard?${params}`);
         const data = await res.json();
         setEntries(Array.isArray(data) ? data : []);
       } catch (error) {
@@ -73,7 +75,7 @@ export default function LeaderboardPage() {
     }
     fetchLeaderboard();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period, guildFilter]);
+  }, [period, guildFilter, merged]);
 
   const handleCopy = async () => {
     const periodLabel = period === 'week' ? 'This Week' : period === 'month' ? 'This Month' : 'All Time';
@@ -124,6 +126,15 @@ export default function LeaderboardPage() {
                 </SelectContent>
               </Select>
 
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setMerged(!merged)}
+                title={merged ? 'Switch to individual character view' : 'Switch to merged alt view'}
+              >
+                {merged ? 'Merged' : 'Individual'}
+              </Button>
+
               <Button variant="outline" size="sm" onClick={handleCopy} disabled={entries.length === 0}>
                 {copied ? <Check className="h-4 w-4 mr-1" /> : <Copy className="h-4 w-4 mr-1" />}
                 {copied ? 'Copied!' : 'Copy'}
@@ -164,6 +175,14 @@ export default function LeaderboardPage() {
                         <td className="py-3">
                           <div>
                             <span className="font-medium">{entry.ign}</span>
+                            {merged && entry.alt_count && entry.alt_count > 0 ? (
+                              <span
+                                className="ml-1.5 text-xs text-blue-400"
+                                title={`Alts: ${entry.alt_igns?.join(', ')}`}
+                              >
+                                +{entry.alt_count} alt{entry.alt_count > 1 ? 's' : ''}
+                              </span>
+                            ) : null}
                             <div className="text-xs text-muted-foreground">
                               {entry.days_active}d active
                             </div>

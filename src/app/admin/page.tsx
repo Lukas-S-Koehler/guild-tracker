@@ -38,6 +38,11 @@ interface GuildSettings {
   api_key: string;
   donation_requirement: number;
   active_buildings: string[];
+  requirement_period: 'daily' | 'weekly';
+  weekly_donation_requirement: number;
+  deposits_only: boolean;
+  discord_log_channel_id: string;
+  discord_server_id: string;
 }
 
 interface Building {
@@ -51,7 +56,16 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
   const api = useApiClient();
   const { currentGuild, isSuperAdmin } = useAuth();
   const isLeaderOfThisGuild = isSuperAdmin || currentGuild?.guild_id === guildId;
-  const [settings, setSettings] = useState<GuildSettings>({ api_key: '', donation_requirement: 5000, active_buildings: [] });
+  const [settings, setSettings] = useState<GuildSettings>({
+    api_key: '',
+    donation_requirement: 5000,
+    active_buildings: [],
+    requirement_period: 'daily',
+    weekly_donation_requirement: 35000,
+    deposits_only: false,
+    discord_log_channel_id: '',
+    discord_server_id: '',
+  });
   const [minLevel, setMinLevel] = useState<number>(currentMinLevel);
   const [isActive, setIsActive] = useState<boolean>(currentIsActive);
   const [buildings, setBuildings] = useState<Building[]>([]);
@@ -76,6 +90,11 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             api_key: data.api_key || '',
             donation_requirement: data.donation_requirement ?? 5000,
             active_buildings: data.settings?.active_buildings || [],
+            requirement_period: data.settings?.requirement_period ?? 'daily',
+            weekly_donation_requirement: data.settings?.weekly_donation_requirement ?? 35000,
+            deposits_only: data.settings?.deposits_only ?? false,
+            discord_log_channel_id: data.settings?.discord_log_channel_id ?? '',
+            discord_server_id: data.settings?.discord_server_id ?? '',
           });
         }
 
@@ -109,6 +128,11 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
           settings: {
             donation_requirement: settings.donation_requirement,
             active_buildings: settings.active_buildings,
+            requirement_period: settings.requirement_period,
+            weekly_donation_requirement: settings.weekly_donation_requirement,
+            deposits_only: settings.deposits_only,
+            discord_log_channel_id: settings.discord_log_channel_id || null,
+            discord_server_id: settings.discord_server_id || null,
           },
         }, { guildId }),
         api.patch('/api/admin/guild-meta', { guild_id: guildId, min_level: minLevel, is_active: isActive }, { guildId }),
@@ -239,6 +263,69 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
           <p className="text-xs text-muted-foreground mt-0.5">Inactive guilds are visually marked in the UI</p>
         </div>
 
+        <div>
+          <Label className="text-xs text-muted-foreground">Activity Requirement Period</Label>
+          <div className="flex gap-3 mt-1">
+            {(['daily', 'weekly'] as const).map(p => (
+              <label key={p} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                <input
+                  type="radio"
+                  name={`period-${guildId}`}
+                  value={p}
+                  checked={settings.requirement_period === p}
+                  onChange={() => setSettings(prev => ({ ...prev, requirement_period: p }))}
+                />
+                {p.charAt(0).toUpperCase() + p.slice(1)}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {settings.requirement_period === 'weekly' && (
+          <>
+            <div>
+              <Label className="text-xs text-muted-foreground">Weekly Requirement (gold)</Label>
+              <Input
+                type="number"
+                value={settings.weekly_donation_requirement}
+                onChange={e => setSettings(prev => ({ ...prev, weekly_donation_requirement: parseInt(e.target.value) || 0 }))}
+                className="mt-1 w-40"
+              />
+            </div>
+            <div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settings.deposits_only}
+                  onChange={e => setSettings(prev => ({ ...prev, deposits_only: e.target.checked }))}
+                  className="rounded"
+                />
+                <span className="text-sm">Stockpile deposits only (no challenge donations)</span>
+              </label>
+            </div>
+          </>
+        )}
+
+        <div>
+          <Label className="text-xs text-muted-foreground">Discord Log Channel ID (for auto-warn summaries)</Label>
+          <Input
+            value={settings.discord_log_channel_id}
+            onChange={e => setSettings(prev => ({ ...prev, discord_log_channel_id: e.target.value }))}
+            placeholder="Channel snowflake ID"
+            className="mt-1"
+          />
+        </div>
+
+        <div>
+          <Label className="text-xs text-muted-foreground">Discord Server ID</Label>
+          <Input
+            value={settings.discord_server_id}
+            onChange={e => setSettings(prev => ({ ...prev, discord_server_id: e.target.value }))}
+            placeholder="Server snowflake ID"
+            className="mt-1"
+          />
+        </div>
+
         {buildings.length > 0 && (
           <div>
             <Label className="text-xs text-muted-foreground">Active Buildings (valid deposit items)</Label>
@@ -275,6 +362,246 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
           </Button>
         )}
       </div>
+    </div>
+  );
+}
+
+interface GuildMemberDiscord {
+  id: string;
+  ign: string;
+  discord_id: string | null;
+  discord_username: string | null;
+}
+
+function DiscordMappingSection({ guildId }: { guildId: string }) {
+  const api = useApiClient();
+  const [members, setMembers] = useState<GuildMemberDiscord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<Record<string, { discord_id: string; discord_username: string }>>({});
+  const [saving, setSaving] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      try {
+        const res = await api.get('/api/members/list', { guildId });
+        if (res.ok) {
+          const data = await res.json();
+          setMembers(Array.isArray(data) ? data : []);
+        }
+      } catch { /* ignore */ }
+      finally { setLoading(false); }
+    }
+    load();
+  }, [api, guildId]);
+
+  const handleEdit = (memberId: string, field: 'discord_id' | 'discord_username', value: string) => {
+    setEditing(prev => ({
+      ...prev,
+      [memberId]: {
+        discord_id: prev[memberId]?.discord_id ?? (members.find(m => m.id === memberId)?.discord_id ?? ''),
+        discord_username: prev[memberId]?.discord_username ?? (members.find(m => m.id === memberId)?.discord_username ?? ''),
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleSave = async (memberId: string) => {
+    const vals = editing[memberId];
+    if (!vals) return;
+    setSaving(memberId);
+    try {
+      const res = await api.patch(`/api/members/list?member_id=${memberId}`, {
+        discord_id: vals.discord_id || null,
+        discord_username: vals.discord_username || null,
+      }, { guildId });
+      if (res.ok) {
+        setMembers(prev => prev.map(m => m.id === memberId ? { ...m, ...vals } : m));
+        setEditing(prev => { const n = { ...prev }; delete n[memberId]; return n; });
+        setMessage({ type: 'success', text: 'Discord mapping saved' });
+        setTimeout(() => setMessage(null), 3000);
+      } else {
+        const d = await res.json();
+        setMessage({ type: 'error', text: d.error || 'Save failed' });
+      }
+    } catch { setMessage({ type: 'error', text: 'Network error' }); }
+    finally { setSaving(null); }
+  };
+
+  if (loading) return <div className="py-2 flex justify-center"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
+
+  const mapped = members.filter(m => m.discord_id).length;
+
+  return (
+    <div className="space-y-3 p-4 border rounded-lg bg-muted/30">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-sm">Discord Member Mapping</h3>
+        <span className="text-xs text-muted-foreground">{mapped}/{members.length} mapped</span>
+      </div>
+      {message && (
+        <div className={`text-xs p-2 rounded ${message.type === 'success' ? 'bg-green-500/10 text-green-600' : 'bg-destructive/10 text-destructive'}`}>
+          {message.text}
+        </div>
+      )}
+      <div className="space-y-2 max-h-64 overflow-y-auto">
+        {members.map(m => {
+          const ed = editing[m.id];
+          const discordId = ed?.discord_id ?? m.discord_id ?? '';
+          const discordUser = ed?.discord_username ?? m.discord_username ?? '';
+          const hasEdit = !!ed;
+          return (
+            <div key={m.id} className="flex items-center gap-2 text-sm">
+              <span className="w-28 shrink-0 font-medium truncate">{m.ign}</span>
+              <input
+                className="flex-1 px-2 py-1 rounded border bg-background text-xs"
+                placeholder="Discord ID (snowflake)"
+                value={discordId}
+                onChange={e => handleEdit(m.id, 'discord_id', e.target.value)}
+              />
+              <input
+                className="flex-1 px-2 py-1 rounded border bg-background text-xs"
+                placeholder="Username"
+                value={discordUser}
+                onChange={e => handleEdit(m.id, 'discord_username', e.target.value)}
+              />
+              {hasEdit && (
+                <Button size="sm" className="h-6 text-xs px-2" onClick={() => handleSave(m.id)} disabled={saving === m.id}>
+                  {saving === m.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                </Button>
+              )}
+              {!hasEdit && m.discord_id && (
+                <Check className="h-3 w-3 text-green-500 shrink-0" />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+interface AltInfo {
+  member_id: string;
+  alt_ign: string;
+  alt_hashed_id: string;
+  alt_member_id: string | null;
+  fetched_at: string;
+  alt_member?: { ign: string; current_guild_id: string };
+}
+
+function AltCharactersSection({ guildId }: { guildId: string }) {
+  const api = useApiClient();
+  const [alts, setAlts] = useState<AltInfo[]>([]);
+  const [members, setMembers] = useState<GuildMemberDiscord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [altRes, memberRes] = await Promise.all([
+        api.get('/api/members/alts', { guildId }),
+        api.get('/api/members/list', { guildId }),
+      ]);
+      if (altRes.ok) setAlts(await altRes.json());
+      if (memberRes.ok) {
+        const d = await memberRes.json();
+        setMembers(Array.isArray(d) ? d : []);
+      }
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }, [api, guildId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleSyncAlts = async () => {
+    setSyncing(true);
+    setMessage(null);
+    try {
+      const res = await api.post('/api/members/alts', {}, { guildId });
+      const data = await res.json();
+      if (res.ok) {
+        setMessage(`Synced: ${data.processed} processed, ${data.alts_found} alts found${data.errors?.length ? `, ${data.errors.length} errors` : ''}`);
+        await load();
+      } else {
+        setMessage(data.error || 'Sync failed');
+      }
+    } catch { setMessage('Network error'); }
+    finally { setSyncing(false); }
+  };
+
+  const handleBackfillHashedIds = async () => {
+    setBackfilling(true);
+    setMessage(null);
+    try {
+      const res = await api.post('/api/admin/backfill-hashed-ids', {}, { guildId });
+      const data = await res.json();
+      if (res.ok) {
+        setMessage(`Backfilled ${data.updated} hashed IDs out of ${data.total_members} members`);
+      } else {
+        setMessage(data.error || 'Backfill failed');
+      }
+    } catch { setMessage('Network error'); }
+    finally { setBackfilling(false); }
+  };
+
+  const memberMap = new Map(members.map(m => [m.id, m]));
+  const altsByMember = new Map<string, AltInfo[]>();
+  for (const alt of alts) {
+    const arr = altsByMember.get(alt.member_id) ?? [];
+    arr.push(alt);
+    altsByMember.set(alt.member_id, arr);
+  }
+
+  const membersWithAlts = members.filter(m => altsByMember.has(m.id));
+  const membersWithHashedId = members.filter(m => !!(m as unknown as { hashed_id: string | null }).hashed_id).length;
+
+  if (loading) return <div className="py-2 flex justify-center"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
+
+  return (
+    <div className="space-y-3 p-4 border rounded-lg bg-muted/30">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h3 className="font-semibold text-sm">Alt Characters</h3>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={handleBackfillHashedIds} disabled={backfilling} className="h-7 text-xs">
+            {backfilling ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+            Backfill Hashed IDs
+          </Button>
+          <Button size="sm" variant="outline" onClick={handleSyncAlts} disabled={syncing} className="h-7 text-xs">
+            {syncing ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+            Sync Alts
+          </Button>
+        </div>
+      </div>
+      {message && <p className="text-xs text-muted-foreground">{message}</p>}
+      <p className="text-xs text-muted-foreground">
+        {membersWithHashedId}/{members.length} members have hashed IDs · {membersWithAlts.length} members with known alts
+      </p>
+      {membersWithAlts.length > 0 && (
+        <div className="space-y-2 max-h-48 overflow-y-auto">
+          {membersWithAlts.map(m => {
+            const memberAlts = altsByMember.get(m.id) ?? [];
+            return (
+              <div key={m.id} className="text-xs flex items-start gap-2">
+                <span className="font-medium w-24 shrink-0 truncate">{m.ign}</span>
+                <div className="flex flex-wrap gap-1">
+                  {memberAlts.map(a => {
+                    const altMember = a.alt_member_id ? memberMap.get(a.alt_member_id) : null;
+                    return (
+                      <span key={a.alt_hashed_id} className={`px-1.5 py-0.5 rounded text-xs ${altMember ? 'bg-blue-500/20 text-blue-400' : 'bg-muted text-muted-foreground'}`}>
+                        {a.alt_ign}{altMember ? ' ✓' : ''}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -550,8 +877,10 @@ function AdminPageContent() {
 
               {/* Guild Settings */}
               {showSettings === guild.id && (
-                <div className="mt-4">
+                <div className="mt-4 space-y-4">
                   <GuildSettingsSection guildId={guild.id} guildName={guild.name} currentMinLevel={guild.min_level} currentIsActive={guild.is_active ?? true} />
+                  <DiscordMappingSection guildId={guild.id} />
+                  <AltCharactersSection guildId={guild.id} />
                 </div>
               )}
             </CardHeader>

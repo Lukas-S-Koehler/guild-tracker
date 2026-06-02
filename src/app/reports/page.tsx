@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Loader2, Copy, Check, Send, X } from 'lucide-react';
+import { Loader2, Copy, Check, Send, X, AlertTriangle } from 'lucide-react';
 import { getInactivityEmoji, formatInactivityReport, copyToClipboard } from '@/lib/utils';
 import { useApiClient } from '@/lib/api-client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,6 +24,8 @@ export default function ReportsPage() {
   const [copied, setCopied] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<'ok' | 'err' | null>(null);
+  const [autoWarning, setAutoWarning] = useState(false);
+  const [autoWarnResult, setAutoWarnResult] = useState<'ok' | 'err' | null>(null);
 
   const [showWebhookInput, setShowWebhookInput] = useState(false);
   const [webhookInput, setWebhookInput] = useState('');
@@ -95,6 +97,20 @@ export default function ReportsPage() {
     } finally {
       setSending(false);
       setTimeout(() => setSendResult(null), 3000);
+    }
+  };
+
+  const handleAutoWarn = async () => {
+    setAutoWarning(true);
+    setAutoWarnResult(null);
+    try {
+      const res = await api.post('/api/cron/auto-warn', {}, { guildId: selectedGuildId });
+      setAutoWarnResult(res.ok ? 'ok' : 'err');
+    } catch {
+      setAutoWarnResult('err');
+    } finally {
+      setAutoWarning(false);
+      setTimeout(() => setAutoWarnResult(null), 4000);
     }
   };
 
@@ -199,36 +215,64 @@ export default function ReportsPage() {
               </Button>
 
               {canManageDiscord && (
-                <Button
-                  variant={
-                    sendResult === 'ok'
-                      ? 'default'
+                <>
+                  <Button
+                    variant={
+                      sendResult === 'ok'
+                        ? 'default'
+                        : sendResult === 'err'
+                        ? 'destructive'
+                        : 'outline'
+                    }
+                    onClick={
+                      hasWebhook
+                        ? handleSendToDiscord
+                        : () => setShowWebhookInput(true)
+                    }
+                    disabled={sending || (hasWebhook && (loading || entries.length === 0))}
+                  >
+                    {sending ? (
+                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                    ) : (
+                      <Send className="h-4 w-4 mr-1" />
+                    )}
+                    {sending
+                      ? 'Sending…'
+                      : sendResult === 'ok'
+                      ? 'Sent!'
                       : sendResult === 'err'
-                      ? 'destructive'
-                      : 'outline'
-                  }
-                  onClick={
-                    hasWebhook
-                      ? handleSendToDiscord
-                      : () => setShowWebhookInput(true)
-                  }
-                  disabled={sending || (hasWebhook && (loading || entries.length === 0))}
-                >
-                  {sending ? (
-                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4 mr-1" />
-                  )}
-                  {sending
-                    ? 'Sending…'
-                    : sendResult === 'ok'
-                    ? 'Sent!'
-                    : sendResult === 'err'
-                    ? 'Failed'
-                    : hasWebhook
-                    ? 'Send to Discord'
-                    : 'Setup Discord'}
-                </Button>
+                      ? 'Failed'
+                      : hasWebhook
+                      ? 'Send to Discord'
+                      : 'Setup Discord'}
+                  </Button>
+
+                  <Button
+                    variant={
+                      autoWarnResult === 'ok'
+                        ? 'default'
+                        : autoWarnResult === 'err'
+                        ? 'destructive'
+                        : 'outline'
+                    }
+                    onClick={handleAutoWarn}
+                    disabled={autoWarning || loading || entries.length === 0}
+                    title="Auto-DM all members at warning threshold"
+                  >
+                    {autoWarning ? (
+                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                    ) : (
+                      <AlertTriangle className="h-4 w-4 mr-1" />
+                    )}
+                    {autoWarning
+                      ? 'Warning…'
+                      : autoWarnResult === 'ok'
+                      ? 'Warned!'
+                      : autoWarnResult === 'err'
+                      ? 'Failed'
+                      : 'Auto-Warn'}
+                  </Button>
+                </>
               )}
             </div>
           </div>
@@ -314,9 +358,22 @@ export default function ReportsPage() {
                       {members.map((member) => (
                         <div
                           key={member.id}
-                          className="bg-muted rounded-full px-3 py-1 text-sm"
+                          className="bg-muted rounded-md px-3 py-1 text-sm flex items-center gap-1.5"
+                          title={
+                            member.alt_covered
+                              ? 'Alt character covers this member'
+                              : member.has_alts
+                              ? 'Has alt characters'
+                              : undefined
+                          }
                         >
                           {member.ign}
+                          {member.alt_covered && (
+                            <span className="text-blue-400 text-xs">(alt)</span>
+                          )}
+                          {!member.discord_id && (
+                            <span className="text-orange-400 text-xs" title="No Discord ID mapped">⚠</span>
+                          )}
                         </div>
                       ))}
                     </div>

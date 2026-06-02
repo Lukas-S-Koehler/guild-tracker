@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { verifyAuthOrPublic, isErrorResponse } from '@/lib/auth-helpers';
+import { getWarningInfo, findLastMetWeek, getISOWeekKey, RequirementPeriod } from '@/lib/warning-calculator';
 
 // GET /api/reports/inactivity — public, no auth required
 export async function GET(req: NextRequest) {
@@ -10,15 +11,24 @@ export async function GET(req: NextRequest) {
   const { guildId } = auth;
   const supabase = createAdminClient();
 
-  // Query members in the current guild with their latest activity
+  // Fetch guild config to check requirement period
+  const { data: config } = await supabase
+    .from('guild_config')
+    .select('settings')
+    .eq('guild_id', guildId)
+    .single();
+
+  const period: RequirementPeriod = config?.settings?.requirement_period ?? 'daily';
+  const weeklyReq: number = config?.settings?.weekly_donation_requirement ?? 35000;
+  const depositsOnly: boolean = config?.settings?.deposits_only ?? false;
+
   const { data: members, error: membersError } = await supabase
     .from('members')
-    .select('id, ign, position, avatar_url, last_seen, first_seen, is_active')
+    .select('id, ign, position, avatar_url, last_seen, first_seen, is_active, discord_id')
     .eq('current_guild_id', guildId)
     .eq('is_active', true);
 
   if (membersError) {
-    console.error('[Inactivity Report] Error fetching members:', membersError);
     return NextResponse.json({ error: membersError.message }, { status: 500 });
   }
 
@@ -26,114 +36,145 @@ export async function GET(req: NextRequest) {
     return NextResponse.json([]);
   }
 
-  // Get the most recent activity date where member MET REQUIREMENTS for each member in this guild
-  // Limit to recent logs to avoid fetching years of data (we only need the most recent per member)
-  const { data: recentLogs, error: logsError } = await supabase
-    .from('daily_logs')
-    .select('member_id, log_date')
-    .eq('guild_id', guildId)
-    .eq('met_requirement', true) // ONLY count days where requirement was met
-    .in('member_id', members.map(m => m.id))
-    .order('log_date', { ascending: false })
-    .limit(365); // Fetch last ~365 days of data (more than enough to find each member's recent activity)
+  const memberIds = members.map((m) => m.id);
 
-  if (logsError) {
-    console.error('[Inactivity Report] Error fetching logs:', logsError);
-    return NextResponse.json({ error: logsError.message }, { status: 500 });
+  // Fetch logs — for weekly guilds we need deposits_gold, for daily we filter by met_requirement
+  let logs: Array<{ member_id: string; log_date: string; met_requirement: boolean; deposits_gold: number }> = [];
+
+  if (period === 'weekly') {
+    const { data } = await supabase
+      .from('daily_logs')
+      .select('member_id, log_date, met_requirement, deposits_gold')
+      .eq('guild_id', guildId)
+      .in('member_id', memberIds)
+      .order('log_date', { ascending: false })
+      .limit(1000);
+    logs = data ?? [];
+  } else {
+    const { data } = await supabase
+      .from('daily_logs')
+      .select('member_id, log_date, met_requirement, deposits_gold')
+      .eq('guild_id', guildId)
+      .eq('met_requirement', true)
+      .in('member_id', memberIds)
+      .order('log_date', { ascending: false })
+      .limit(365);
+    logs = data ?? [];
   }
 
-  // Build a map of member_id -> most recent log_date
+  // Build last-activity map per member
   const lastActivityMap = new Map<string, string>();
-  recentLogs?.forEach(log => {
-    if (!lastActivityMap.has(log.member_id)) {
-      lastActivityMap.set(log.member_id, log.log_date);
-    }
-  });
 
-  // Helper function to calculate warning level and category based on days inactive
-  // New warning tiers: 1d=green, 2d=yellow(private), 3d=orange(private+optional public), 4d+=red(kick)
-  const getWarningInfo = (daysInactive: number): { category: string; warning_level: 'safe' | 'warn1' | 'warn2' | 'kick' } => {
-    if (daysInactive === 0) {
-      return { category: 'active', warning_level: 'safe' };
-    } else if (daysInactive === 1) {
-      return { category: '1d', warning_level: 'safe' }; // Green - safe
-    } else if (daysInactive === 2) {
-      return { category: '2d', warning_level: 'warn1' }; // Yellow - private warn
-    } else if (daysInactive === 3) {
-      return { category: '3d', warning_level: 'warn2' }; // Orange - private + optional public
-    } else {
-      return { category: '4d+', warning_level: 'kick' }; // Red - kick
+  if (period === 'weekly') {
+    const weeklyMap = new Map<string, Map<string, number>>();
+    for (const log of logs) {
+      const goldValue = depositsOnly ? (log.deposits_gold ?? 0) : (log.deposits_gold ?? 0); // always deposits for DI
+      const weekKey = getISOWeekKey(log.log_date);
+      const memberWeeks = weeklyMap.get(log.member_id) ?? new Map<string, number>();
+      memberWeeks.set(weekKey, (memberWeeks.get(weekKey) ?? 0) + goldValue);
+      weeklyMap.set(log.member_id, memberWeeks);
     }
-  };
+    Array.from(weeklyMap.entries()).forEach(([memberId, weeks]) => {
+      const lastMetSunday = findLastMetWeek(Object.fromEntries(Array.from(weeks.entries())), weeklyReq);
+      if (lastMetSunday) {
+        lastActivityMap.set(memberId, lastMetSunday.toISOString().split('T')[0]);
+      }
+    });
+  } else {
+    for (const log of logs) {
+      if (!lastActivityMap.has(log.member_id)) {
+        lastActivityMap.set(log.member_id, log.log_date);
+      }
+    }
+  }
 
-  // Calculate inactivity for each member
+  // Fetch alt relationships
+  const { data: altLinks } = await supabase
+    .from('member_alts')
+    .select('member_id, alt_member_id')
+    .in('member_id', memberIds)
+    .not('alt_member_id', 'is', null);
+
+  const memberSet = new Set(memberIds);
+  const altToMain = new Map<string, string>();
+  const mainToAlts = new Map<string, string[]>();
+  for (const link of altLinks ?? []) {
+    if (!link.alt_member_id) continue;
+    altToMain.set(link.alt_member_id, link.member_id);
+    const arr = mainToAlts.get(link.member_id) ?? [];
+    arr.push(link.alt_member_id);
+    mainToAlts.set(link.member_id, arr);
+  }
+
   const today = new Date();
-  const inactiveMembers = members
-    .map(member => {
-      const lastActivityDate = lastActivityMap.get(member.id);
 
-      // Calculate days since join (first_seen) - used to cap inactivity
-      let daysSinceJoin = 999; // Default high value if no first_seen
+  const inactiveMembers = members
+    .map((member) => {
+      let lastDate = lastActivityMap.get(member.id);
+      let altCovered = false;
+
+      // Check same-guild alts for coverage
+      const altIds = mainToAlts.get(member.id) ?? [];
+      const altInGuild = altIds.filter((aid) => memberSet.has(aid));
+      for (const altId of altInGuild) {
+        const altLast = lastActivityMap.get(altId);
+        if (altLast && (!lastDate || altLast > lastDate)) {
+          lastDate = altLast;
+          altCovered = true;
+        }
+      }
+      // Also check if this member is an alt of someone else in the guild
+      const mainId = altToMain.get(member.id);
+      if (mainId && memberSet.has(mainId)) {
+        const mainLast = lastActivityMap.get(mainId);
+        if (mainLast && (!lastDate || mainLast > lastDate)) {
+          lastDate = mainLast;
+          altCovered = true;
+        }
+      }
+
+      let daysSinceJoin = 999;
       if (member.first_seen) {
         const joinDate = new Date(member.first_seen);
         daysSinceJoin = Math.floor((today.getTime() - joinDate.getTime()) / (1000 * 60 * 60 * 24));
       }
 
-      if (!lastActivityDate) {
-        // No activity that met requirement - cap at days since join
-        // Never show "never active" - use days since join instead
-        const effectiveDays = Math.min(daysSinceJoin, 999);
-        const { category, warning_level } = getWarningInfo(effectiveDays);
-
-        return {
-          id: member.id,
-          ign: member.ign,
-          position: member.position,
-          avatar_url: member.avatar_url,
-          last_active_date: null,
-          first_seen: member.first_seen,
-          days_inactive: effectiveDays,
-          category,
-          warning_level,
-        };
+      let daysInactive: number;
+      if (!lastDate) {
+        daysInactive = Math.min(daysSinceJoin, 999);
+      } else {
+        const lastDateObj = new Date(lastDate + 'T00:00:00Z');
+        daysInactive = Math.floor((today.getTime() - lastDateObj.getTime()) / (1000 * 60 * 60 * 24));
+        daysInactive = Math.min(daysInactive, daysSinceJoin);
       }
 
-      const lastDate = new Date(lastActivityDate);
-      let daysDiff = Math.floor((today.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
+      const { category, warning_level } = getWarningInfo(daysInactive, period);
 
-      // Cap days inactive at days since join (can't be inactive longer than membership)
-      daysDiff = Math.min(daysDiff, daysSinceJoin);
-
-      const { category, warning_level } = getWarningInfo(daysDiff);
+      const hasAlts = altIds.length > 0 || !!altToMain.get(member.id);
 
       return {
         id: member.id,
         ign: member.ign,
         position: member.position,
         avatar_url: member.avatar_url,
-        last_active_date: lastActivityDate,
+        last_active_date: lastDate ?? null,
         first_seen: member.first_seen,
-        days_inactive: daysDiff,
+        days_inactive: daysInactive,
         category,
         warning_level,
+        has_alts: hasAlts,
+        alt_covered: altCovered,
+        discord_id: member.discord_id ?? null,
       };
     })
-    .filter(m => {
-      // Filter out invalid entries
+    .filter((m) => {
       if (!m.ign || m.ign.toLowerCase().includes('raw activity') || m.ign.toLowerCase().includes('log')) {
         return false;
       }
-      // Filter out LEADER and DEPUTY positions - they are not tracked for inactivity
-      if (m.position === 'LEADER' || m.position === 'DEPUTY') {
-        return false;
-      }
-      // Only show inactive members (not active today)
+      if (m.position === 'LEADER' || m.position === 'DEPUTY') return false;
       return m.category !== 'active';
     })
-    .sort((a, b) => {
-      // Sort by days inactive (most inactive first)
-      return b.days_inactive - a.days_inactive;
-    });
+    .sort((a, b) => b.days_inactive - a.days_inactive);
 
   return NextResponse.json(inactiveMembers);
 }

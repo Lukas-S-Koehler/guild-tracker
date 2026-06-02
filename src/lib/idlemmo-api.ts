@@ -63,6 +63,18 @@ interface MarketHistoryResponse {
   history_data?: HistoryData[];
 }
 
+interface AltCharacterResponse {
+  characters: Array<{
+    id: number;
+    hashed_id: string;
+    name: string;
+    class: string;
+    total_level: number;
+    created_at: string;
+  }>;
+  endpoint_updates_at: string;
+}
+
 export class IdleMMOApi {
   private apiKey: string;
 
@@ -158,6 +170,12 @@ export class IdleMMOApi {
   async getGuildActivity(guildId: string, page = 1): Promise<GuildActivityResponse> {
     const url = `${IDLEMMO_BASE_URL}/v1/guild/${guildId}/activity?page=${page}`;
     return this.fetch<GuildActivityResponse>(url);
+  }
+
+  async getCharacterAlts(hashedCharId: string): Promise<AltCharacterResponse['characters']> {
+    const url = `${IDLEMMO_BASE_URL}/v1/character/${hashedCharId}/characters`;
+    const data = await this.fetch<AltCharacterResponse>(url);
+    return data.characters ?? [];
   }
 
   async getAllGuildActivitySince(guildId: string, sinceDate: Date): Promise<ActivityEvent[]> {

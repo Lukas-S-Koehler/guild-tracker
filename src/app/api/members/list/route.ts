@@ -1,7 +1,7 @@
 // app/api/members/list/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
-import { verifyAuthOrPublic, isErrorResponse } from '@/lib/auth-helpers';
+import { verifyAuthOrPublic, verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 
 // GET /api/members/list — public, no auth required
 export async function GET(req: NextRequest) {
@@ -32,4 +32,30 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json(data);
+}
+
+// PATCH /api/members/list?member_id=... — update discord mapping fields
+export async function PATCH(req: NextRequest) {
+  const auth = await verifyAuth(req, 'OFFICER');
+  if (isErrorResponse(auth)) return auth;
+
+  const supabase = createAdminClient();
+  const { searchParams } = new URL(req.url);
+  const memberId = searchParams.get('member_id');
+
+  if (!memberId) return NextResponse.json({ error: 'member_id required' }, { status: 400 });
+
+  const body = await req.json();
+  const update: Record<string, string | null> = {};
+  if ('discord_id' in body) update.discord_id = body.discord_id;
+  if ('discord_username' in body) update.discord_username = body.discord_username;
+
+  if (Object.keys(update).length === 0) {
+    return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
+  }
+
+  const { error } = await supabase.from('members').update(update).eq('id', memberId);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  return NextResponse.json({ ok: true });
 }
