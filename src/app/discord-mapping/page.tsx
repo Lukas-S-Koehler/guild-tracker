@@ -179,7 +179,7 @@ function DiscordMappingContent() {
         }
         membersData = membersData.map(m => propagated.has(m.id) ? { ...m, ...propagated.get(m.id) } : m);
 
-        await Promise.allSettled(
+        const patchResults = await Promise.allSettled(
           toPropagate.map(alt => {
             const vals = propagated.get(alt.id)!;
             return patchMember(alt.id, guildId, vals.discord_id, vals.discord_username);
