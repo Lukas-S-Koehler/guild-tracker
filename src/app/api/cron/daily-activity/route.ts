@@ -138,10 +138,14 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      await supabase
+      const { error: updateErr } = await supabase
         .from('guild_config')
         .update({ settings: settingsUpdate })
         .eq('guild_id', guild_id);
+
+      if (updateErr) {
+        console.error(`[daily-activity] Failed to update settings for ${guild_id}:`, updateErr.message);
+      }
     } catch (err) {
       results[guild_id] = { stored: 0, processed: 0, joins: [], leaves: [], error: String(err) };
     }

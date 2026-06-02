@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 
+export const dynamic = 'force-dynamic';
+
 // GET /api/guilds/status — public, no auth required
 export async function GET(req: NextRequest) {
   const admin = createAdminClient();
@@ -38,5 +40,7 @@ export async function GET(req: NextRequest) {
     last_member_synced_at: configByGuild[g.id]?.last_member_synced_at ?? latestSyncByGuild[g.id] ?? null,
   }));
 
-  return NextResponse.json(guilds);
+  return NextResponse.json(guilds, {
+    headers: { 'Cache-Control': 'no-store' },
+  });
 }
