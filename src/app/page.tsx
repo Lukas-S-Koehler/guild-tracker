@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2, Settings, Swords, Coins, TrendingUp, CheckCircle2, XCircle, Users } from 'lucide-react';
-import { formatGold, formatDate } from '@/lib/utils';
+import { formatGold, formatDate, getLastCompletedDay } from '@/lib/utils';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -26,6 +26,7 @@ interface UniversalStats {
 }
 
 interface DashboardData {
+  date: string;
   today: TodayLog[];
   stats: UniversalStats;
 }
@@ -82,7 +83,7 @@ function DashboardPageContent() {
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold">Guild Dashboard</h1>
-        <p className="text-muted-foreground mt-1">{formatDate(new Date())}</p>
+        <p className="text-muted-foreground mt-1">{formatDate(data?.date ?? getLastCompletedDay())}</p>
       </div>
 
       {/* Guild Statistics */}
@@ -138,7 +139,7 @@ function DashboardPageContent() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
-            <span>Today&apos;s Activity</span>
+            <span>{data?.date === new Date().toISOString().substring(0, 10) ? "Today's Activity" : `Activity — ${data?.date ?? getLastCompletedDay()}`}</span>
             {hasActivityToday && (
               <span className="text-sm font-normal text-muted-foreground">
                 {totalMetToday}/{data?.today.length} met

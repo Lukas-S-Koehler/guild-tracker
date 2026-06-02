@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
-import { formatInactivityReport } from '@/lib/utils';
+import { formatInactivityReport, getLastCompletedDay } from '@/lib/utils';
 
 export async function POST(req: NextRequest) {
   const auth = await verifyAuth(req, 'OFFICER');
@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
     }
   });
 
-  const today = new Date();
+  const today = new Date(getLastCompletedDay() + 'T00:00:00Z');
 
   const getCategory = (daysInactive: number): string => {
     if (daysInactive === 0) return 'active';

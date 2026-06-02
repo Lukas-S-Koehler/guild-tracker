@@ -173,22 +173,6 @@ export default function ReportsPage() {
         </p>
       </div>
 
-      {/* Guild selector — only shown when user belongs to multiple guilds */}
-      {multiGuild && (
-        <div className="flex gap-2 flex-wrap">
-          {guilds.map((guild) => (
-            <Button
-              key={guild.guild_id}
-              variant={selectedGuildId === guild.guild_id ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setSelectedGuildId(guild.guild_id)}
-            >
-              {guild.guild_name}
-            </Button>
-          ))}
-        </div>
-      )}
-
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between flex-wrap gap-2">
@@ -295,11 +279,7 @@ export default function ReportsPage() {
         </CardHeader>
 
         <CardContent>
-          {loading ? (
-            <div className="flex justify-center py-8">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            </div>
-          ) : entries.length === 0 ? (
+          {entries.length === 0 ? (
             <p className="text-center text-muted-foreground py-8">
               No inactive members found! 🎉
             </p>

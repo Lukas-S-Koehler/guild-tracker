@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
+import { getLastCompletedDay } from '@/lib/utils';
 
 // GET /api/dashboard
 // Universal dashboard data across all guilds. Public — no auth required.
 export async function GET(req: NextRequest) {
   const admin = createAdminClient();
-  const today = new Date().toISOString().substring(0, 10);
+  const today = getLastCompletedDay();
 
   const [todayLogsRes, allTimeRes, guildsRes] = await Promise.all([
     admin
@@ -50,6 +51,7 @@ export async function GET(req: NextRequest) {
     .eq('is_active', true);
 
   return NextResponse.json({
+    date: today,
     today: todayLogs.map((l: any) => ({
       id: l.id,
       ign: l.members?.ign ?? '?',

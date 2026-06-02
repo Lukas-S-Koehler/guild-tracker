@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { verifyAnyGuildAccess, isErrorResponse } from '@/lib/auth-helpers';
+import { getLastCompletedDay } from '@/lib/utils';
 
 // GET /api/guild-activity?date=YYYY-MM-DD
 // Returns processed daily activity for any guild (any authenticated guild member can view)
@@ -12,7 +13,7 @@ export async function GET(req: NextRequest) {
   const supabase = createServerClient(req);
   const { searchParams } = new URL(req.url);
 
-  const date = searchParams.get('date') || new Date().toISOString().substring(0, 10);
+  const date = searchParams.get('date') || getLastCompletedDay();
 
   const { data: logs, error } = await supabase
     .from('daily_logs')

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
@@ -15,8 +15,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { signIn } = useAuth();
+  const { signIn, user } = useAuth();
   const router = useRouter();
+
+  useEffect(() => {
+    if (user) router.push('/');
+  }, [user, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,9 +32,6 @@ export default function LoginPage() {
 
       if (signInError) {
         setError(signInError.message);
-      } else {
-        // Redirect to home (AuthContext automatically selects first guild)
-        router.push('/');
       }
     } catch (err) {
       setError('An unexpected error occurred');

@@ -32,7 +32,7 @@ jobs:
         if: ${{ github.event.inputs.run_backfill != 'true' }}
         run: |
           echo "Fetching daily activity for all guilds..."
-          response=$(curl -s -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/daily-activity" \
+          response=$(curl -s -L -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/daily-activity" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json")
           http_code=$(echo "$response" | tail -1)
@@ -48,7 +48,7 @@ jobs:
         if: ${{ github.event.inputs.run_backfill != 'true' }}
         run: |
           echo "Syncing members for all guilds..."
-          response=$(curl -s -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/members-sync-all" \
+          response=$(curl -s -L -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/members-sync-all" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json" \
             -d '{}')
@@ -68,7 +68,7 @@ jobs:
           fi
           PAYLOAD="$PAYLOAD}"
           echo "Running backfill: $PAYLOAD"
-          response=$(curl -s -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/backfill" \
+          response=$(curl -s -L -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/backfill" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD")

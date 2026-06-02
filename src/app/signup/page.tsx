@@ -17,7 +17,6 @@ export default function SignupPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
   const { signUp } = useAuth();
   const router = useRouter();
 
@@ -53,9 +52,7 @@ export default function SignupPage() {
       if (signUpError) {
         setError(signUpError.message);
       } else {
-        setSuccess(true);
-        // Note: Supabase sends a confirmation email by default
-        // After confirming, users will be able to sign in
+        router.push('/login');
       }
     } catch (err) {
       setError('An unexpected error occurred');
@@ -63,35 +60,6 @@ export default function SignupPage() {
       setLoading(false);
     }
   };
-
-  if (success) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl font-bold text-center">Check Your Email</CardTitle>
-            <CardDescription className="text-center">
-              We&apos;ve sent you a confirmation link
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-md">
-              <p className="text-sm text-green-600 dark:text-green-400">
-                Please check your email and click the confirmation link to activate your account.
-              </p>
-            </div>
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={() => router.push('/login')}
-            >
-              Go to Sign In
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">

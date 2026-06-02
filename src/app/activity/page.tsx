@@ -1,11 +1,14 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { format, parseISO } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Check, AlertCircle, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Loader2, Check, AlertCircle, RefreshCw, ChevronDown, ChevronUp, CalendarIcon } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { formatGold, getLastCompletedDay } from '@/lib/utils';
 import { useApiClient } from '@/lib/api-client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -210,12 +213,25 @@ function ActivityPageContent() {
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">
           <label className="text-sm font-medium">Date</label>
-          <Input
-            type="date"
-            value={selectedDate}
-            onChange={e => setSelectedDate(e.target.value)}
-            className="w-40"
-          />
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className={cn("w-40 justify-start text-left font-normal", !selectedDate && "text-muted-foreground")}
+              >
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {selectedDate ? format(parseISO(selectedDate), 'MMM d, yyyy') : 'Pick date'}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={selectedDate ? parseISO(selectedDate) : undefined}
+                onSelect={(date) => date && setSelectedDate(format(date, 'yyyy-MM-dd'))}
+                disabled={(date) => date > new Date()}
+              />
+            </PopoverContent>
+          </Popover>
         </div>
         {activityLogs.length > 0 && (
           <div className="flex gap-4 text-sm text-muted-foreground">
