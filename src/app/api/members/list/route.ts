@@ -54,8 +54,43 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
   }
 
+  const force = searchParams.get('force') === 'true';
+
   const { error } = await supabase.from('members').update(update).eq('id', memberId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Propagate discord info to all alt-linked members (main, siblings, own alts)
+  if (update.discord_id !== undefined) {
+    const [{ data: fwdLinks }, { data: revLinks }] = await Promise.all([
+      supabase.from('member_alts').select('alt_member_id').eq('member_id', memberId).not('alt_member_id', 'is', null),
+      supabase.from('member_alts').select('member_id').eq('alt_member_id', memberId),
+    ]);
+
+    const linkedIds = new Set<string>([
+      ...(fwdLinks ?? []).map((r) => r.alt_member_id).filter(Boolean) as string[],
+      ...(revLinks ?? []).map((r) => r.member_id).filter(Boolean) as string[],
+    ]);
+
+    // Siblings: if this member is an alt, get all other alts of the same main
+    const parentIds = (revLinks ?? []).map((r) => r.member_id).filter(Boolean) as string[];
+    if (parentIds.length > 0) {
+      const { data: siblingLinks } = await supabase
+        .from('member_alts')
+        .select('alt_member_id')
+        .in('member_id', parentIds)
+        .not('alt_member_id', 'is', null);
+      for (const r of siblingLinks ?? []) {
+        if (r.alt_member_id && r.alt_member_id !== memberId) linkedIds.add(r.alt_member_id);
+      }
+    }
+
+    const allLinkedIds = Array.from(linkedIds);
+    if (allLinkedIds.length > 0) {
+      let q = supabase.from('members').update(update).in('id', allLinkedIds);
+      if (!force) q = q.is('discord_id', null);
+      await q;
+    }
+  }
 
   return NextResponse.json({ ok: true });
 }

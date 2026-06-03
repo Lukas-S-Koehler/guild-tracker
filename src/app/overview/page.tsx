@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Loader2, AlertTriangle } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { useApiClient } from '@/lib/api-client';
+import { ApiClient, useApiClient } from '@/lib/api-client';
 import { useAuth } from '@/contexts/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { formatGold } from '@/lib/utils';
@@ -65,6 +65,13 @@ function formatColHeader(colKey: string, period: 'daily' | 'weekly'): { top: str
   }
 }
 
+interface DonationEntry {
+  item_name: string;
+  quantity: number;
+  unit_price: number;
+  gold_value: number;
+}
+
 interface CellDetailProps {
   colKey: string;
   period: NonNullable<OverviewResponse>['config']['period'];
@@ -77,12 +84,35 @@ interface CellDetailProps {
     alt_covered?: boolean;
   };
   ign: string;
+  memberId: string;
+  guildId: string;
 }
 
-function CellDetail({ colKey, period, data, ign }: CellDetailProps) {
+function CellDetail({ colKey, period, data, ign, memberId, guildId }: CellDetailProps) {
   const header = formatColHeader(colKey, period);
+  const [donations, setDonations] = useState<DonationEntry[] | null>(null);
+  const [loadingDonations, setLoadingDonations] = useState(false);
+
+  useEffect(() => {
+    if (period !== 'daily') return;
+    setLoadingDonations(true);
+    const client = new ApiClient();
+    client.setGuildId(guildId);
+    client.get(`/api/guild-activity?date=${colKey}`)
+      .then(r => r.json())
+      .then((logs: any[]) => {
+        const log = logs.find((l: any) => l.members?.id === memberId);
+        setDonations(log?.donations || []);
+      })
+      .catch(() => setDonations([]))
+      .finally(() => setLoadingDonations(false));
+  }, [colKey, memberId, guildId, period]);
+
+  const regularDonations = donations?.filter(d => !d.item_name.startsWith('[DEPOSIT]')) ?? [];
+  const deposits = donations?.filter(d => d.item_name.startsWith('[DEPOSIT]')) ?? [];
+
   return (
-    <div className="space-y-2 min-w-[180px]">
+    <div className="space-y-2 min-w-[240px]">
       <p className="font-semibold text-sm">{ign} — {header.top} {header.bottom}</p>
       <div className="space-y-1 text-xs text-muted-foreground">
         <div className="flex justify-between gap-4">
@@ -107,6 +137,38 @@ function CellDetail({ colKey, period, data, ign }: CellDetailProps) {
           <div className="pt-1 text-blue-400">Covered by alt contribution</div>
         )}
       </div>
+      {period === 'daily' && (
+        loadingDonations ? (
+          <div className="flex justify-center pt-1">
+            <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+          </div>
+        ) : (regularDonations.length > 0 || deposits.length > 0) ? (
+          <div className="pt-2 border-t space-y-2">
+            {regularDonations.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-foreground">Challenge Donations</p>
+                {regularDonations.map((d, i) => (
+                  <div key={i} className="flex justify-between gap-4 text-xs text-muted-foreground">
+                    <span>{d.item_name} ×{d.quantity}</span>
+                    <span className="font-medium text-foreground">{formatGold(d.gold_value)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {deposits.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-foreground">Guild Hall Deposits</p>
+                {deposits.map((d, i) => (
+                  <div key={i} className="flex justify-between gap-4 text-xs text-muted-foreground">
+                    <span>{d.item_name.replace('[DEPOSIT] ', '')} ×{d.quantity}</span>
+                    <span className="font-medium text-foreground">{formatGold(d.gold_value)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null
+      )}
     </div>
   );
 }
@@ -115,12 +177,14 @@ function MemberRow({
   member,
   columns,
   period,
+  guildId,
 }: {
   member: OverviewMember;
   columns: string[];
   period: 'daily' | 'weekly';
+  guildId: string;
 }) {
-  const warnBadge = getWarningBadge(member.recent_warning);
+  const warnBadge = getWarningBadge(member.warning_level);
   const inactiveColor = getWarningColor(member.warning_level);
 
   return (
@@ -163,7 +227,7 @@ function MemberRow({
                     </button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-3" side="top">
-                    <CellDetail colKey={col} period={period} data={p} ign={member.ign} />
+                    <CellDetail colKey={col} period={period} data={p} ign={member.ign} memberId={member.id} guildId={guildId} />
                   </PopoverContent>
                 </Popover>
               ) : (
@@ -175,7 +239,7 @@ function MemberRow({
       </tr>
       {/* Alt sub-rows */}
       {member.alts.map((alt) => (
-        <AltRow key={alt.id} alt={alt} columns={columns} period={period} />
+        <AltRow key={alt.id} alt={alt} mainIgn={member.ign} columns={columns} period={period} guildId={guildId} />
       ))}
     </>
   );
@@ -183,19 +247,26 @@ function MemberRow({
 
 function AltRow({
   alt,
+  mainIgn,
   columns,
   period,
+  guildId,
 }: {
   alt: OverviewAlt;
+  mainIgn: string;
   columns: string[];
   period: 'daily' | 'weekly';
+  guildId: string;
 }) {
   return (
     <tr className="border-b bg-muted/10 hover:bg-muted/20 transition-colors">
       <td className="px-3 py-1.5 min-w-[140px] max-w-[180px]">
         <div className="flex items-center gap-1.5 pl-5">
           <span className="text-muted-foreground text-xs">└</span>
-          <span className="text-sm text-muted-foreground truncate">{alt.ign}</span>
+          <div className="flex flex-col min-w-0">
+            <span className="text-sm text-muted-foreground truncate">{alt.ign}</span>
+            <span className="text-[10px] text-muted-foreground/60 truncate">alt of {mainIgn}</span>
+          </div>
         </div>
       </td>
       <td className="px-3 py-1.5 text-center text-xs text-muted-foreground">—</td>
@@ -217,7 +288,7 @@ function AltRow({
                   </button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-3" side="top">
-                  <CellDetail colKey={col} period={period} data={p} ign={alt.ign} />
+                  <CellDetail colKey={col} period={period} data={p} ign={alt.ign} memberId={alt.id} guildId={guildId} />
                 </PopoverContent>
               </Popover>
             ) : (
@@ -412,7 +483,7 @@ function OverviewPageContent() {
                 </thead>
                 <tbody>
                   {members.filter((m) => !m.is_alt || !m.main_id).map((member) => (
-                    <MemberRow key={member.id} member={member} columns={columns} period={period} />
+                    <MemberRow key={member.id} member={member} columns={columns} period={period} guildId={selectedGuildId} />
                   ))}
                 </tbody>
               </table>

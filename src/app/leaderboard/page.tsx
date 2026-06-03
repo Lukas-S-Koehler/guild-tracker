@@ -30,6 +30,8 @@ interface LeaderboardEntry {
   days_active: number;
   alt_count?: number;
   alt_igns?: string[];
+  is_alt?: boolean;
+  main_ign?: string | null;
 }
 
 export default function LeaderboardPage() {
@@ -181,6 +183,11 @@ export default function LeaderboardPage() {
                                 title={`Alts: ${entry.alt_igns?.join(', ')}`}
                               >
                                 +{entry.alt_count} alt{entry.alt_count > 1 ? 's' : ''}
+                              </span>
+                            ) : null}
+                            {!merged && entry.is_alt && entry.main_ign ? (
+                              <span className="ml-1.5 text-xs text-muted-foreground">
+                                alt of {entry.main_ign}
                               </span>
                             ) : null}
                             <div className="text-xs text-muted-foreground">

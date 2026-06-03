@@ -18,12 +18,22 @@ interface GuildMemberDiscord {
   discord_username: string | null;
 }
 
+interface LinkedMemberInfo {
+  id: string;
+  ign: string;
+  current_guild_id: string | null;
+  discord_id: string | null;
+  discord_username: string | null;
+}
+
 interface AltInfo {
   member_id: string;
   alt_ign: string;
-  alt_hashed_id: string;
+  alt_hashed_id: string | null;
   alt_member_id: string | null;
-  alt_member?: { ign: string; current_guild_id: string } | null;
+  alt_member?: LinkedMemberInfo | null;
+  // present on reverse links (guild member is the alt, main is cross-guild)
+  main_member?: LinkedMemberInfo | null;
 }
 
 interface GuildStat {
@@ -58,6 +68,12 @@ function DiscordMappingContent() {
   const [editing, setEditing] = useState<Record<string, { discord_id: string; discord_username: string }>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [conflictPending, setConflictPending] = useState<{
+    memberId: string;
+    discordId: string | null;
+    discordUsername: string | null;
+    conflicts: { ign: string; discord_id: string }[];
+  } | null>(null);
   const [search, setSearch] = useState('');
   const [showInstructions, setShowInstructions] = useState(false);
 
@@ -146,8 +162,9 @@ function DiscordMappingContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSuperAdmin, accessibleGuilds.length]);
 
-  const patchMember = useCallback(async (memberId: string, guildId: string, discord_id: string | null, discord_username: string | null) => {
-    return api.patch(`/api/members/list?member_id=${memberId}`, { discord_id, discord_username }, { guildId });
+  const patchMember = useCallback(async (memberId: string, guildId: string, discord_id: string | null, discord_username: string | null, force = false) => {
+    const qs = force ? `member_id=${memberId}&force=true` : `member_id=${memberId}`;
+    return api.patch(`/api/members/list?${qs}`, { discord_id, discord_username }, { guildId });
   }, [api]);
 
   const loadMembers = useCallback(async (guildId: string) => {
@@ -224,21 +241,56 @@ function DiscordMappingContent() {
   }, [selectedGuildId, loadMembers]);
 
 
-  // Build relationship maps from alts state
+  // Build relationship maps from alts state (covers same-guild and cross-guild links)
   const altMemberIds = new Set<string>();
   const altToMainId = new Map<string, string>();
-  const mainToLinkedAlts = new Map<string, { alt_member_id: string; guild_id: string }[]>();
+  // memberId → all linked member IDs (both same-guild alts and cross-guild main/alts)
+  const memberToGroupIds = new Map<string, Set<string>>();
+  // id → discord info for cross-guild members (not in local members array)
+  const crossGuildInfo = new Map<string, LinkedMemberInfo>();
 
-  for (const alt of alts) {
-    if (!alt.alt_member_id) continue;
-    altMemberIds.add(alt.alt_member_id);
-    altToMainId.set(alt.alt_member_id, alt.member_id);
-    const existing = mainToLinkedAlts.get(alt.member_id) ?? [];
-    existing.push({ alt_member_id: alt.alt_member_id, guild_id: alt.alt_member?.current_guild_id ?? selectedGuildId });
-    mainToLinkedAlts.set(alt.member_id, existing);
+  const addGroupEdge = (a: string, b: string) => {
+    if (!memberToGroupIds.has(a)) memberToGroupIds.set(a, new Set());
+    if (!memberToGroupIds.has(b)) memberToGroupIds.set(b, new Set());
+    memberToGroupIds.get(a)!.add(b);
+    memberToGroupIds.get(b)!.add(a);
+  };
+
+  for (const link of alts) {
+    if (!link.alt_member_id) continue;
+    altMemberIds.add(link.alt_member_id);
+    altToMainId.set(link.alt_member_id, link.member_id);
+    addGroupEdge(link.member_id, link.alt_member_id);
+
+    // Store cross-guild member discord info
+    if (link.alt_member?.id) crossGuildInfo.set(link.alt_member.id, link.alt_member);
+    if (link.main_member?.id) crossGuildInfo.set(link.main_member.id, link.main_member);
   }
 
   const memberMap = new Map(members.map(m => [m.id, m]));
+
+  // Returns all member IDs in the same account group globally (same-guild + cross-guild)
+  const getGroupMemberIds = (memberId: string): string[] => {
+    const visited = new Set<string>();
+    const queue = [memberId];
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      if (visited.has(id)) continue;
+      visited.add(id);
+      for (const linked of Array.from(memberToGroupIds.get(id) ?? [])) {
+        if (!visited.has(linked)) queue.push(linked);
+      }
+    }
+    return Array.from(visited);
+  };
+
+  // Returns discord info for any member in the group (same-guild or cross-guild)
+  const getDiscordInfo = (memberId: string): { discord_id: string | null; discord_username: string | null } => {
+    const local = memberMap.get(memberId);
+    if (local) return { discord_id: local.discord_id, discord_username: local.discord_username };
+    const cross = crossGuildInfo.get(memberId);
+    return { discord_id: cross?.discord_id ?? null, discord_username: cross?.discord_username ?? null };
+  };
 
   const handleEdit = (memberId: string, field: 'discord_id' | 'discord_username', value: string) => {
     setEditing(prev => ({
@@ -251,16 +303,10 @@ function DiscordMappingContent() {
     }));
   };
 
-  const handleSave = async (memberId: string) => {
-    const vals = editing[memberId];
-    if (!vals || !selectedGuildId) return;
+  const doSave = async (memberId: string, discordId: string | null, discordUsername: string | null, force: boolean) => {
     setSaving(memberId);
-
-    const discordId = vals.discord_id || null;
-    const discordUsername = vals.discord_username || null;
-
     try {
-      const res = await patchMember(memberId, selectedGuildId, discordId, discordUsername);
+      const res = await patchMember(memberId, selectedGuildId, discordId, discordUsername, force);
       if (!res.ok) {
         const d = await res.json();
         setMessage({ type: 'error', text: d.error || 'Save failed' });
@@ -270,25 +316,19 @@ function DiscordMappingContent() {
       const wasMap = !!members.find(m => m.id === memberId)?.discord_id;
       const nowMap = !!discordId;
 
-      const linkedAlts = mainToLinkedAlts.get(memberId) ?? [];
-      await Promise.allSettled(
-        linkedAlts.map(({ alt_member_id, guild_id }) =>
-          patchMember(alt_member_id, guild_id, discordId, discordUsername)
-        )
-      );
-
-      setMembers(prev => prev.map(m => {
-        if (m.id === memberId) return { ...m, discord_id: discordId, discord_username: discordUsername };
-        if (altToMainId.get(m.id) === memberId) return { ...m, discord_id: discordId, discord_username: discordUsername };
-        return m;
-      }));
+      // Update same-guild group members in local state (backend handles cross-guild)
+      const allGroupIds = new Set(getGroupMemberIds(memberId));
+      setMembers(prev => prev.map(m =>
+        allGroupIds.has(m.id) ? { ...m, discord_id: discordId, discord_username: discordUsername } : m
+      ));
       setEditing(prev => { const n = { ...prev }; delete n[memberId]; return n; });
 
-      const propagatedCount = linkedAlts.length;
+      // Total linked = all group members minus self (including cross-guild)
+      const totalLinked = allGroupIds.size - 1;
       setMessage({
         type: 'success',
-        text: propagatedCount > 0
-          ? `Saved + propagated to ${propagatedCount} alt${propagatedCount > 1 ? 's' : ''}`
+        text: totalLinked > 0
+          ? `Saved + synced to ${totalLinked} linked character${totalLinked > 1 ? 's' : ''}`
           : 'Saved',
       });
       setTimeout(() => setMessage(null), 3000);
@@ -296,13 +336,46 @@ function DiscordMappingContent() {
       if (allStats && wasMap !== nowMap) {
         setAllStats(prev => prev ? { ...prev, mapped: prev.mapped + (nowMap ? 1 : -1) } : prev);
         setPerGuildStats(prev => prev.map(g =>
-          g.guild_id === selectedGuildId
-            ? { ...g, mapped: g.mapped + (nowMap ? 1 : -1) }
-            : g
+          g.guild_id === selectedGuildId ? { ...g, mapped: g.mapped + (nowMap ? 1 : -1) } : g
         ));
       }
     } catch { setMessage({ type: 'error', text: 'Network error' }); }
     finally { setSaving(null); }
+  };
+
+  const handleSave = async (memberId: string) => {
+    const vals = editing[memberId];
+    if (!vals || !selectedGuildId) return;
+
+    const discordId = vals.discord_id || null;
+    const discordUsername = vals.discord_username || null;
+
+    // Check for conflicts across ALL group members (same-guild + cross-guild)
+    const groupIds = getGroupMemberIds(memberId);
+    const conflicts = groupIds
+      .filter(id => id !== memberId)
+      .map(id => {
+        const info = getDiscordInfo(id);
+        const ign = memberMap.get(id)?.ign ?? crossGuildInfo.get(id)?.ign ?? id;
+        return info.discord_id && info.discord_id !== discordId
+          ? { ign, discord_id: info.discord_id }
+          : null;
+      })
+      .filter((c): c is { ign: string; discord_id: string } => c !== null);
+
+    if (conflicts.length > 0) {
+      setConflictPending({ memberId, discordId, discordUsername, conflicts });
+      return;
+    }
+
+    await doSave(memberId, discordId, discordUsername, false);
+  };
+
+  const handleForceOverwrite = async () => {
+    if (!conflictPending) return;
+    const { memberId, discordId, discordUsername } = conflictPending;
+    setConflictPending(null);
+    await doSave(memberId, discordId, discordUsername, true);
   };
 
   const selectedGuild = accessibleGuilds.find(g => g.guild_id === selectedGuildId);
@@ -554,6 +627,29 @@ function DiscordMappingContent() {
               {message.text}
             </div>
           )}
+          {conflictPending && (
+            <div className="mt-2 p-3 rounded border border-orange-500/40 bg-orange-500/10 text-sm space-y-2">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 text-orange-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-orange-300">Discord conflict detected</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {conflictPending.conflicts.map(c => (
+                      <span key={c.ign}><span className="font-medium text-foreground">{c.ign}</span> already has Discord ID <span className="font-mono">{c.discord_id}</span></span>
+                    )).reduce((acc: React.ReactNode[], el, i) => i === 0 ? [el] : [...acc, ', ', el], [])}
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" className="h-7 text-xs bg-orange-500 hover:bg-orange-600 text-white" onClick={handleForceOverwrite}>
+                  Overwrite all with new ID
+                </Button>
+                <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setConflictPending(null)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
         </CardHeader>
         <CardContent className="px-4 pb-4">
           {loadingMembers ? (
@@ -576,8 +672,10 @@ function DiscordMappingContent() {
                 {filtered.map(m => {
                   const mainId = altToMainId.get(m.id);
                   const isAlt = !!mainId;
-                  const mainMember = mainId ? memberMap.get(mainId) : null;
-                  const linkedAltCount = mainToLinkedAlts.get(m.id)?.length ?? 0;
+                  // main info: check same-guild first, then cross-guild
+                  const mainMember = mainId ? (memberMap.get(mainId) ?? crossGuildInfo.get(mainId) ?? null) : null;
+                  // total linked = all group members minus self
+                  const linkedAltCount = getGroupMemberIds(m.id).length - 1;
 
                   const ed = editing[m.id];
                   const discordId = ed?.discord_id ?? m.discord_id ?? '';
@@ -586,8 +684,9 @@ function DiscordMappingContent() {
                   const isMapped = !!discordId;
                   const isValidId = discordId === '' || /^\d{17,20}$/.test(discordId);
 
-                  // Inherited: alt whose discord_id matches main's (was auto-propagated)
-                  const isInherited = isAlt && !!mainMember?.discord_id && m.discord_id === mainMember.discord_id;
+                  // Inherited: any group member whose discord_id matches another group member's
+                  const mainDiscordId = mainId ? getDiscordInfo(mainId).discord_id : null;
+                  const isInherited = isAlt && !!mainDiscordId && m.discord_id === mainDiscordId;
 
                   return (
                     <div

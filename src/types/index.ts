@@ -163,4 +163,6 @@ export interface LeaderboardEntryMerged {
   days_active: number;
   alt_count: number;
   alt_igns: string[];
+  is_alt?: boolean;
+  main_ign?: string | null;
 }

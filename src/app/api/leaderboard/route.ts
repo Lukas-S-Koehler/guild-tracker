@@ -36,31 +36,88 @@ export async function GET(req: NextRequest) {
   const entries = leaderboard ?? [];
 
   if (!merged) {
-    return NextResponse.json(entries.map((e) => ({ ...e, alt_count: 0, alt_igns: [] })));
+    // In individual mode, still annotate which members are alts and who their main is
+    const memberIds = entries.map((e) => e.id);
+    if (memberIds.length === 0) return NextResponse.json(entries.map((e) => ({ ...e, alt_count: 0, alt_igns: [], is_alt: false, main_ign: null })));
+
+    const { data: revLinks } = await supabase
+      .from('member_alts')
+      .select('member_id, alt_member_id')
+      .in('alt_member_id', memberIds);
+
+    // alt_member_id → main's member_id
+    const altToMainId = new Map<string, string>();
+    for (const link of revLinks ?? []) {
+      if (link.alt_member_id) altToMainId.set(link.alt_member_id, link.member_id);
+    }
+
+    // Fetch main members' IGNs
+    const mainIds = Array.from(new Set(Array.from(altToMainId.values())));
+    let mainIgnMap = new Map<string, string>();
+    if (mainIds.length > 0) {
+      const { data: mainMembers } = await supabase
+        .from('members')
+        .select('id, ign')
+        .in('id', mainIds);
+      for (const m of mainMembers ?? []) mainIgnMap.set(m.id, m.ign);
+      // Also check entries themselves (main may be in the same result set)
+      for (const e of entries) mainIgnMap.set(e.id, e.ign);
+    }
+
+    return NextResponse.json(entries.map((e) => {
+      const mainId = altToMainId.get(e.id);
+      return {
+        ...e,
+        alt_count: 0,
+        alt_igns: [],
+        is_alt: !!mainId,
+        main_ign: mainId ? (mainIgnMap.get(mainId) ?? null) : null,
+      };
+    }));
   }
 
   const memberIds = entries.map((e) => e.id);
   if (memberIds.length === 0) return NextResponse.json([]);
 
-  // Fetch alt links for members in result set
-  const { data: altLinks } = await supabase
-    .from('member_alts')
-    .select('member_id, alt_member_id, alt_ign, alt_hashed_id')
-    .in('member_id', memberIds);
+  // Fetch alt links: forward (member is main) + reverse (member is alt)
+  // Reverse lookup needed when main is in a different guild and not in this result set
+  const [{ data: altLinks }, { data: reverseAltLinks }] = await Promise.all([
+    supabase
+      .from('member_alts')
+      .select('member_id, alt_member_id, alt_ign, alt_hashed_id')
+      .in('member_id', memberIds),
+    supabase
+      .from('member_alts')
+      .select('member_id, alt_member_id, alt_ign, alt_hashed_id')
+      .in('alt_member_id', memberIds),
+  ]);
+  // External mains: member_id from reverseAltLinks not in this guild's memberIds.
+  // Need their forward links to show untracked alts (e.g. JC001/JC002/JC003 under JCFighter).
+  const externalMainIds = Array.from(new Set(
+    (reverseAltLinks ?? [])
+      .map((l) => l.member_id)
+      .filter((id) => !memberIds.includes(id))
+  ));
 
-  // Fetch character_id for all members (lowest = main account)
-  const { data: memberCharIds } = await supabase
-    .from('members')
-    .select('id, character_id')
-    .in('id', memberIds);
+  let externalLinks: Array<{
+    member_id: string;
+    alt_member_id: string | null;
+    alt_ign: string;
+    alt_hashed_id: string | null;
+  }> = [];
 
-  const charIdMap = new Map<string, number>(
-    (memberCharIds ?? [])
-      .filter((m) => m.character_id != null)
-      .map((m) => [m.id, m.character_id as number])
-  );
+  if (externalMainIds.length > 0) {
+    const { data } = await supabase
+      .from('member_alts')
+      .select('member_id, alt_member_id, alt_ign, alt_hashed_id')
+      .in('member_id', externalMainIds);
+    externalLinks = data ?? [];
+  }
+
+  const allLinks = [...(altLinks ?? []), ...(reverseAltLinks ?? []), ...externalLinks];
 
   // Union-find: group alts together
+  // member_id in alt_links is always the main; alt_member_id is always the alt
   const parent = new Map<string, string>();
 
   function find(id: string): string {
@@ -72,19 +129,14 @@ export async function GET(req: NextRequest) {
     return root;
   }
 
-  function union(a: string, b: string) {
-    const ra = find(a);
-    const rb = find(b);
-    if (ra === rb) return;
-    // Canonical = member with lower character_id (= main account)
-    // Fall back to string sort if character_id unknown
-    const charA = charIdMap.get(ra) ?? Infinity;
-    const charB = charIdMap.get(rb) ?? Infinity;
-    if (charA <= charB) parent.set(rb, ra);
-    else parent.set(ra, rb);
+  function union(mainMemberId: string, altMemberId: string) {
+    const rm = find(mainMemberId);
+    const ra = find(altMemberId);
+    if (rm === ra) return;
+    parent.set(ra, rm); // main always becomes canonical root
   }
 
-  for (const link of altLinks ?? []) {
+  for (const link of allLinks) {
     if (link.alt_member_id && memberIds.includes(link.alt_member_id)) {
       union(link.member_id, link.alt_member_id);
     }
@@ -99,24 +151,17 @@ export async function GET(req: NextRequest) {
     groups.set(canonical, group);
   }
 
-  // Build merged entries: main = member with lowest character_id in group
-  const merged_entries = Array.from(groups.values()).map((group) => {
-    // Sort by character_id ascending (main first), fall back to activity_score desc
-    group.sort((a, b) => {
-      const cA = charIdMap.get(a.id) ?? Infinity;
-      const cB = charIdMap.get(b.id) ?? Infinity;
-      if (cA !== cB) return cA - cB;
-      return b.activity_score - a.activity_score;
-    });
-    const main = group[0];
-    const alts = group.slice(1);
+  // Build merged entries: main = member whose id is the canonical root of its group
+  const merged_entries = Array.from(groups.entries()).map(([canonicalId, group]) => {
+    // canonical id IS the main member's id (set by union-find which always roots on member_id)
+    const main = group.find((e) => e.id === canonicalId) ?? group[0];
+    const alts = group.filter((e) => e.id !== main.id);
 
     // Named alts: untracked chars linked from any member in this group
     // Deduplicate by alt_hashed_id to avoid counting same char multiple times
-    const seenHashedIds = new Set<string>(group.map((e) => e.id)); // not needed but guard
     const namedAltsMap = new Map<string, string>(); // hashed_id → ign
 
-    for (const link of altLinks ?? []) {
+    for (const link of allLinks) {
       if (find(link.member_id) !== find(main.id)) continue;
       if (memberIds.includes(link.alt_member_id ?? '')) continue; // tracked member, counted in alts[]
       if (link.alt_hashed_id) {
