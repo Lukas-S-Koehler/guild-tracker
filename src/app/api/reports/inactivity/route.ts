@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { verifyAuthOrPublic, isErrorResponse } from '@/lib/auth-helpers';
 import { getWarningInfo, findLastMetWeek, getISOWeekKey, RequirementPeriod } from '@/lib/warning-calculator';
+import { DAY_BOUNDARY_OFFSET_MINUTES } from '@/lib/activity-processor';
 
 // GET /api/reports/inactivity — public, no auth required
 export async function GET(req: NextRequest) {
@@ -11,12 +12,13 @@ export async function GET(req: NextRequest) {
   const { guildId } = auth;
   const supabase = createAdminClient();
 
-  // Fetch guild config to check requirement period
-  const { data: config } = await supabase
-    .from('guild_config')
-    .select('settings')
-    .eq('guild_id', guildId)
-    .single();
+  // Fetch guild active status + config
+  const [{ data: guild }, { data: config }] = await Promise.all([
+    supabase.from('guilds').select('is_active').eq('id', guildId).single(),
+    supabase.from('guild_config').select('settings').eq('guild_id', guildId).single(),
+  ]);
+
+  if (guild?.is_active === false) return NextResponse.json([]);
 
   const period: RequirementPeriod = config?.settings?.requirement_period ?? 'daily';
   const weeklyReq: number = config?.settings?.weekly_donation_requirement ?? 35000;
@@ -39,12 +41,12 @@ export async function GET(req: NextRequest) {
   const memberIds = members.map((m) => m.id);
 
   // Fetch logs — for weekly guilds we need deposits_gold, for daily we filter by met_requirement
-  let logs: Array<{ member_id: string; log_date: string; met_requirement: boolean; deposits_gold: number }> = [];
+  let logs: Array<{ member_id: string; log_date: string; met_requirement: boolean; deposits_gold: number; gold_donated?: number }> = [];
 
   if (period === 'weekly') {
     const { data } = await supabase
       .from('daily_logs')
-      .select('member_id, log_date, met_requirement, deposits_gold')
+      .select('member_id, log_date, met_requirement, deposits_gold, gold_donated')
       .eq('guild_id', guildId)
       .in('member_id', memberIds)
       .order('log_date', { ascending: false })
@@ -68,7 +70,7 @@ export async function GET(req: NextRequest) {
   if (period === 'weekly') {
     const weeklyMap = new Map<string, Map<string, number>>();
     for (const log of logs) {
-      const goldValue = depositsOnly ? (log.deposits_gold ?? 0) : (log.deposits_gold ?? 0); // always deposits for DI
+      const goldValue = depositsOnly ? (log.deposits_gold ?? 0) : ((log.gold_donated ?? 0) + (log.deposits_gold ?? 0));
       const weekKey = getISOWeekKey(log.log_date);
       const memberWeeks = weeklyMap.get(log.member_id) ?? new Map<string, number>();
       memberWeeks.set(weekKey, (memberWeeks.get(weekKey) ?? 0) + goldValue);
@@ -106,7 +108,10 @@ export async function GET(req: NextRequest) {
     mainToAlts.set(link.member_id, arr);
   }
 
-  const today = new Date();
+  // Align with game day boundary (11:50 UTC). Same shift used in activity-processor.
+  const shiftedNow = new Date(Date.now() - DAY_BOUNDARY_OFFSET_MINUTES * 60 * 1000);
+  const today = new Date(shiftedNow);
+  today.setUTCHours(0, 0, 0, 0);
 
   const inactiveMembers = members
     .map((member) => {

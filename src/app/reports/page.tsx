@@ -370,6 +370,9 @@ export default function ReportsPage() {
           <p className="mt-2 text-xs">
             Note: Leaders and Deputies are excluded from inactivity tracking. New members are tracked from their join date.
           </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            📅 Day cycle: <strong>11:50 UTC (13:50 GMT+2)</strong> → next day <strong>11:49 UTC (13:49 GMT+2)</strong>. Warnings fire daily at 11:48 UTC.
+          </p>
         </div>
         {canManageDiscord && (
           <div>

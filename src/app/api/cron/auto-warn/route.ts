@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase-server';
 import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 import { sendDirectMessage, postToChannel } from '@/lib/discord-api';
 import { getWarningInfo, findLastMetWeek, getISOWeekKey, RequirementPeriod } from '@/lib/warning-calculator';
+import { DAY_BOUNDARY_OFFSET_MINUTES } from '@/lib/activity-processor';
 
 // POST /api/cron/auto-warn — auto-warn inactive members
 // Accepts either CRON_SECRET (all guilds) or officer session (single guild via x-guild-id)
@@ -38,15 +39,26 @@ export async function POST(req: NextRequest) {
 
   const { data: configs } = await configQuery;
 
+  // Fetch active status for all guilds in scope
+  const configGuildIds = (configs ?? []).map((c) => c.guild_id);
+  const { data: guildRows } = configGuildIds.length
+    ? await supabase.from('guilds').select('id, is_active').in('id', configGuildIds)
+    : { data: [] };
+  const guildActiveMap = new Map((guildRows ?? []).map((g) => [g.id, g.is_active]));
+
   if (!configs || configs.length === 0) {
     return NextResponse.json({ message: 'No guilds with Discord log channel configured', summary });
   }
 
-  const today = new Date();
+  // Align with game day boundary (11:50 UTC). Same shift used in activity-processor.
+  const shiftedNow = new Date(Date.now() - DAY_BOUNDARY_OFFSET_MINUTES * 60 * 1000);
+  const today = new Date(shiftedNow);
   today.setUTCHours(0, 0, 0, 0);
 
   for (const config of configs) {
     const { guild_id: guildId, guild_name: guildName, settings } = config;
+    if (guildActiveMap.get(guildId) === false) continue;
+
     const logChannelId: string | null = settings?.discord_log_channel_id ?? null;
     const period: RequirementPeriod = settings?.requirement_period ?? 'daily';
     const weeklyReq: number = settings?.weekly_donation_requirement ?? 35000;
@@ -74,7 +86,7 @@ export async function POST(req: NextRequest) {
       since.setUTCDate(since.getUTCDate() - 90);
       const { data: logs } = await supabase
         .from('daily_logs')
-        .select('member_id, log_date, met_requirement, deposits_gold')
+        .select('member_id, log_date, met_requirement, deposits_gold, gold_donated')
         .in('member_id', memberIds)
         .gte('log_date', since.toISOString().split('T')[0])
         .order('log_date', { ascending: false });
@@ -105,7 +117,8 @@ export async function POST(req: NextRequest) {
         for (const log of logs ?? []) {
           const weekKey = getISOWeekKey(log.log_date);
           const memberWeeks = weeklyMap.get(log.member_id) ?? new Map<string, number>();
-          memberWeeks.set(weekKey, (memberWeeks.get(weekKey) ?? 0) + (log.deposits_gold ?? 0));
+          const goldVal = depositsOnly ? (log.deposits_gold ?? 0) : ((log.gold_donated ?? 0) + (log.deposits_gold ?? 0));
+          memberWeeks.set(weekKey, (memberWeeks.get(weekKey) ?? 0) + goldVal);
           weeklyMap.set(log.member_id, memberWeeks);
         }
 
@@ -210,7 +223,7 @@ export async function POST(req: NextRequest) {
           dmError = 'DMs paused (admin setting)';
           noDiscord++;
         } else if (member.discord_id && botToken) {
-          const dmMsg = `${levelLabel}\nYour character **${member.ign}** in **${guildName}** has been flagged for inactivity (${daysInactive} days inactive).\nPlease ensure you meet the activity requirements to remain in the guild.`;
+          const dmMsg = `${levelLabel}\nYour character **${member.ign}** in **${guildName}** has been flagged for inactivity (${daysInactive} days inactive).\nPlease ensure you meet the activity requirements to remain in the guild.\n📅 Activity is tracked daily from **11:50 UTC (13:50 GMT+2)** to **11:49 UTC (13:49 GMT+2)** the following day.`;
           const result = await sendDirectMessage(member.discord_id, dmMsg);
           dmSent = result.ok;
           dmError = result.error ?? null;
@@ -252,7 +265,10 @@ export async function POST(req: NextRequest) {
         const warn2List = inactiveReport.filter((m) => m.warning_level === 'warn2').sort((a, b) => b.daysInactive - a.daysInactive);
         const warn1List = inactiveReport.filter((m) => m.warning_level === 'warn1').sort((a, b) => b.daysInactive - a.daysInactive);
 
-        const lines: string[] = [`**${guildName} — Inactivity Report**`];
+        const gameDay = today.toISOString().split('T')[0];
+        const lines: string[] = [
+          `**${guildName} — Inactivity Report** · Game day: **${gameDay}** (11:50 UTC → next day 11:49 UTC)`,
+        ];
         if (kickList.length) {
           lines.push(`\n🚫 **Kick Notice** (${kickList.length})`);
           kickList.forEach((m) => lines.push(`• **${m.ign}** — ${m.daysInactive}d inactive${m.discord_id ? '' : ' · ❌ no Discord'}`));

@@ -2,8 +2,8 @@ name: Daily Guild Activity Fetch
 
 on:
   schedule:
-    # Runs at 11:50 UTC daily
-    - cron: '50 11 * * *'
+    # Runs at 11:48 UTC daily — 2 min before game day boundary (11:50 UTC / 13:50 GMT+2)
+    - cron: '48 11 * * *'
   workflow_dispatch:
     inputs:
       run_backfill:

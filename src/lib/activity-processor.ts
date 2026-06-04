@@ -1,6 +1,10 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { IdleMMOApi, ActivityEvent } from './idlemmo-api';
 
+// Game day ends at 11:50 UTC; events before this belong to the previous calendar day.
+// Day cycle: 11:50 UTC (13:50 GMT+2) → next day 11:49 UTC (13:49 GMT+2).
+export const DAY_BOUNDARY_OFFSET_MINUTES = 710; // minutes to subtract to get game-day date
+
 interface DayMemberActivity {
   raids: number;
   donations: Array<{ item: string; quantity: number }>;
@@ -25,7 +29,7 @@ function isDonationEvent(type: string, text: string): boolean {
 
 function eventDateUTC(createdAt: string): string {
   const d = new Date(createdAt);
-  d.setUTCMinutes(d.getUTCMinutes() - 710); // shift day boundary to 11:50 UTC
+  d.setUTCMinutes(d.getUTCMinutes() - DAY_BOUNDARY_OFFSET_MINUTES); // shift day boundary to 11:50 UTC
   return d.toISOString().substring(0, 10);
 }
 
