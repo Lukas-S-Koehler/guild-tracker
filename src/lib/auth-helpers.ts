@@ -49,7 +49,13 @@ export async function verifyAuth(
     );
   }
 
-  // 3. Verify user has access to this guild
+  // 3. Super admin bypasses guild membership check entirely
+  if (user.email === SUPER_ADMIN_EMAIL) {
+    console.log('[verifyAuth] SUCCESS - Super admin bypass');
+    return { user: { id: user.id, email: user.email }, guildId, role: 'LEADER', isSuperAdmin: true };
+  }
+
+  // 4. Verify user has access to this guild
   const { data: membership, error: membershipError } = await supabase
     .from('guild_leaders')
     .select('role')
@@ -73,7 +79,7 @@ export async function verifyAuth(
     );
   }
 
-  // 4. Check role if required
+  // 5. Check role if required
   if (requiredRole) {
     const roleHierarchy = { MEMBER: 0, OFFICER: 1, DEPUTY: 2, LEADER: 3 };
     const userRoleLevel = roleHierarchy[membership.role as keyof typeof roleHierarchy];

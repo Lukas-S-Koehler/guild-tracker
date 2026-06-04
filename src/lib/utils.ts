@@ -28,15 +28,28 @@ export function getToday(): string {
   return new Date().toISOString().split('T')[0];
 }
 
-// Returns yesterday if before cron time (11:00 UTC), else today.
-// Avoids showing empty activity page in morning before cron runs.
+export const CRON_HOUR_UTC = 11;
+export const CRON_MINUTE_UTC = 50;
+
+// Returns yesterday if before cron time (11:50 UTC), else today.
 export function getLastCompletedDay(): string {
   const now = new Date();
-  if (now.getUTCHours() < 11) {
+  const beforeCron =
+    now.getUTCHours() < CRON_HOUR_UTC ||
+    (now.getUTCHours() === CRON_HOUR_UTC && now.getUTCMinutes() < CRON_MINUTE_UTC);
+  if (beforeCron) {
     const y = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
     return y.toISOString().split('T')[0];
   }
   return now.toISOString().split('T')[0];
+}
+
+// Milliseconds until next cron run (11:50 UTC).
+export function msUntilNextCron(): number {
+  const now = new Date();
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), CRON_HOUR_UTC, CRON_MINUTE_UTC));
+  if (now >= next) next.setUTCDate(next.getUTCDate() + 1);
+  return next.getTime() - now.getTime();
 }
 
 export function getWeekStart(): string {

@@ -21,6 +21,14 @@ export async function POST(req: NextRequest) {
   const botToken = process.env.DISCORD_BOT_TOKEN;
   const summary: Array<{ guild: string; warned: number; skipped: number; no_discord: number }> = [];
 
+  // Check global DM pause flag
+  const { data: pauseSetting } = await supabase
+    .from('app_settings')
+    .select('value')
+    .eq('key', 'pause_discord_dms')
+    .maybeSingle();
+  const dmsPaused = pauseSetting?.value === 'true';
+
   // Fetch guild configs — if called by officer, only their guild; cron fetches all
   let configQuery = supabase.from('guild_config').select('guild_id, guild_name, settings');
 
@@ -52,7 +60,7 @@ export async function POST(req: NextRequest) {
       // Fetch active members (excluding leaders/deputies)
       const { data: members } = await supabase
         .from('members')
-        .select('id, ign, position, discord_id, first_seen')
+        .select('id, ign, position, discord_id, first_seen, hashed_id')
         .eq('current_guild_id', guildId)
         .eq('is_active', true)
         .not('position', 'in', '("LEADER","DEPUTY")');
@@ -180,6 +188,10 @@ export async function POST(req: NextRequest) {
         const ignLower = member.ign?.toLowerCase() ?? '';
         if (!member.ign || ignLower.includes('raw activity') || ignLower.includes('log')) continue;
 
+        // Exempt admin accounts
+        const ADMIN_HASHED_IDS = new Set(['6aDoyRnLyEey9LpV5AGX', 'AB1E9poQq7VOKYnakeJj', 'o31P7kZL6Z31BLveGxXO']);
+        if (member.hashed_id && ADMIN_HASHED_IDS.has(member.hashed_id)) continue;
+
         // Add to full inactivity report (all inactive, regardless of warn status)
         inactiveReport.push({ ign: member.ign, daysInactive, warning_level, discord_id: member.discord_id ?? null });
 
@@ -189,12 +201,15 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
-        // Send DM if Discord ID is mapped and bot token exists
+        // Send DM if Discord ID is mapped and bot token exists (skip if DMs are paused)
         let dmSent = false;
         let dmError: string | null = null;
         const levelLabel = warning_level === 'warn1' ? '⚠️ Warning' : warning_level === 'warn2' ? '⚠️⚠️ Final Warning' : '🚫 Kick Notice';
 
-        if (member.discord_id && botToken) {
+        if (dmsPaused) {
+          dmError = 'DMs paused (admin setting)';
+          noDiscord++;
+        } else if (member.discord_id && botToken) {
           const dmMsg = `${levelLabel}\nYour character **${member.ign}** in **${guildName}** has been flagged for inactivity (${daysInactive} days inactive).\nPlease ensure you meet the activity requirements to remain in the guild.`;
           const result = await sendDirectMessage(member.discord_id, dmMsg);
           dmSent = result.ok;
@@ -218,9 +233,11 @@ export async function POST(req: NextRequest) {
         // Post per-member DM confirmation to warn log channel
         const warnLogChannelId = process.env.DISCORD_WARN_LOG_CHANNEL_ID;
         if (warnLogChannelId && botToken) {
-          const dmStatus = member.discord_id
-            ? (dmSent ? '✅ DM sent' : `❌ DM failed: ${dmError ?? 'unknown'}`)
-            : '❌ No Discord ID';
+          const dmStatus = dmsPaused
+            ? '⏸️ DM paused'
+            : member.discord_id
+              ? (dmSent ? '✅ DM sent' : `❌ DM failed: ${dmError ?? 'unknown'}`)
+              : '❌ No Discord ID';
           const logLine = `${levelLabel} **${member.ign}** · Guild: **${guildName}** · ${daysInactive} days inactive · ${dmStatus}`;
           const channelResult = await postToChannel(warnLogChannelId, logLine);
           if (!channelResult.ok) {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
-import { IdleMMOApi } from '@/lib/idlemmo-api';
+import { IdleMMOApi, ActivityEvent } from '@/lib/idlemmo-api';
 import { storeActivityEvents, processActivityEvents } from '@/lib/activity-processor';
 
 function verifyCronSecret(req: NextRequest): boolean {
@@ -39,14 +39,41 @@ export async function POST(req: NextRequest) {
     try {
       const api = new IdleMMOApi(api_key);
 
-      // Fetch latest activity (page 1 gets most recent — enough for daily run)
-      // Fetch up to 3 pages to catch any backlog since last run
-      const allEvents = [];
-      for (let page = 1; page <= 3; page++) {
+      // Fetch guild config to get last_fetched_at cutoff and existing settings
+      const { data: existingConfig } = await supabase
+        .from('guild_config')
+        .select('settings')
+        .eq('guild_id', guild_id)
+        .single();
+
+      const lastFetchedAt = existingConfig?.settings?.last_fetched_at
+        ? new Date(existingConfig.settings.last_fetched_at)
+        : null;
+
+      // Paginate until no more pages or all events are older than last fetch
+      const allEvents: ActivityEvent[] = [];
+      let endpointUpdatesAt: string | null = null;
+      let page = 1;
+      let done = false;
+
+      while (!done) {
         const response = await api.getGuildActivity(guild_id, page);
         if (!response.activity?.length) break;
-        allEvents.push(...response.activity);
+
+        if (page === 1) endpointUpdatesAt = response.endpoint_updates_at ?? null;
+
+        for (const event of response.activity) {
+          const eventTime = new Date(event.created_at);
+          // 2h overlap buffer handles cron delays; stops re-processing old history
+          if (lastFetchedAt && eventTime < new Date(lastFetchedAt.getTime() - 2 * 60 * 60 * 1000)) {
+            done = true;
+            break;
+          }
+          allEvents.push(event);
+        }
+
         if (!response.pagination.has_more) break;
+        page++;
         await new Promise(r => setTimeout(r, 300));
       }
 
@@ -68,15 +95,10 @@ export async function POST(req: NextRequest) {
       }
 
       // Record last_fetched_at; also sync members if new joins detected
-      const { data: existingConfig } = await supabase
-        .from('guild_config')
-        .select('settings')
-        .eq('guild_id', guild_id)
-        .single();
-
-      const settingsUpdate: Record<string, string> = {
+      const settingsUpdate: Record<string, unknown> = {
         ...(existingConfig?.settings || {}),
         last_fetched_at: new Date().toISOString(),
+        ...(endpointUpdatesAt ? { last_endpoint_updates_at: endpointUpdatesAt } : {}),
       };
 
       if (joins.length > 0) {
@@ -118,6 +140,7 @@ export async function POST(req: NextRequest) {
                   is_active: true,
                   synced_at: new Date().toISOString(),
                   ...(isNewToGuild ? { first_seen: today } : {}),
+                  ...(m.hashed_id ? { hashed_id: m.hashed_id } : {}),
                 };
               });
 

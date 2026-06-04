@@ -367,17 +367,18 @@ export async function GET(req: NextRequest) {
       const mainId = altToMain.get(member.id) ?? null;
       const altIds = (mainToAlts.get(member.id) ?? []).filter((aid) => memberSet.has(aid));
 
-      // Days inactive
+      // Days inactive — use cron-reference date as anchor, not wall clock
+      const refMs = new Date(todayStr + 'T00:00:00Z').getTime();
       let lastDate = lastActivityMap.get(member.id);
       let daysSinceJoin = 999;
       if (member.first_seen) {
-        daysSinceJoin = Math.floor((now.getTime() - new Date(member.first_seen).getTime()) / 86400000);
+        daysSinceJoin = Math.floor((refMs - new Date(member.first_seen).getTime()) / 86400000);
       }
       let daysInactive: number;
       if (!lastDate) {
         daysInactive = Math.min(daysSinceJoin, 999);
       } else {
-        const d = Math.floor((now.getTime() - new Date(lastDate + 'T00:00:00Z').getTime()) / 86400000);
+        const d = Math.floor((refMs - new Date(lastDate + 'T00:00:00Z').getTime()) / 86400000);
         daysInactive = Math.min(d, daysSinceJoin);
       }
       const { warning_level } = getWarningInfo(daysInactive, period);

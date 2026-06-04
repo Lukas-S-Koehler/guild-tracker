@@ -10,6 +10,7 @@ import { ApiClient, useApiClient } from '@/lib/api-client';
 import { useAuth } from '@/contexts/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { formatGold } from '@/lib/utils';
+import CronCountdown from '@/components/CronCountdown';
 import type { OverviewResponse, OverviewMember, OverviewAlt } from '@/app/api/overview/route';
 
 function getWarningBadge(level: string | null): string {
@@ -395,7 +396,10 @@ function OverviewPageContent() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">🗓️ Guild Overview</h1>
-        <p className="text-muted-foreground">7-{period === 'weekly' ? 'week' : 'day'} activity overview for all members</p>
+        <div className="flex items-center gap-3">
+          <p className="text-muted-foreground">7-{period === 'weekly' ? 'week' : 'day'} activity overview for all members</p>
+          <CronCountdown />
+        </div>
       </div>
 
       {/* Guild selector */}

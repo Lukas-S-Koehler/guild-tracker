@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, UserPlus, Trash2, Shield, Crown, Users, AlertCircle, Check, ChevronDown, ChevronRight, Settings, RefreshCw, History } from 'lucide-react';
+import { Loader2, UserPlus, Trash2, Shield, Crown, Users, AlertCircle, Check, ChevronDown, ChevronRight, Settings, RefreshCw } from 'lucide-react';
 import { useApiClient } from '@/lib/api-client';
 import { useAuth } from '@/contexts/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -50,7 +50,6 @@ interface Building {
   name: string;
 }
 
-const BACKFILL_DISABLED_GUILDS = new Set(['111', '554', '1184', '292', '171', '735', '751', '785', '845', '1106', '955']);
 
 function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsActive }: { guildId: string; guildName: string; currentMinLevel: number; currentIsActive: boolean }) {
   const api = useApiClient();
@@ -72,7 +71,6 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [backfilling, setBackfilling] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
@@ -168,24 +166,6 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
       showMsg('error', err instanceof Error ? err.message : 'Sync failed');
     } finally {
       setSyncing(false);
-    }
-  };
-
-  const handleBackfill = async () => {
-    if (!confirm(`Fetch 90 days of history for ${guildName}? This may take a few minutes.`)) return;
-    setBackfilling(true);
-    try {
-      const res = await api.post('/api/admin/backfill', { guild_id: guildId, days: 90 });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Backfill request failed');
-      }
-      const data = await res.json();
-      showMsg('success', `Backfill complete: ${data.stored ?? 0} events stored, ${data.processed ?? 0} member-days processed`);
-    } catch (err) {
-      showMsg('error', err instanceof Error ? err.message : 'Backfill failed');
-    } finally {
-      setBackfilling(false);
     }
   };
 
@@ -355,12 +335,6 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
           {syncing ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
           Sync Members
         </Button>
-        {!BACKFILL_DISABLED_GUILDS.has(guildId) && (
-          <Button size="sm" variant="outline" onClick={handleBackfill} disabled={backfilling}>
-            {backfilling ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <History className="h-3 w-3 mr-1" />}
-            Backfill 90 Days
-          </Button>
-        )}
       </div>
     </div>
   );
@@ -577,9 +551,19 @@ function AltCharactersSection({ guildId }: { guildId: string }) {
         </div>
       </div>
       {message && <p className="text-xs text-muted-foreground">{message}</p>}
-      <p className="text-xs text-muted-foreground">
-        {membersWithHashedId}/{members.length} members have hashed IDs · {membersWithAlts.length} members with known alts
-      </p>
+      <div className="flex items-center gap-2 flex-wrap">
+        {membersWithHashedId === members.length ? (
+          <span className="inline-flex items-center gap-1 text-xs text-green-500 font-medium">
+            <Check className="h-3 w-3" /> Setup complete
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-xs text-amber-500 font-medium">
+            <AlertCircle className="h-3 w-3" /> {members.length - membersWithHashedId} member{members.length - membersWithHashedId !== 1 ? 's' : ''} missing hashed ID
+          </span>
+        )}
+        <span className="text-xs text-muted-foreground">·</span>
+        <span className="text-xs text-muted-foreground">{membersWithAlts.length} with known alts</span>
+      </div>
       {membersWithAlts.length > 0 && (
         <div className="space-y-2 max-h-48 overflow-y-auto">
           {membersWithAlts.map(m => {
@@ -642,10 +626,39 @@ function SuperAdminPanel() {
   const [showOverview, setShowOverview] = useState(false);
   const [overviewFilter, setOverviewFilter] = useState<'all' | 'missing' | 'alts'>('all');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [pauseDiscordDMs, setPauseDiscordDMs] = useState<boolean | null>(null);
+  const [togglingPause, setTogglingPause] = useState(false);
 
   const showMsg = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
     setTimeout(() => setMessage(null), 8000);
+  };
+
+  useEffect(() => {
+    fetch('/api/admin/app-settings')
+      .then(r => r.json())
+      .then(d => setPauseDiscordDMs(d.pause_discord_dms === 'true'))
+      .catch(() => setPauseDiscordDMs(false));
+  }, []);
+
+  const handleTogglePause = async () => {
+    setTogglingPause(true);
+    const next = !pauseDiscordDMs;
+    try {
+      const res = await fetch('/api/admin/app-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'pause_discord_dms', value: String(next) }),
+      });
+      if (res.ok) {
+        setPauseDiscordDMs(next);
+        showMsg('success', next ? 'Discord DMs paused — cron will log warnings but not DM members' : 'Discord DMs resumed');
+      } else {
+        const d = await res.json();
+        showMsg('error', d.error || 'Failed to update setting');
+      }
+    } catch { showMsg('error', 'Network error'); }
+    finally { setTogglingPause(false); }
   };
 
   const loadOverview = async () => {
@@ -717,6 +730,25 @@ function SuperAdminPanel() {
             {message.text}
           </div>
         )}
+
+        <div className="flex items-center justify-between p-3 border rounded-lg bg-background">
+          <div>
+            <p className="text-sm font-medium flex items-center gap-2">
+              Pause Discord DMs
+              {pauseDiscordDMs && <Badge variant="outline" className="text-xs bg-orange-500/10 text-orange-500 border-orange-500/50">PAUSED</Badge>}
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">When paused, auto-warn cron logs warnings to DB and posts channel reports but skips member DMs</p>
+          </div>
+          <Button
+            size="sm"
+            variant={pauseDiscordDMs ? 'default' : 'outline'}
+            onClick={handleTogglePause}
+            disabled={togglingPause || pauseDiscordDMs === null}
+            className={pauseDiscordDMs ? 'bg-orange-500 hover:bg-orange-600' : ''}
+          >
+            {togglingPause ? <Loader2 className="h-3 w-3 animate-spin" /> : pauseDiscordDMs ? 'Resume DMs' : 'Pause DMs'}
+          </Button>
+        </div>
 
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="outline" onClick={handleBackfillAll} disabled={backfilling || syncingAlts}>

@@ -37,6 +37,14 @@ export async function processActivityEvents(
 ): Promise<{ processed: number; membersHandled: number; joins: string[]; leaves: string[] }> {
   if (events.length === 0) return { processed: 0, membersHandled: 0, joins: [], leaves: [] };
 
+  // Build hashed_id map from event data — free, no extra API calls
+  const hashedIdMap = new Map<string, string>(); // lowercased name → hashed_id
+  for (const event of events) {
+    if (event.character?.name && event.character?.hashed_id) {
+      hashedIdMap.set(event.character.name.toLowerCase(), event.character.hashed_id);
+    }
+  }
+
   // Group events by date → character → activity
   const byDateChar: Record<string, Record<string, DayMemberActivity>> = {};
   const joins: string[] = [];
@@ -175,6 +183,8 @@ export async function processActivityEvents(
         .eq('idlemmo_id', ignLower)
         .maybeSingle();
 
+      const hashedId = hashedIdMap.get(ignLower);
+
       if (!member) {
         const { data: inserted } = await supabase
           .from('members')
@@ -189,15 +199,19 @@ export async function processActivityEvents(
             last_seen: date,
             total_level: 0,
             avatar_url: null,
+            ...(hashedId ? { hashed_id: hashedId } : {}),
           })
           .select('id, current_guild_id')
           .single();
         member = inserted;
       } else {
-        // Update last_seen
         await supabase
           .from('members')
-          .update({ last_seen: date, is_active: true })
+          .update({
+            last_seen: date,
+            is_active: true,
+            ...(hashedId ? { hashed_id: hashedId } : {}),
+          })
           .eq('id', member.id);
       }
 

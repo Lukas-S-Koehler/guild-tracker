@@ -685,8 +685,10 @@ function DiscordMappingContent() {
                   const isValidId = discordId === '' || /^\d{17,20}$/.test(discordId);
 
                   // Inherited: any group member whose discord_id matches another group member's
-                  const mainDiscordId = mainId ? getDiscordInfo(mainId).discord_id : null;
-                  const isInherited = isAlt && !!mainDiscordId && m.discord_id === mainDiscordId;
+                  // Inherited: discord matches any other member in the same account group
+                  const isInherited = !!m.discord_id && getGroupMemberIds(m.id)
+                    .filter(id => id !== m.id)
+                    .some(id => getDiscordInfo(id).discord_id === m.discord_id);
 
                   return (
                     <div
