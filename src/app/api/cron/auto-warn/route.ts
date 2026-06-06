@@ -3,7 +3,6 @@ import { createAdminClient } from '@/lib/supabase-server';
 import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 import { sendDirectMessage, postToChannel } from '@/lib/discord-api';
 import { getWarningInfo, findLastMetWeek, getISOWeekKey, RequirementPeriod } from '@/lib/warning-calculator';
-import { DAY_BOUNDARY_OFFSET_MINUTES } from '@/lib/activity-processor';
 
 // POST /api/cron/auto-warn — auto-warn inactive members
 // Accepts either CRON_SECRET (all guilds) or officer session (single guild via x-guild-id)
@@ -50,10 +49,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: 'No guilds with Discord log channel configured', summary });
   }
 
-  // Align with game day boundary (11:50 UTC). Same shift used in activity-processor.
-  const shiftedNow = new Date(Date.now() - DAY_BOUNDARY_OFFSET_MINUTES * 60 * 1000);
-  const today = new Date(shiftedNow);
-  today.setUTCHours(0, 0, 0, 0);
+  // today = last completed game day (log_date of game day that just ended).
+  // Game day boundary is 11:50 UTC; the just-completed day always has log_date = yesterday's calendar date.
+  // Using yesterday is robust regardless of when the cron actually runs (delays of hours are common).
+  const now = new Date();
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
 
   for (const config of configs) {
     const { guild_id: guildId, guild_name: guildName, settings } = config;
@@ -139,8 +139,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Fetch warnings from last 24h only — prevent same-run duplicates, allow daily escalation
-      const recentSince = new Date(today);
-      recentSince.setUTCDate(recentSince.getUTCDate() - 1);
+      const recentSince = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const { data: recentWarnings } = await supabase
         .from('warnings')
         .select('member_id, warning_level, created_at')
@@ -190,7 +189,7 @@ export async function POST(req: NextRequest) {
         if (!lastDate) {
           daysInactive = Math.min(daysSinceJoin, 999);
         } else {
-          daysInactive = Math.floor((today.getTime() - new Date(lastDate + 'T00:00:00Z').getTime()) / 86400000);
+          daysInactive = Math.max(0, Math.floor((today.getTime() - new Date(lastDate + 'T00:00:00Z').getTime()) / 86400000));
           daysInactive = Math.min(daysInactive, daysSinceJoin);
         }
 
@@ -256,6 +255,7 @@ export async function POST(req: NextRequest) {
           if (!channelResult.ok) {
             console.error(`[auto-warn] Warn log post failed for ${member.ign}:`, channelResult.error);
           }
+          await new Promise(r => setTimeout(r, 500));
         }
       }
 
@@ -269,24 +269,28 @@ export async function POST(req: NextRequest) {
         const lines: string[] = [
           `**${guildName} — Inactivity Report** · Game day: **${gameDay}** (11:50 UTC → next day 11:49 UTC)`,
         ];
+        const fmtMember = (m: { ign: string; daysInactive: number; discord_id: string | null }) =>
+          `• **${m.ign}**${m.discord_id ? ` (<@${m.discord_id}>)` : ' · ❌ no Discord'} — ${m.daysInactive}d inactive`;
+
         if (kickList.length) {
           lines.push(`\n🚫 **Kick Notice** (${kickList.length})`);
-          kickList.forEach((m) => lines.push(`• **${m.ign}** — ${m.daysInactive}d inactive${m.discord_id ? '' : ' · ❌ no Discord'}`));
+          kickList.forEach((m) => lines.push(fmtMember(m)));
         }
         if (warn2List.length) {
           lines.push(`\n⚠️⚠️ **Final Warning** (${warn2List.length})`);
-          warn2List.forEach((m) => lines.push(`• **${m.ign}** — ${m.daysInactive}d inactive${m.discord_id ? '' : ' · ❌ no Discord'}`));
+          warn2List.forEach((m) => lines.push(fmtMember(m)));
         }
         if (warn1List.length) {
           lines.push(`\n⚠️ **Warning** (${warn1List.length})`);
-          warn1List.forEach((m) => lines.push(`• **${m.ign}** — ${m.daysInactive}d inactive${m.discord_id ? '' : ' · ❌ no Discord'}`));
+          warn1List.forEach((m) => lines.push(fmtMember(m)));
         }
 
-        // Chunk into messages under 2000 chars
+        // Chunk into messages under 2000 chars, with delay between posts to avoid rate limiting
         let chunk = '';
         for (const line of lines) {
           if ((chunk + '\n' + line).length > 1900) {
             await postToChannel(logChannelId, chunk.trim());
+            await new Promise(r => setTimeout(r, 500));
             chunk = line;
           } else {
             chunk = chunk ? chunk + '\n' + line : line;

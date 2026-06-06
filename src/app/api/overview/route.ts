@@ -109,15 +109,20 @@ export async function GET(req: NextRequest) {
   const donationReq: number = configRow?.donation_requirement ?? 5000;
   const guildName: string = configRow?.guild_name ?? guildId;
 
-  // Fetch today (UTC, respecting getLastCompletedDay logic)
   const now = new Date();
   const utcHour = now.getUTCHours();
   const utcMinutes = now.getUTCMinutes();
+
+  // todayStr: current game day for column headers (include in-progress game day)
   const todayDate = new Date(now);
   if (utcHour < 11 || (utcHour === 11 && utcMinutes < 50)) {
     todayDate.setUTCDate(todayDate.getUTCDate() - 1);
   }
   const todayStr = todayDate.toISOString().split('T')[0];
+
+  // inactivityAnchor: last completed game day = yesterday's calendar date.
+  // Robust regardless of when this runs — game boundary 11:50 UTC; completed day log_date = yesterday.
+  const inactivityAnchor = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
 
   const columns = getColumnKeys(period, todayStr);
 
@@ -367,8 +372,8 @@ export async function GET(req: NextRequest) {
       const mainId = altToMain.get(member.id) ?? null;
       const altIds = (mainToAlts.get(member.id) ?? []).filter((aid) => memberSet.has(aid));
 
-      // Days inactive — use cron-reference date as anchor, not wall clock
-      const refMs = new Date(todayStr + 'T00:00:00Z').getTime();
+      // Days inactive — use last completed game day as anchor (yesterday), not current game day
+      const refMs = inactivityAnchor.getTime();
       let lastDate = lastActivityMap.get(member.id);
       let daysSinceJoin = 999;
       if (member.first_seen) {
@@ -378,7 +383,7 @@ export async function GET(req: NextRequest) {
       if (!lastDate) {
         daysInactive = Math.min(daysSinceJoin, 999);
       } else {
-        const d = Math.floor((refMs - new Date(lastDate + 'T00:00:00Z').getTime()) / 86400000);
+        const d = Math.max(0, Math.floor((refMs - new Date(lastDate + 'T00:00:00Z').getTime()) / 86400000));
         daysInactive = Math.min(d, daysSinceJoin);
       }
       const { warning_level } = getWarningInfo(daysInactive, period);

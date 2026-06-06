@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { verifyAuthOrPublic, isErrorResponse } from '@/lib/auth-helpers';
 import { getWarningInfo, findLastMetWeek, getISOWeekKey, RequirementPeriod } from '@/lib/warning-calculator';
-import { DAY_BOUNDARY_OFFSET_MINUTES } from '@/lib/activity-processor';
 
 // GET /api/reports/inactivity — public, no auth required
 export async function GET(req: NextRequest) {
@@ -108,10 +107,10 @@ export async function GET(req: NextRequest) {
     mainToAlts.set(link.member_id, arr);
   }
 
-  // Align with game day boundary (11:50 UTC). Same shift used in activity-processor.
-  const shiftedNow = new Date(Date.now() - DAY_BOUNDARY_OFFSET_MINUTES * 60 * 1000);
-  const today = new Date(shiftedNow);
-  today.setUTCHours(0, 0, 0, 0);
+  // today = last completed game day = yesterday's calendar date.
+  // Robust regardless of when this is called (game boundary 11:50 UTC; completed day log_date = yesterday).
+  const now = new Date();
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
 
   const inactiveMembers = members
     .map((member) => {
@@ -149,7 +148,7 @@ export async function GET(req: NextRequest) {
         daysInactive = Math.min(daysSinceJoin, 999);
       } else {
         const lastDateObj = new Date(lastDate + 'T00:00:00Z');
-        daysInactive = Math.floor((today.getTime() - lastDateObj.getTime()) / (1000 * 60 * 60 * 24));
+        daysInactive = Math.max(0, Math.floor((today.getTime() - lastDateObj.getTime()) / (1000 * 60 * 60 * 24)));
         daysInactive = Math.min(daysInactive, daysSinceJoin);
       }
 

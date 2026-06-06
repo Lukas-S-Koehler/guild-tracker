@@ -8,7 +8,8 @@ function getBotToken(): string {
 
 async function discordFetch<T>(
   path: string,
-  options?: RequestInit
+  options?: RequestInit,
+  _retried = false
 ): Promise<T> {
   const res = await fetch(`${DISCORD_API}${path}`, {
     ...options,
@@ -18,6 +19,11 @@ async function discordFetch<T>(
       ...(options?.headers ?? {}),
     },
   });
+  if (res.status === 429 && !_retried) {
+    const data = await res.json().catch(() => ({ retry_after: 1 }));
+    await new Promise(r => setTimeout(r, (data.retry_after ?? 1) * 1000));
+    return discordFetch(path, options, true);
+  }
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Discord API ${res.status}: ${text}`);

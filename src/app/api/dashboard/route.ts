@@ -92,8 +92,10 @@ export async function GET(req: NextRequest) {
     if (lastSunday) lastMetMap.set(memberId, lastSunday.toISOString().split('T')[0]);
   });
 
-  // Per-guild inactivity counts — use last cron day as reference, not wall clock
-  const nowMs = new Date(today + 'T00:00:00Z').getTime();
+  // Per-guild inactivity counts — anchor to last completed game day (yesterday's calendar date).
+  // yesterday's log_date = log_date of game day that just ended (boundary 11:50 UTC).
+  const _nowRef = new Date();
+  const nowMs = new Date(Date.UTC(_nowRef.getUTCFullYear(), _nowRef.getUTCMonth(), _nowRef.getUTCDate() - 1)).getTime();
   const inactivityByGuild: Record<string, { guildName: string; warn1: number; warn2: number; kick: number }> = {};
 
   for (const member of allMembers) {
@@ -113,7 +115,7 @@ export async function GET(req: NextRequest) {
     if (!lastDate) {
       daysInactive = Math.min(daysSinceJoin, 999);
     } else {
-      daysInactive = Math.floor((nowMs - new Date(lastDate + 'T00:00:00Z').getTime()) / 86400000);
+      daysInactive = Math.max(0, Math.floor((nowMs - new Date(lastDate + 'T00:00:00Z').getTime()) / 86400000));
       daysInactive = Math.min(daysInactive, daysSinceJoin);
     }
 
