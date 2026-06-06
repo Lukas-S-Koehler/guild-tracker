@@ -81,14 +81,17 @@ export async function POST(req: NextRequest) {
 
       const memberIds = members.map((m) => m.id);
 
-      // Fetch daily logs (last 90 days covers weekly calc too)
+      // Fetch daily logs (last 90 days, up to and including inactivityAnchor = yesterday).
+      // Upper bound prevents donations in the new game day from masking missed activity in the checked day.
       const since = new Date(today);
       since.setUTCDate(since.getUTCDate() - 90);
+      const todayStr = today.toISOString().split('T')[0];
       const { data: logs } = await supabase
         .from('daily_logs')
         .select('member_id, log_date, met_requirement, deposits_gold, gold_donated')
         .in('member_id', memberIds)
         .gte('log_date', since.toISOString().split('T')[0])
+        .lte('log_date', todayStr)
         .order('log_date', { ascending: false });
 
       // Fetch alt relationships for same-guild coverage
@@ -222,7 +225,7 @@ export async function POST(req: NextRequest) {
           dmError = 'DMs paused (admin setting)';
           noDiscord++;
         } else if (member.discord_id && botToken) {
-          const dmMsg = `${levelLabel}\nYour character **${member.ign}** in **${guildName}** has been flagged for inactivity (${daysInactive} days inactive).\nPlease ensure you meet the activity requirements to remain in the guild.\n📅 Activity is tracked daily from **11:50 UTC (13:50 GMT+2)** to **11:49 UTC (13:49 GMT+2)** the following day.`;
+          const dmMsg = `${levelLabel}\nYour character **${member.ign}** in **${guildName}** has been flagged for inactivity (${daysInactive} days inactive).\nPlease ensure you meet the activity requirements to remain in the guild.\n📅 Each game day runs **11:50 UTC to 11:49 UTC** the following day. The daily check runs shortly after — donations made after **11:50 UTC today** count toward tomorrow's check, not today's.`;
           const result = await sendDirectMessage(member.discord_id, dmMsg);
           dmSent = result.ok;
           dmError = result.error ?? null;
@@ -267,7 +270,7 @@ export async function POST(req: NextRequest) {
 
         const gameDay = today.toISOString().split('T')[0];
         const lines: string[] = [
-          `**${guildName} — Inactivity Report** · Game day: **${gameDay}** (11:50 UTC → next day 11:49 UTC)`,
+          `**${guildName} — Inactivity Report** · Checked game day: **${gameDay}** (11:50 UTC → next day 11:49 UTC)\n⚠️ Donations after **11:50 UTC today** count toward **tomorrow's** check, not this one.`,
         ];
         const fmtMember = (m: { ign: string; daysInactive: number; discord_id: string | null }) =>
           `• **${m.ign}**${m.discord_id ? ` (<@${m.discord_id}>)` : ' · ❌ no Discord'} — ${m.daysInactive}d inactive`;

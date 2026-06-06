@@ -39,6 +39,14 @@ export async function GET(req: NextRequest) {
 
   const memberIds = members.map((m) => m.id);
 
+  // today = last completed game day = yesterday's calendar date.
+  // Robust regardless of when this is called (game boundary 11:50 UTC; completed day log_date = yesterday).
+  const now = new Date();
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
+  // Upper bound for log queries: donations in the new game day (log_date > today) must not
+  // mask missed activity in the checked day.
+  const todayStr = today.toISOString().split('T')[0];
+
   // Fetch logs — for weekly guilds we need deposits_gold, for daily we filter by met_requirement
   let logs: Array<{ member_id: string; log_date: string; met_requirement: boolean; deposits_gold: number; gold_donated?: number }> = [];
 
@@ -48,6 +56,7 @@ export async function GET(req: NextRequest) {
       .select('member_id, log_date, met_requirement, deposits_gold, gold_donated')
       .eq('guild_id', guildId)
       .in('member_id', memberIds)
+      .lte('log_date', todayStr)
       .order('log_date', { ascending: false })
       .limit(1000);
     logs = data ?? [];
@@ -58,6 +67,7 @@ export async function GET(req: NextRequest) {
       .eq('guild_id', guildId)
       .eq('met_requirement', true)
       .in('member_id', memberIds)
+      .lte('log_date', todayStr)
       .order('log_date', { ascending: false })
       .limit(365);
     logs = data ?? [];
@@ -106,11 +116,6 @@ export async function GET(req: NextRequest) {
     arr.push(link.alt_member_id);
     mainToAlts.set(link.member_id, arr);
   }
-
-  // today = last completed game day = yesterday's calendar date.
-  // Robust regardless of when this is called (game boundary 11:50 UTC; completed day log_date = yesterday).
-  const now = new Date();
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
 
   const inactiveMembers = members
     .map((member) => {

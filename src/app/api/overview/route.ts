@@ -110,19 +110,12 @@ export async function GET(req: NextRequest) {
   const guildName: string = configRow?.guild_name ?? guildId;
 
   const now = new Date();
-  const utcHour = now.getUTCHours();
-  const utcMinutes = now.getUTCMinutes();
 
-  // todayStr: current game day for column headers (include in-progress game day)
-  const todayDate = new Date(now);
-  if (utcHour < 11 || (utcHour === 11 && utcMinutes < 50)) {
-    todayDate.setUTCDate(todayDate.getUTCDate() - 1);
-  }
-  const todayStr = todayDate.toISOString().split('T')[0];
-
-  // inactivityAnchor: last completed game day = yesterday's calendar date.
-  // Robust regardless of when this runs — game boundary 11:50 UTC; completed day log_date = yesterday.
+  // Use last completed game day for both columns and inactivity anchor.
+  // log_date of completed game day = yesterday's calendar date (game boundary 11:50 UTC).
+  // This keeps the grid and the days_inactive count consistent — if yesterday's column is green, 0d inactive.
   const inactivityAnchor = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
+  const todayStr = inactivityAnchor.toISOString().split('T')[0];
 
   const columns = getColumnKeys(period, todayStr);
 
@@ -242,7 +235,8 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Build inactivity map (for days_inactive calc) — reuse same logic as inactivity route
+  // Build inactivity map — only consider logs up to todayStr (= inactivityAnchor = yesterday).
+  // Donations in the new game day (log_date > todayStr) must not mask missed activity in checked day.
   const lastActivityMap = new Map<string, string>();
   if (period === 'weekly') {
     // Fetch all logs for weekly calculation (need more than just 7 weeks for inactivity)
@@ -251,6 +245,7 @@ export async function GET(req: NextRequest) {
       .select('member_id, log_date, deposits_gold, gold_donated')
       .eq('guild_id', guildId)
       .in('member_id', memberIds)
+      .lte('log_date', todayStr)
       .order('log_date', { ascending: false })
       .limit(1000);
 
@@ -275,6 +270,7 @@ export async function GET(req: NextRequest) {
       .eq('guild_id', guildId)
       .eq('met_requirement', true)
       .in('member_id', memberIds)
+      .lte('log_date', todayStr)
       .order('log_date', { ascending: false })
       .limit(365);
     for (const log of metLogs ?? []) {
