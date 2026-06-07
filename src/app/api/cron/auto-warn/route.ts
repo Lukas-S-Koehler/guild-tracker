@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
   const guildPingsDisabled = pingsSetting?.value === 'true';
 
   // Fetch guild configs — if called by officer, only their guild; cron fetches all
-  let configQuery = supabase.from('guild_config').select('guild_id, guild_name, settings');
+  let configQuery = supabase.from('guild_config').select('guild_id, guild_name, settings, donation_requirement');
 
   if (!isCron && guildIdHeader) {
     configQuery = configQuery.eq('guild_id', guildIdHeader);
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
   const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
 
   for (const config of configs) {
-    const { guild_id: guildId, guild_name: guildName, settings } = config;
+    const { guild_id: guildId, guild_name: guildName, settings, donation_requirement } = config;
     if (guildActiveMap.get(guildId) === false) continue;
 
     const logChannelId: string | null = settings?.discord_log_channel_id ?? null;
@@ -72,6 +72,7 @@ export async function POST(req: NextRequest) {
     const depositsOnly: boolean = settings?.deposits_only ?? false;
     const overflowEnabled: boolean = settings?.overflow_enabled ?? true;
     const overflowLimit: number = settings?.overflow_limit ?? 10000;
+    const donationReq: number = donation_requirement ?? 5000;
 
     let warned = 0;
     let skipped = 0;
@@ -90,18 +91,6 @@ export async function POST(req: NextRequest) {
 
       const memberIds = members.map((m) => m.id);
 
-      // Fetch bank balances for all active members
-      const { data: bankRows } = await supabase
-        .from('member_gold_bank')
-        .select('member_id, balance')
-        .eq('guild_id', guildId)
-        .in('member_id', memberIds);
-
-      const bankMap = new Map<string, number>();
-      for (const row of bankRows ?? []) {
-        bankMap.set(row.member_id, row.balance ?? 0);
-      }
-
       // Fetch daily logs (last 90 days, up to and including inactivityAnchor = yesterday).
       // Upper bound prevents donations in the new game day from masking missed activity in the checked day.
       const since = new Date(today);
@@ -109,11 +98,33 @@ export async function POST(req: NextRequest) {
       const todayStr = today.toISOString().split('T')[0];
       const { data: logs } = await supabase
         .from('daily_logs')
-        .select('member_id, log_date, met_requirement, deposits_gold, gold_donated')
+        .select('member_id, log_date, met_requirement, deposits_gold, gold_donated, bank_balance_after')
         .in('member_id', memberIds)
         .gte('log_date', since.toISOString().split('T')[0])
         .lte('log_date', todayStr)
         .order('log_date', { ascending: false });
+
+      // Compute current bank balance from logs (latest bank_balance_after drained to today).
+      // More accurate than reading member_gold_bank which may lag by a day.
+      const bankMap = new Map<string, number>();
+      if (overflowEnabled) {
+        const latestBankLog = new Map<string, { log_date: string; balance: number }>();
+        for (const log of logs ?? []) {
+          if (!latestBankLog.has(log.member_id)) {
+            latestBankLog.set(log.member_id, { log_date: log.log_date, balance: log.bank_balance_after ?? 0 });
+          }
+        }
+        for (const memberId of memberIds) {
+          const latest = latestBankLog.get(memberId);
+          if (!latest || latest.balance === 0) { bankMap.set(memberId, 0); continue; }
+          const daysSince = Math.round(
+            (new Date(todayStr + 'T00:00:00Z').getTime() - new Date(latest.log_date + 'T00:00:00Z').getTime()) / 86400000
+          );
+          let bal = latest.balance;
+          for (let i = 0; i < daysSince && bal > 0; i++) bal = Math.max(0, bal - donationReq);
+          bankMap.set(memberId, bal);
+        }
+      }
 
       // Fetch alt relationships for same-guild coverage
       const { data: altLinks } = await supabase
@@ -158,6 +169,47 @@ export async function POST(req: NextRequest) {
           const counts = depositsOnly ? goldField !== null : log.met_requirement;
           if (counts && !lastActivityMap.has(log.member_id)) {
             lastActivityMap.set(log.member_id, log.log_date);
+          }
+        }
+      }
+
+      // For daily guilds: inactive days covered by individual bank count as met.
+      // Walk forward from each member's last met day; infer bank coverage on days with no log.
+      if (period === 'daily' && overflowEnabled) {
+        // memberId → date → { balance_after, met }
+        const bankByDate = new Map<string, Map<string, { balance: number; met: boolean }>>();
+        for (const log of logs ?? []) {
+          const m = bankByDate.get(log.member_id) ?? new Map<string, { balance: number; met: boolean }>();
+          m.set(log.log_date, { balance: log.bank_balance_after ?? 0, met: log.met_requirement ?? false });
+          bankByDate.set(log.member_id, m);
+        }
+
+        for (const member of members) {
+          const memberId = member.id;
+          const lastDate = lastActivityMap.get(memberId);
+          if (!lastDate) continue;
+
+          const memberDays = bankByDate.get(memberId) ?? new Map<string, { balance: number; met: boolean }>();
+          let balance = memberDays.get(lastDate)?.balance ?? 0;
+          if (balance === 0) continue;
+
+          const startMs = new Date(lastDate + 'T00:00:00Z').getTime() + 86400000;
+          const endMs = today.getTime();
+
+          for (let ms = startMs; ms <= endMs && balance > 0; ms += 86400000) {
+            const dateStr = new Date(ms).toISOString().split('T')[0];
+            const dayEntry = memberDays.get(dateStr);
+            if (dayEntry) {
+              // Day has a log: if met=true it's already in lastActivityMap; advance balance
+              balance = dayEntry.balance;
+            } else if (balance >= donationReq) {
+              // Inactive day fully covered by bank
+              const existing = lastActivityMap.get(memberId);
+              if (!existing || dateStr > existing) lastActivityMap.set(memberId, dateStr);
+              balance = balance - donationReq;
+            } else {
+              balance = 0;
+            }
           }
         }
       }
@@ -314,7 +366,7 @@ export async function POST(req: NextRequest) {
           warn1List.forEach((m) => lines.push(fmtMember(m)));
         }
 
-        // Bank balance section — all active members with non-zero balance
+        // Bank balance section — all active members with non-zero balance (no pings ever)
         if (overflowEnabled) {
           const bankEntries = members
             .map((m) => ({ ign: m.ign, balance: bankMap.get(m.id) ?? 0 }))
@@ -322,7 +374,8 @@ export async function POST(req: NextRequest) {
             .sort((a, b) => b.balance - a.balance);
 
           if (bankEntries.length > 0) {
-            lines.push(`\n💰 **Bank Balances** (cap: ${overflowLimit.toLocaleString()} gold)`);
+            lines.push(`\n────────────────────`);
+            lines.push(`💰 **Bank Balances** (cap: ${overflowLimit.toLocaleString()} gold)`);
             bankEntries.forEach((m) => {
               const capped = m.balance >= overflowLimit;
               lines.push(`• **${m.ign}** — ${m.balance.toLocaleString()} gold${capped ? ' ✅' : ''}`);
