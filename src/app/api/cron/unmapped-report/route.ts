@@ -62,14 +62,22 @@ export async function POST(req: NextRequest) {
     byGuild.set(m.current_guild_id, arr);
   }
 
-  // Post one message per guild with unmapped members
+  // Header message with total
+  const totalUnmapped = members.length;
+  const totalMembers = Array.from(totalMap.values()).reduce((a, b) => a + b, 0);
+  await postToChannel(
+    UNMAPPED_CHANNEL_ID,
+    `🔔 **Unmapped Members Report**\n${totalUnmapped} of ${totalMembers} active members across ${byGuild.size} guild${byGuild.size !== 1 ? 's' : ''} need a Discord mapping.`
+  );
+
+  // Per-guild messages
   const results: Array<{ guild: string; unmapped: number; ok: boolean }> = [];
 
   for (const [guildId, unmappedIgNs] of Array.from(byGuild.entries())) {
     const guildName = nameMap.get(guildId) ?? guildId;
     const total = totalMap.get(guildId) ?? unmappedIgNs.length;
     const lines = unmappedIgNs.map((ign: string) => `• ${ign}`).join('\n');
-    const msg = `📋 **Unmapped Members — ${guildName}**\n${lines}\n*(${unmappedIgNs.length} of ${total} unmapped — use \`/map\` to link)*`;
+    const msg = `▸ **${guildName}** — ${unmappedIgNs.length} of ${total} unmapped\n${lines}\n​`;
 
     const result = await postToChannel(UNMAPPED_CHANNEL_ID, msg);
     results.push({ guild: guildName, unmapped: unmappedIgNs.length, ok: result.ok });
