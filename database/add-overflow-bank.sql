@@ -11,3 +11,5 @@ CREATE TABLE IF NOT EXISTS member_gold_bank (
 -- Track per-day bank contributions so re-runs are idempotent
 ALTER TABLE daily_logs ADD COLUMN IF NOT EXISTS bank_used INT NOT NULL DEFAULT 0;
 ALTER TABLE daily_logs ADD COLUMN IF NOT EXISTS bank_earned INT NOT NULL DEFAULT 0;
+-- Running bank balance after this day's contribution; used as starting point for next day
+ALTER TABLE daily_logs ADD COLUMN IF NOT EXISTS bank_balance_after INT NOT NULL DEFAULT 0;

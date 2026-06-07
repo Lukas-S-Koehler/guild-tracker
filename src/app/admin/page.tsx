@@ -75,6 +75,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [backfillingBank, setBackfillingBank] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
@@ -174,6 +175,24 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
       showMsg('error', err instanceof Error ? err.message : 'Sync failed');
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleBackfillBank = async () => {
+    setBackfillingBank(true);
+    try {
+      const res = await api.post('/api/admin/backfill-bank', { guild_id: guildId }, { guildId });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Backfill failed');
+      }
+      const data = await res.json();
+      const r = data.results?.[0];
+      showMsg('success', `Bank backfilled: ${r?.logsUpdated ?? 0} logs updated across ${r?.members ?? 0} members`);
+    } catch (err) {
+      showMsg('error', err instanceof Error ? err.message : 'Backfill failed');
+    } finally {
+      setBackfillingBank(false);
     }
   };
 
@@ -371,6 +390,12 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
           {syncing ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
           Sync Members
         </Button>
+        {settings.overflow_enabled && (
+          <Button size="sm" variant="outline" onClick={handleBackfillBank} disabled={backfillingBank}>
+            {backfillingBank ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+            Backfill Bank History
+          </Button>
+        )}
       </div>
     </div>
   );

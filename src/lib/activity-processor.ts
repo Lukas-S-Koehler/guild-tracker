@@ -285,23 +285,29 @@ export async function processActivityEvents(
       const gross = goldDonatedFinal + depositGoldFinal;
 
       // ── Overflow bank ──────────────────────────────────────────────────────
-      // Fetch current bank balance for this member+guild
-      const { data: bankRow } = await supabase
-        .from('member_gold_bank')
-        .select('balance')
+      // Starting balance = bank_balance_after of the most recent daily_log BEFORE
+      // this date. This makes each day's calculation independent and idempotent —
+      // no undo logic needed; re-running any day gives the same result.
+      const { data: priorLog } = await supabase
+        .from('daily_logs')
+        .select('log_date, bank_balance_after')
         .eq('member_id', member.id)
         .eq('guild_id', guildId)
+        .lt('log_date', date)
+        .order('log_date', { ascending: false })
+        .limit(1)
         .maybeSingle();
 
-      const currentBalance = bankRow?.balance ?? 0;
-      const prevBankEarned = existing?.bank_earned ?? 0;
-      const prevBankUsed = existing?.bank_used ?? 0;
-
-      // Reverse prior run's bank effect so re-runs are idempotent
-      const adjustedBalance = Math.min(
-        Math.max(currentBalance - prevBankEarned + prevBankUsed, 0),
-        overflowLimit
-      );
+      // Drain bank for each calendar day skipped between prior log and current date.
+      // Every day with no events still consumes bank up to the requirement.
+      let startingBalance = priorLog?.bank_balance_after ?? 0;
+      if (startingBalance > 0 && priorLog) {
+        const skippedDays =
+          Math.round((new Date(date + 'T00:00:00Z').getTime() - new Date(priorLog.log_date + 'T00:00:00Z').getTime()) / 86400000) - 1;
+        for (let i = 0; i < skippedDays && startingBalance > 0; i++) {
+          startingBalance = Math.max(0, startingBalance - donationReq);
+        }
+      }
 
       let newBankEarned = 0;
       let newBankUsed = 0;
@@ -309,24 +315,24 @@ export async function processActivityEvents(
 
       if (overflowEnabled) {
         if (gross >= donationReq) {
-          newBankEarned = Math.min(gross - donationReq, overflowLimit - adjustedBalance);
+          newBankEarned = Math.min(gross - donationReq, overflowLimit - startingBalance);
           metRequirement = true;
         } else {
           const deficit = donationReq - gross;
-          newBankUsed = Math.min(deficit, adjustedBalance);
+          newBankUsed = Math.min(deficit, startingBalance);
           metRequirement = gross + newBankUsed >= donationReq;
         }
       } else {
         metRequirement = gross >= donationReq;
       }
 
-      const newBalance = Math.min(
-        Math.max(adjustedBalance + newBankEarned - newBankUsed, 0),
+      const bankBalanceAfter = Math.min(
+        Math.max(startingBalance + newBankEarned - newBankUsed, 0),
         overflowLimit
       );
 
       await supabase.from('member_gold_bank').upsert(
-        { member_id: member.id, guild_id: guildId, balance: newBalance, updated_at: new Date().toISOString() },
+        { member_id: member.id, guild_id: guildId, balance: bankBalanceAfter, updated_at: new Date().toISOString() },
         { onConflict: 'member_id,guild_id' }
       );
 
@@ -343,6 +349,7 @@ export async function processActivityEvents(
           met_requirement: metRequirement,
           bank_used: newBankUsed,
           bank_earned: newBankEarned,
+          bank_balance_after: bankBalanceAfter,
           log_order: activity.logOrder,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'member_id,log_date' })
@@ -418,6 +425,77 @@ export async function processActivityEvents(
   }
 
   return { processed, membersHandled, joins, leaves };
+}
+
+// Drain bank for every active member in a guild regardless of whether they had events.
+// Called after processActivityEvents so members with no events still get their bank updated.
+export async function drainInactiveBanks(
+  guildId: string,
+  supabase: SupabaseClient
+): Promise<void> {
+  const { data: cfg } = await supabase
+    .from('guild_config')
+    .select('settings')
+    .eq('guild_id', guildId)
+    .single();
+
+  const overflowEnabled: boolean = cfg?.settings?.overflow_enabled ?? true;
+  if (!overflowEnabled) return;
+
+  const donationReq: number = cfg?.settings?.donation_requirement ?? 5000;
+  const overflowLimit: number = cfg?.settings?.overflow_limit ?? 10000;
+
+  const yesterday = new Date();
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const yesterdayStr = yesterday.toISOString().substring(0, 10);
+
+  // Fetch all active members in guild
+  const { data: members } = await supabase
+    .from('members')
+    .select('id')
+    .eq('current_guild_id', guildId)
+    .eq('is_active', true);
+
+  if (!members || members.length === 0) return;
+
+  const memberIds = members.map((m: any) => m.id);
+
+  // Get latest daily_log per member (for bank_balance_after and log_date)
+  const { data: latestLogs } = await supabase
+    .from('daily_logs')
+    .select('member_id, log_date, bank_balance_after')
+    .eq('guild_id', guildId)
+    .in('member_id', memberIds)
+    .lte('log_date', yesterdayStr)
+    .order('log_date', { ascending: false });
+
+  const latestPerMember = new Map<string, { log_date: string; bank_balance_after: number }>();
+  for (const row of latestLogs ?? []) {
+    if (!latestPerMember.has(row.member_id)) {
+      latestPerMember.set(row.member_id, { log_date: row.log_date, bank_balance_after: row.bank_balance_after ?? 0 });
+    }
+  }
+
+  for (const { id: memberId } of members) {
+    const latest = latestPerMember.get(memberId);
+    if (!latest || latest.bank_balance_after === 0) continue;
+
+    const daysSinceLog = Math.round(
+      (new Date(yesterdayStr + 'T00:00:00Z').getTime() - new Date(latest.log_date + 'T00:00:00Z').getTime()) / 86400000
+    );
+    if (daysSinceLog <= 0) continue;
+
+    let balance = latest.bank_balance_after;
+    for (let i = 0; i < daysSinceLog && balance > 0; i++) {
+      balance = Math.max(0, balance - donationReq);
+    }
+    balance = Math.min(balance, overflowLimit);
+
+    await supabase.from('member_gold_bank').upsert(
+      { member_id: memberId, guild_id: guildId, balance, updated_at: new Date().toISOString() },
+      { onConflict: 'member_id,guild_id' }
+    );
+  }
 }
 
 export async function storeActivityEvents(

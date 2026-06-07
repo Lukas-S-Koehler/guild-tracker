@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { formatGold } from '@/lib/utils';
 import CronCountdown from '@/components/CronCountdown';
-import type { OverviewResponse, OverviewMember, OverviewAlt } from '@/app/api/overview/route';
+import type { OverviewResponse, OverviewMember } from '@/app/api/overview/route';
 
 function getWarningBadge(level: string | null): string {
   switch (level) {
@@ -32,8 +32,8 @@ function getWarningColor(level: string): string {
   }
 }
 
-function getCellBg(status: 'green' | 'yellow' | 'red', altCovered?: boolean): string {
-  if (altCovered) return 'bg-blue-500/20 border border-blue-500/40';
+function getCellBg(status: 'green' | 'yellow' | 'red', sharedBankCovered?: boolean): string {
+  if (sharedBankCovered) return 'bg-blue-500/20 border border-blue-500/40';
   switch (status) {
     case 'green': return 'bg-green-500/25 border border-green-500/40';
     case 'yellow': return 'bg-yellow-500/20 border border-yellow-500/40';
@@ -106,7 +106,8 @@ interface CellDetailProps {
     raids: number;
     met_requirement: boolean;
     cell_status: 'green' | 'yellow' | 'red';
-    alt_covered?: boolean;
+    shared_bank_covered?: boolean;
+    shared_bank_amount?: number;
     bank_used?: number;
     bank_earned?: number;
   };
@@ -155,9 +156,9 @@ function CellDetail({ colKey, period, data, ign, memberId, guildId }: CellDetail
           <span className="font-medium text-foreground">{data.raids}</span>
         </div>
         {(data.bank_used ?? 0) > 0 && (
-          <div className="flex justify-between gap-4 text-amber-400">
+          <div className="flex justify-between gap-4 text-red-400">
             <span>Bank used</span>
-            <span className="font-medium">{formatGold(data.bank_used!)}</span>
+            <span className="font-medium">-{formatGold(data.bank_used!)}</span>
           </div>
         )}
         {(data.bank_earned ?? 0) > 0 && (
@@ -172,8 +173,14 @@ function CellDetail({ colKey, period, data, ign, memberId, guildId }: CellDetail
             {data.met_requirement ? '✓ Met' : '✗ Not met'}
           </span>
         </div>
-        {data.alt_covered && (
-          <div className="pt-1 text-blue-400">Covered by alt contribution</div>
+        {(data.shared_bank_amount ?? 0) > 0 && (
+          <div className="flex justify-between gap-4 text-blue-400">
+            <span>Shared bank</span>
+            <span className="font-medium">🏦{formatGold(data.shared_bank_amount!)}</span>
+          </div>
+        )}
+        {data.shared_bank_covered && (
+          <div className="pt-1 text-blue-400">Covered by shared bank</div>
         )}
       </div>
       {period === 'daily' && (
@@ -212,26 +219,90 @@ function CellDetail({ colKey, period, data, ign, memberId, guildId }: CellDetail
   );
 }
 
+type GroupPosition = 'solo' | 'first' | 'middle' | 'last';
+
+const GROUP_COLORS = [
+  { border: 'border-l-2 border-purple-500/40 bg-purple-500/[0.04]', topBorder: 'border-t border-t-purple-500/20' },
+  { border: 'border-l-2 border-cyan-500/40 bg-cyan-500/[0.04]', topBorder: 'border-t border-t-cyan-500/20' },
+  { border: 'border-l-2 border-amber-500/40 bg-amber-500/[0.04]', topBorder: 'border-t border-t-amber-500/20' },
+  { border: 'border-l-2 border-rose-500/40 bg-rose-500/[0.04]', topBorder: 'border-t border-t-rose-500/20' },
+];
+
+function groupAndSortMembers(members: OverviewMember[]): Array<{ member: OverviewMember; position: GroupPosition; groupColorIdx: number }> {
+  const memberMap = new Map(members.map(m => [m.id, m]));
+  const visited = new Set<string>();
+  const groups: OverviewMember[][] = [];
+
+  for (const member of members) {
+    if (visited.has(member.id)) continue;
+    visited.add(member.id);
+    const group: OverviewMember[] = [member];
+    for (const linked of member.linked_members) {
+      const linkedMember = memberMap.get(linked.id);
+      if (linkedMember && !visited.has(linked.id)) {
+        group.push(linkedMember);
+        visited.add(linked.id);
+      }
+    }
+    groups.push(group);
+  }
+
+  groups.forEach(g => g.sort((a, b) => b.days_inactive - a.days_inactive));
+  groups.sort((a, b) => {
+    const maxA = Math.max(...a.map(m => m.days_inactive));
+    const maxB = Math.max(...b.map(m => m.days_inactive));
+    return maxB - maxA;
+  });
+
+  const result: Array<{ member: OverviewMember; position: GroupPosition; groupColorIdx: number }> = [];
+  let colorIdx = 0;
+  for (const group of groups) {
+    if (group.length === 1) {
+      result.push({ member: group[0], position: 'solo', groupColorIdx: -1 });
+    } else {
+      const idx = colorIdx++ % GROUP_COLORS.length;
+      group.forEach((m, i) => {
+        const position: GroupPosition = i === 0 ? 'first' : i === group.length - 1 ? 'last' : 'middle';
+        result.push({ member: m, position, groupColorIdx: idx });
+      });
+    }
+  }
+  return result;
+}
+
 function MemberRow({
   member,
   columns,
   period,
   guildId,
   overflowEnabled,
+  overflowLimit,
+  groupPosition,
+  groupColorIdx,
 }: {
   member: OverviewMember;
   columns: string[];
   period: 'daily' | 'weekly';
   guildId: string;
   overflowEnabled: boolean;
+  overflowLimit: number;
+  groupPosition: GroupPosition;
+  groupColorIdx: number;
 }) {
   const warnBadge = getWarningBadge(member.warning_level);
   const inactiveColor = getWarningColor(member.warning_level);
   const isNew = member.first_seen ? daysSinceDate(member.first_seen) <= 7 : false;
+  const isCapped = overflowEnabled && member.bank_balance >= overflowLimit && overflowLimit > 0;
+
+  const isGrouped = groupPosition !== 'solo';
+  const gc = isGrouped && groupColorIdx >= 0 ? GROUP_COLORS[groupColorIdx % GROUP_COLORS.length] : null;
+  const groupRowClass = gc
+    ? `${gc.border} ${groupPosition === 'first' ? gc.topBorder : ''}`
+    : '';
 
   return (
     <>
-      <tr className="border-b hover:bg-muted/30 transition-colors">
+      <tr className={`border-b hover:bg-muted/30 transition-colors ${groupRowClass}`}>
         {/* Member name */}
         <td className="px-3 py-2 min-w-[160px] max-w-[220px]">
           <div className="flex items-center gap-1.5">
@@ -249,13 +320,24 @@ function MemberRow({
               </span>
             )}
             {warnBadge && <span className="shrink-0 text-xs">{warnBadge}</span>}
+            {member.linked_members.length > 0 && (
+              <span
+                className="shrink-0 text-[10px] font-medium px-1 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-500/30"
+                title={`Linked: ${member.linked_members.map(l => l.ign).join(', ')}`}
+              >
+                🔗
+              </span>
+            )}
           </div>
-          {overflowEnabled && member.bank_balance > 0 && (
+          {overflowEnabled && member.combined_bank_balance > 0 && (
             <div
-              className="mt-0.5 text-[10px] text-amber-400/80 font-medium"
-              title={`Bank balance: ${member.bank_balance.toLocaleString()}g`}
+              className="mt-0.5 text-[10px] text-amber-400/80 font-medium flex items-center gap-1"
+              title={`Bank: ${member.bank_balance.toLocaleString()}g own${member.linked_members.length > 0 ? ` + ${(member.combined_bank_balance - member.bank_balance).toLocaleString()}g linked` : ''}`}
             >
-              🏦 {formatGold(member.bank_balance)}
+              <span>🏦 {formatGold(member.combined_bank_balance)}{member.linked_members.length > 0 && member.combined_bank_balance !== member.bank_balance ? ' (combined)' : ''}</span>
+              {isCapped && (
+                <span className="px-0.5 py-px rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[9px] font-semibold">CAP</span>
+              )}
             </div>
           )}
         </td>
@@ -273,15 +355,33 @@ function MemberRow({
                 <Popover>
                   <PopoverTrigger asChild>
                     <button
-                      className={`w-12 h-8 rounded text-xs font-medium transition-opacity hover:opacity-80 cursor-pointer ${getCellBg(p.cell_status, p.alt_covered)}`}
-                      title={p.alt_covered ? 'Alt covered' : undefined}
+                      className={`w-12 h-8 rounded text-xs font-medium transition-opacity hover:opacity-80 cursor-pointer ${getCellBg(p.cell_status, p.shared_bank_covered)}`}
+                      title={p.shared_bank_covered ? 'Covered by shared bank' : undefined}
                     >
-                      {p.alt_covered ? (
-                        <span className="text-blue-400 text-[10px]">alt</span>
+                      {p.shared_bank_covered ? (
+                        <div className="flex flex-col items-center leading-none gap-px">
+                          <span className="text-blue-400 text-xs">✓</span>
+                          {p.shared_bank_amount > 0 && (
+                            <span className="text-blue-300 text-[9px] font-normal">🏦{formatGold(p.shared_bank_amount)}</span>
+                          )}
+                        </div>
                       ) : p.cell_status === 'green' ? (
-                        <span className="text-green-600">✓</span>
-                      ) : p.gold_donated + p.deposits_gold > 0 ? (
-                        <span className="text-yellow-600 text-[10px]">{formatGold(p.gold_donated + p.deposits_gold)}</span>
+                        <div className="flex flex-col items-center leading-none gap-px">
+                          <span className="text-green-600 text-xs">✓</span>
+                          {p.bank_earned > 0 && (
+                            <span className="text-sky-400 text-[9px] font-normal">+{formatGold(p.bank_earned)}</span>
+                          )}
+                          {p.bank_used > 0 && (
+                            <span className="text-red-400 text-[9px] font-normal">-{formatGold(p.bank_used)}</span>
+                          )}
+                        </div>
+                      ) : (p.gold_donated + p.deposits_gold + p.bank_used) > 0 ? (
+                        <div className="flex flex-col items-center leading-none gap-px">
+                          <span className="text-yellow-600 text-[10px]">{formatGold(p.gold_donated + p.deposits_gold)}</span>
+                          {p.bank_used > 0 && (
+                            <span className="text-red-400 text-[9px] font-normal">-{formatGold(p.bank_used)}</span>
+                          )}
+                        </div>
                       ) : null}
                     </button>
                   </PopoverTrigger>
@@ -298,67 +398,7 @@ function MemberRow({
           );
         })}
       </tr>
-      {/* Alt sub-rows */}
-      {member.alts.map((alt) => (
-        <AltRow key={alt.id} alt={alt} mainIgn={member.ign} columns={columns} period={period} guildId={guildId} />
-      ))}
     </>
-  );
-}
-
-function AltRow({
-  alt,
-  mainIgn,
-  columns,
-  period,
-  guildId,
-}: {
-  alt: OverviewAlt;
-  mainIgn: string;
-  columns: string[];
-  period: 'daily' | 'weekly';
-  guildId: string;
-}) {
-  return (
-    <tr className="border-b bg-muted/10 hover:bg-muted/20 transition-colors">
-      <td className="px-3 py-1.5 min-w-[140px] max-w-[180px]">
-        <div className="flex items-center gap-1.5 pl-5">
-          <span className="text-muted-foreground text-xs">└</span>
-          <div className="flex flex-col min-w-0">
-            <span className="text-sm text-muted-foreground truncate">{alt.ign}</span>
-            <span className="text-[10px] text-muted-foreground/60 truncate">alt of {mainIgn}</span>
-          </div>
-        </div>
-      </td>
-      <td className="px-3 py-1.5 text-center text-xs text-muted-foreground">—</td>
-      {columns.map((col) => {
-        const p = alt.periods[col];
-        return (
-          <td key={col} className="px-1 py-1.5 text-center">
-            {p ? (
-              <Popover>
-                <PopoverTrigger asChild>
-                  <button
-                    className={`w-12 h-7 rounded text-xs transition-opacity hover:opacity-80 cursor-pointer ${getCellBg(p.cell_status)}`}
-                  >
-                    {p.cell_status === 'green' ? (
-                      <span className="text-green-600 text-[10px]">✓</span>
-                    ) : p.gold_donated + p.deposits_gold > 0 ? (
-                      <span className="text-yellow-600 text-[10px]">{formatGold(p.gold_donated + p.deposits_gold)}</span>
-                    ) : null}
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-3" side="top">
-                  <CellDetail colKey={col} period={period} data={p} ign={alt.ign} memberId={alt.id} guildId={guildId} />
-                </PopoverContent>
-              </Popover>
-            ) : (
-              <div className={`w-12 h-7 rounded mx-auto ${getCellBg('red')}`} />
-            )}
-          </td>
-        );
-      })}
-    </tr>
   );
 }
 
@@ -452,15 +492,26 @@ function OverviewPageContent() {
   const members = data?.members ?? [];
   const summary = data?.summary ?? { safe: 0, warn1: 0, warn2: 0, kick: 0 };
   const overflowEnabled = data?.config.overflow_enabled ?? true;
+  const overflowLimit = data?.config.overflow_limit ?? 10000;
+  const groupedMembers = useMemo(() => groupAndSortMembers(members), [members]);
+
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">🗓️ Guild Overview</h1>
-        <div className="flex items-center gap-3">
-          <p className="text-muted-foreground">7-{period === 'weekly' ? 'week' : 'day'} activity overview for all members</p>
-          <CronCountdown />
+      <div className="flex items-start justify-between gap-6">
+        <div>
+          <h1 className="text-2xl font-bold">🗓️ Guild Overview</h1>
+          <div className="flex items-center gap-3">
+            <p className="text-muted-foreground">7-{period === 'weekly' ? 'week' : 'day'} activity overview for all members</p>
+            <CronCountdown />
+          </div>
         </div>
+        {overflowEnabled && (
+          <div className="text-right text-xs text-muted-foreground leading-snug shrink-0 pt-0.5">
+            <p className="font-semibold text-amber-400/80">🏦 Bank cap: {formatGold(overflowLimit)}/member</p>
+            <p>Excess above daily req is banked · drawn on missed days</p>
+          </div>
+        )}
       </div>
 
       {/* Guild selector */}
@@ -547,8 +598,8 @@ function OverviewPageContent() {
                   </tr>
                 </thead>
                 <tbody>
-                  {members.filter((m) => !m.is_alt || !m.main_id).map((member) => (
-                    <MemberRow key={member.id} member={member} columns={columns} period={period} guildId={selectedGuildId} overflowEnabled={overflowEnabled} />
+                  {groupedMembers.map(({ member, position, groupColorIdx }) => (
+                    <MemberRow key={member.id} member={member} columns={columns} period={period} guildId={selectedGuildId} overflowEnabled={overflowEnabled} overflowLimit={data?.config.overflow_limit ?? 10000} groupPosition={position} groupColorIdx={groupColorIdx} />
                   ))}
                 </tbody>
               </table>
@@ -564,7 +615,7 @@ function OverviewPageContent() {
           <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded bg-green-500/25 border border-green-500/40 inline-block" /> Met requirement</span>
           <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded bg-yellow-500/20 border border-yellow-500/40 inline-block" /> Partial (below req)</span>
           <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded bg-red-500/15 border border-red-400/30 inline-block" /> No activity</span>
-          <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded bg-blue-500/20 border border-blue-500/40 inline-block" /> Covered by alt (2× req)</span>
+          <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded bg-blue-500/20 border border-blue-500/40 inline-block" /> Covered by shared bank (linked chars pool excess)</span>
           <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded bg-muted/30 border border-muted-foreground/10 inline-block" /> Not yet a member</span>
           <span className="flex items-center gap-1.5"><span className="text-sky-400 text-[10px] font-medium px-1 py-0.5 rounded bg-sky-500/20 border border-sky-500/30">new</span> Joined within 7 days</span>
         </div>
@@ -573,7 +624,7 @@ function OverviewPageContent() {
         </p>
         {overflowEnabled && (
           <p className="text-xs">
-            🏦 = Gold bank (overflow above daily req is banked, drawn on shortfall days). Max {formatGold(data?.config.overflow_limit ?? 10000)}.
+            🏦 = Gold bank · max {formatGold(data?.config.overflow_limit ?? 10000)}/member · linked accounts share a combined pool (N members × cap) · red -X = bank drawn · +X = bank earned · CAP = at limit
           </p>
         )}
       </div>

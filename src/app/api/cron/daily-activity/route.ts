@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { IdleMMOApi, ActivityEvent } from '@/lib/idlemmo-api';
-import { storeActivityEvents, processActivityEvents } from '@/lib/activity-processor';
+import { storeActivityEvents, processActivityEvents, drainInactiveBanks } from '@/lib/activity-processor';
 
 function verifyCronSecret(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -89,6 +89,9 @@ export async function POST(req: NextRequest) {
       );
 
       results[guild_id] = { stored, processed, joins, leaves };
+
+      // Drain bank for all active members who had no events today
+      await drainInactiveBanks(guild_id, supabase);
 
       if (joins.length > 0) {
         guildsNeedingSync.push(guild_id);

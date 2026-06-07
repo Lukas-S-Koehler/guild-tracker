@@ -70,6 +70,8 @@ export async function POST(req: NextRequest) {
     const period: RequirementPeriod = settings?.requirement_period ?? 'daily';
     const weeklyReq: number = settings?.weekly_donation_requirement ?? 35000;
     const depositsOnly: boolean = settings?.deposits_only ?? false;
+    const overflowEnabled: boolean = settings?.overflow_enabled ?? true;
+    const overflowLimit: number = settings?.overflow_limit ?? 10000;
 
     let warned = 0;
     let skipped = 0;
@@ -87,6 +89,18 @@ export async function POST(req: NextRequest) {
       if (!members || members.length === 0) continue;
 
       const memberIds = members.map((m) => m.id);
+
+      // Fetch bank balances for all active members
+      const { data: bankRows } = await supabase
+        .from('member_gold_bank')
+        .select('member_id, balance')
+        .eq('guild_id', guildId)
+        .in('member_id', memberIds);
+
+      const bankMap = new Map<string, number>();
+      for (const row of bankRows ?? []) {
+        bankMap.set(row.member_id, row.balance ?? 0);
+      }
 
       // Fetch daily logs (last 90 days, up to and including inactivityAnchor = yesterday).
       // Upper bound prevents donations in the new game day from masking missed activity in the checked day.
@@ -228,11 +242,16 @@ export async function POST(req: NextRequest) {
         let dmError: string | null = null;
         const levelLabel = warning_level === 'warn1' ? '⚠️ Warning' : warning_level === 'warn2' ? '⚠️⚠️ Final Warning' : '🚫 Kick Notice';
 
+        const bankBalance = bankMap.get(member.id) ?? 0;
+        const bankLine = overflowEnabled
+          ? `\n💰 Bank balance: **${bankBalance.toLocaleString()}** / ${overflowLimit.toLocaleString()} gold${bankBalance >= overflowLimit ? ' ✅ (capped)' : ''}`
+          : '';
+
         if (dmsPaused) {
           dmError = 'DMs paused (admin setting)';
           noDiscord++;
         } else if (member.discord_id && botToken) {
-          const dmMsg = `${levelLabel}\nYour character **${member.ign}** in **${guildName}** has been flagged for inactivity (${daysInactive} days inactive).\nPlease ensure you meet the activity requirements to remain in the guild.\n📅 Each game day runs **11:50 UTC to 11:49 UTC** the following day. The daily check runs shortly after — donations made after **11:50 UTC today** count toward tomorrow's check, not today's.`;
+          const dmMsg = `${levelLabel}\nYour character **${member.ign}** in **${guildName}** has been flagged for inactivity (${daysInactive} days inactive).\nPlease ensure you meet the activity requirements to remain in the guild.${bankLine}\n📅 Each game day runs **11:50 UTC to 11:49 UTC** the following day. The daily check runs shortly after — donations made after **11:50 UTC today** count toward tomorrow's check, not today's.`;
           const result = await sendDirectMessage(member.discord_id, dmMsg);
           dmSent = result.ok;
           dmError = result.error ?? null;
@@ -293,6 +312,22 @@ export async function POST(req: NextRequest) {
         if (warn1List.length) {
           lines.push(`\n⚠️ **Warning** (${warn1List.length})`);
           warn1List.forEach((m) => lines.push(fmtMember(m)));
+        }
+
+        // Bank balance section — all active members with non-zero balance
+        if (overflowEnabled) {
+          const bankEntries = members
+            .map((m) => ({ ign: m.ign, balance: bankMap.get(m.id) ?? 0 }))
+            .filter((m) => m.balance > 0)
+            .sort((a, b) => b.balance - a.balance);
+
+          if (bankEntries.length > 0) {
+            lines.push(`\n💰 **Bank Balances** (cap: ${overflowLimit.toLocaleString()} gold)`);
+            bankEntries.forEach((m) => {
+              const capped = m.balance >= overflowLimit;
+              lines.push(`• **${m.ign}** — ${m.balance.toLocaleString()} gold${capped ? ' ✅' : ''}`);
+            });
+          }
         }
 
         // Chunk into messages under 2000 chars, with delay between posts to avoid rate limiting
