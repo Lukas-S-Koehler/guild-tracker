@@ -1,0 +1,28 @@
+name: Daily Unmapped Members Report
+
+on:
+  schedule:
+    # Runs at 11:24 UTC daily — posts unmapped members to Discord
+    - cron: '24 11 * * *'
+  workflow_dispatch:
+
+jobs:
+  unmapped-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Post unmapped members report to Discord
+        run: |
+          echo "Posting unmapped members report..."
+          response=$(curl -s -L -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/unmapped-report" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | head -n -1)
+          echo "Response: $body"
+          echo "HTTP status: $http_code"
+          if [ "$http_code" != "200" ]; then
+            echo "ERROR: Unmapped report failed with status $http_code"
+            exit 1
+          fi
