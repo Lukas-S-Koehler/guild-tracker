@@ -153,6 +153,8 @@ export async function processActivityEvents(
     .single();
 
   const donationReq = config?.settings?.donation_requirement ?? 5000;
+  const overflowEnabled: boolean = config?.settings?.overflow_enabled ?? true;
+  const overflowLimit: number = config?.settings?.overflow_limit ?? 10000;
 
   // Fetch active buildings for valid deposit items
   const activeBuildings: string[] = config?.settings?.active_buildings || [];
@@ -244,8 +246,89 @@ export async function processActivityEvents(
         depositRows.push({ item: d.item, qty: d.quantity, price, total, valid });
       }
 
-      const totalGold = donationGold + depositGold;
-      const metRequirement = totalGold >= donationReq;
+      let goldDonatedFinal = donationGold;
+      let depositGoldFinal = depositGold;
+
+      // Always fetch existing log so we can restore previously calculated values
+      // on re-runs AND read prior bank_used/bank_earned for idempotent bank updates.
+      const { data: existing } = await supabase
+        .from('daily_logs')
+        .select('id, gold_donated, deposits_gold, bank_used, bank_earned')
+        .eq('member_id', member.id)
+        .eq('log_date', date)
+        .maybeSingle();
+
+      // If current run has no donation/deposit events, recalculate from the
+      // donations table to prevent re-runs from zeroing previously correct data
+      if (donationRows.length === 0 || depositRows.filter(r => r.valid).length === 0) {
+        if (donationRows.length === 0 && existing?.id) {
+          const { data: existingDonations } = await supabase
+            .from('donations')
+            .select('gold_value')
+            .eq('daily_log_id', existing.id)
+            .not('item_name', 'like', '[DEPOSIT]%');
+          const recalc = (existingDonations || []).reduce((s: number, d: any) => s + (d.gold_value || 0), 0);
+          goldDonatedFinal = recalc > 0 ? recalc : (existing.gold_donated || 0);
+        }
+
+        if (depositRows.filter(r => r.valid).length === 0 && existing?.id) {
+          const { data: existingDeposits } = await supabase
+            .from('donations')
+            .select('gold_value')
+            .eq('daily_log_id', existing.id)
+            .like('item_name', '[DEPOSIT]%');
+          const recalc = (existingDeposits || []).reduce((s: number, d: any) => s + (d.gold_value || 0), 0);
+          depositGoldFinal = recalc > 0 ? recalc : (existing.deposits_gold || 0);
+        }
+      }
+
+      const gross = goldDonatedFinal + depositGoldFinal;
+
+      // ── Overflow bank ──────────────────────────────────────────────────────
+      // Fetch current bank balance for this member+guild
+      const { data: bankRow } = await supabase
+        .from('member_gold_bank')
+        .select('balance')
+        .eq('member_id', member.id)
+        .eq('guild_id', guildId)
+        .maybeSingle();
+
+      const currentBalance = bankRow?.balance ?? 0;
+      const prevBankEarned = existing?.bank_earned ?? 0;
+      const prevBankUsed = existing?.bank_used ?? 0;
+
+      // Reverse prior run's bank effect so re-runs are idempotent
+      const adjustedBalance = Math.min(
+        Math.max(currentBalance - prevBankEarned + prevBankUsed, 0),
+        overflowLimit
+      );
+
+      let newBankEarned = 0;
+      let newBankUsed = 0;
+      let metRequirement: boolean;
+
+      if (overflowEnabled) {
+        if (gross >= donationReq) {
+          newBankEarned = Math.min(gross - donationReq, overflowLimit - adjustedBalance);
+          metRequirement = true;
+        } else {
+          const deficit = donationReq - gross;
+          newBankUsed = Math.min(deficit, adjustedBalance);
+          metRequirement = gross + newBankUsed >= donationReq;
+        }
+      } else {
+        metRequirement = gross >= donationReq;
+      }
+
+      const newBalance = Math.min(
+        Math.max(adjustedBalance + newBankEarned - newBankUsed, 0),
+        overflowLimit
+      );
+
+      await supabase.from('member_gold_bank').upsert(
+        { member_id: member.id, guild_id: guildId, balance: newBalance, updated_at: new Date().toISOString() },
+        { onConflict: 'member_id,guild_id' }
+      );
 
       // Upsert daily_log
       const { data: logRow, error: logError } = await supabase
@@ -255,9 +338,11 @@ export async function processActivityEvents(
           guild_id: guildId,
           log_date: date,
           raids: activity.raids,
-          gold_donated: donationGold,
-          deposits_gold: depositGold,
+          gold_donated: goldDonatedFinal,
+          deposits_gold: depositGoldFinal,
           met_requirement: metRequirement,
+          bank_used: newBankUsed,
+          bank_earned: newBankEarned,
           log_order: activity.logOrder,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'member_id,log_date' })

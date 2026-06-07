@@ -21,13 +21,20 @@ export async function POST(req: NextRequest) {
   const botToken = process.env.DISCORD_BOT_TOKEN;
   const summary: Array<{ guild: string; warned: number; skipped: number; no_discord: number }> = [];
 
-  // Check global DM pause flag
+  // Check global flags
   const { data: pauseSetting } = await supabase
     .from('app_settings')
     .select('value')
     .eq('key', 'pause_discord_dms')
     .maybeSingle();
   const dmsPaused = pauseSetting?.value === 'true';
+
+  const { data: pingsSetting } = await supabase
+    .from('app_settings')
+    .select('value')
+    .eq('key', 'disable_guild_pings')
+    .maybeSingle();
+  const guildPingsDisabled = pingsSetting?.value === 'true';
 
   // Fetch guild configs — if called by officer, only their guild; cron fetches all
   let configQuery = supabase.from('guild_config').select('guild_id, guild_name, settings');
@@ -185,7 +192,7 @@ export async function POST(req: NextRequest) {
 
         let daysSinceJoin = 999;
         if (member.first_seen) {
-          daysSinceJoin = Math.floor((today.getTime() - new Date(member.first_seen).getTime()) / 86400000);
+          daysSinceJoin = Math.max(0, Math.floor((today.getTime() - new Date(member.first_seen).getTime()) / 86400000));
         }
 
         let daysInactive: number;
@@ -273,7 +280,7 @@ export async function POST(req: NextRequest) {
           `**${guildName} — Inactivity Report** · Checked game day: **${gameDay}** (11:50 UTC → next day 11:49 UTC)\n⚠️ Donations after **11:50 UTC today** count toward **tomorrow's** check, not this one.`,
         ];
         const fmtMember = (m: { ign: string; daysInactive: number; discord_id: string | null }) =>
-          `• **${m.ign}**${m.discord_id ? ` (<@${m.discord_id}>)` : ' · ❌ no Discord'} — ${m.daysInactive}d inactive`;
+          `• **${m.ign}**${!guildPingsDisabled && m.discord_id ? ` (<@${m.discord_id}>)` : ''} — ${m.daysInactive}d inactive`;
 
         if (kickList.length) {
           lines.push(`\n🚫 **Kick Notice** (${kickList.length})`);

@@ -43,6 +43,8 @@ interface GuildSettings {
   deposits_only: boolean;
   discord_log_channel_id: string;
   discord_server_id: string;
+  overflow_enabled: boolean;
+  overflow_limit: number;
 }
 
 interface Building {
@@ -64,6 +66,8 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
     deposits_only: false,
     discord_log_channel_id: '',
     discord_server_id: '',
+    overflow_enabled: true,
+    overflow_limit: 10000,
   });
   const [minLevel, setMinLevel] = useState<number>(currentMinLevel);
   const [isActive, setIsActive] = useState<boolean>(currentIsActive);
@@ -93,6 +97,8 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             deposits_only: data.settings?.deposits_only ?? false,
             discord_log_channel_id: data.settings?.discord_log_channel_id ?? '',
             discord_server_id: data.settings?.discord_server_id ?? '',
+            overflow_enabled: data.settings?.overflow_enabled ?? true,
+            overflow_limit: data.settings?.overflow_limit ?? 10000,
           });
         }
 
@@ -131,6 +137,8 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             deposits_only: settings.deposits_only,
             discord_log_channel_id: settings.discord_log_channel_id || null,
             discord_server_id: settings.discord_server_id || null,
+            overflow_enabled: settings.overflow_enabled,
+            overflow_limit: settings.overflow_limit,
           },
         }, { guildId }),
         api.patch('/api/admin/guild-meta', { guild_id: guildId, min_level: minLevel, is_active: isActive }, { guildId }),
@@ -285,6 +293,34 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             </div>
           </>
         )}
+
+        <div className="border rounded-lg p-3 space-y-3 bg-muted/20">
+          <p className="text-xs font-medium text-foreground">Overflow Bank</p>
+          <div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.overflow_enabled}
+                onChange={e => setSettings(prev => ({ ...prev, overflow_enabled: e.target.checked }))}
+                className="rounded"
+              />
+              <span className="text-sm">Enable overflow bank</span>
+            </label>
+            <p className="text-xs text-muted-foreground mt-0.5">Gold above daily req is banked and used to cover future shortfalls</p>
+          </div>
+          {settings.overflow_enabled && (
+            <div>
+              <Label className="text-xs text-muted-foreground">Bank limit (gold)</Label>
+              <Input
+                type="number"
+                value={settings.overflow_limit}
+                onChange={e => setSettings(prev => ({ ...prev, overflow_limit: parseInt(e.target.value) || 0 }))}
+                className="mt-1 w-40"
+                min={0}
+              />
+            </div>
+          )}
+        </div>
 
         <div>
           <Label className="text-xs text-muted-foreground">Discord Log Channel ID (for auto-warn summaries)</Label>
@@ -628,6 +664,8 @@ function SuperAdminPanel() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [pauseDiscordDMs, setPauseDiscordDMs] = useState<boolean | null>(null);
   const [togglingPause, setTogglingPause] = useState(false);
+  const [disableGuildPings, setDisableGuildPings] = useState<boolean | null>(null);
+  const [togglingPings, setTogglingPings] = useState(false);
 
   const showMsg = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
@@ -637,8 +675,11 @@ function SuperAdminPanel() {
   useEffect(() => {
     fetch('/api/admin/app-settings')
       .then(r => r.json())
-      .then(d => setPauseDiscordDMs(d.pause_discord_dms === 'true'))
-      .catch(() => setPauseDiscordDMs(false));
+      .then(d => {
+        setPauseDiscordDMs(d.pause_discord_dms === 'true');
+        setDisableGuildPings(d.disable_guild_pings === 'true');
+      })
+      .catch(() => { setPauseDiscordDMs(false); setDisableGuildPings(false); });
   }, []);
 
   const handleTogglePause = async () => {
@@ -659,6 +700,26 @@ function SuperAdminPanel() {
       }
     } catch { showMsg('error', 'Network error'); }
     finally { setTogglingPause(false); }
+  };
+
+  const handleToggleGuildPings = async () => {
+    setTogglingPings(true);
+    const next = !disableGuildPings;
+    try {
+      const res = await fetch('/api/admin/app-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'disable_guild_pings', value: String(next) }),
+      });
+      if (res.ok) {
+        setDisableGuildPings(next);
+        showMsg('success', next ? 'Guild channel pings disabled — reports will not @mention members' : 'Guild channel pings re-enabled');
+      } else {
+        const d = await res.json();
+        showMsg('error', d.error || 'Failed to update setting');
+      }
+    } catch { showMsg('error', 'Network error'); }
+    finally { setTogglingPings(false); }
   };
 
   const loadOverview = async () => {
@@ -747,6 +808,25 @@ function SuperAdminPanel() {
             className={pauseDiscordDMs ? 'bg-orange-500 hover:bg-orange-600' : ''}
           >
             {togglingPause ? <Loader2 className="h-3 w-3 animate-spin" /> : pauseDiscordDMs ? 'Resume DMs' : 'Pause DMs'}
+          </Button>
+        </div>
+
+        <div className="flex items-center justify-between p-3 border rounded-lg bg-background">
+          <div>
+            <p className="text-sm font-medium flex items-center gap-2">
+              Disable Guild Channel Pings
+              {disableGuildPings && <Badge variant="outline" className="text-xs bg-orange-500/10 text-orange-500 border-orange-500/50">DISABLED</Badge>}
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">When disabled, inactivity reports in guild channels will not @mention members</p>
+          </div>
+          <Button
+            size="sm"
+            variant={disableGuildPings ? 'default' : 'outline'}
+            onClick={handleToggleGuildPings}
+            disabled={togglingPings || disableGuildPings === null}
+            className={disableGuildPings ? 'bg-orange-500 hover:bg-orange-600' : ''}
+          >
+            {togglingPings ? <Loader2 className="h-3 w-3 animate-spin" /> : disableGuildPings ? 'Enable Pings' : 'Disable Pings'}
           </Button>
         </div>
 

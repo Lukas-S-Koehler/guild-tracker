@@ -145,7 +145,7 @@ export async function GET(req: NextRequest) {
       let daysSinceJoin = 999;
       if (member.first_seen) {
         const joinDate = new Date(member.first_seen);
-        daysSinceJoin = Math.floor((today.getTime() - joinDate.getTime()) / (1000 * 60 * 60 * 24));
+        daysSinceJoin = Math.max(0, Math.floor((today.getTime() - joinDate.getTime()) / (1000 * 60 * 60 * 24)));
       }
 
       let daysInactive: number;

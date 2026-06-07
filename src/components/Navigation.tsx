@@ -55,6 +55,7 @@ export default function Navigation() {
     { href: '/challenges', label: 'Challenges', requiresRole: 'OFFICER' },
     { href: '/discord-mapping', label: 'Discord', requiresRole: 'OFFICER' },
     { href: '/data-management', label: 'Manage Data', requiresSuperAdmin: true },
+    { href: '/price-cache', label: 'Price Cache', requiresSuperAdmin: true },
     { href: '/admin', label: 'Admin', requiresRole: 'LEADER' },
   ];
 

@@ -41,6 +41,30 @@ function getCellBg(status: 'green' | 'yellow' | 'red', altCovered?: boolean): st
   }
 }
 
+function getWeekStartDate(weekKey: string): string {
+  const [yearStr, weekStr] = weekKey.split('-W');
+  const year = parseInt(yearStr);
+  const week = parseInt(weekStr);
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const dayOfWeek = jan4.getUTCDay() || 7;
+  const monday1 = new Date(jan4);
+  monday1.setUTCDate(jan4.getUTCDate() - dayOfWeek + 1);
+  const targetMonday = new Date(monday1);
+  targetMonday.setUTCDate(monday1.getUTCDate() + (week - 1) * 7);
+  return targetMonday.toISOString().split('T')[0];
+}
+
+function isBeforeJoin(col: string, firstSeen: string, period: 'daily' | 'weekly'): boolean {
+  const colDate = period === 'weekly' ? getWeekStartDate(col) : col;
+  return colDate < firstSeen;
+}
+
+function daysSinceDate(dateStr: string): number {
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Math.floor((todayUtc - new Date(dateStr).getTime()) / 86400000);
+}
+
 function formatColHeader(colKey: string, period: 'daily' | 'weekly'): { top: string; bottom: string } {
   if (period === 'weekly') {
     const [, weekPart] = colKey.split('-W');
@@ -83,6 +107,8 @@ interface CellDetailProps {
     met_requirement: boolean;
     cell_status: 'green' | 'yellow' | 'red';
     alt_covered?: boolean;
+    bank_used?: number;
+    bank_earned?: number;
   };
   ign: string;
   memberId: string;
@@ -128,6 +154,18 @@ function CellDetail({ colKey, period, data, ign, memberId, guildId }: CellDetail
           <span>Raids</span>
           <span className="font-medium text-foreground">{data.raids}</span>
         </div>
+        {(data.bank_used ?? 0) > 0 && (
+          <div className="flex justify-between gap-4 text-amber-400">
+            <span>Bank used</span>
+            <span className="font-medium">{formatGold(data.bank_used!)}</span>
+          </div>
+        )}
+        {(data.bank_earned ?? 0) > 0 && (
+          <div className="flex justify-between gap-4 text-sky-400">
+            <span>Bank earned</span>
+            <span className="font-medium">+{formatGold(data.bank_earned!)}</span>
+          </div>
+        )}
         <div className="flex justify-between gap-4 pt-1 border-t">
           <span>Requirement</span>
           <span className={data.met_requirement ? 'text-green-500 font-medium' : 'text-red-400 font-medium'}>
@@ -179,28 +217,47 @@ function MemberRow({
   columns,
   period,
   guildId,
+  overflowEnabled,
 }: {
   member: OverviewMember;
   columns: string[];
   period: 'daily' | 'weekly';
   guildId: string;
+  overflowEnabled: boolean;
 }) {
   const warnBadge = getWarningBadge(member.warning_level);
   const inactiveColor = getWarningColor(member.warning_level);
+  const isNew = member.first_seen ? daysSinceDate(member.first_seen) <= 7 : false;
 
   return (
     <>
       <tr className="border-b hover:bg-muted/30 transition-colors">
         {/* Member name */}
-        <td className="px-3 py-2 min-w-[140px] max-w-[180px]">
+        <td className="px-3 py-2 min-w-[160px] max-w-[220px]">
           <div className="flex items-center gap-1.5">
             {member.avatar_url && (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={member.avatar_url} alt="" className="h-5 w-5 rounded-full shrink-0" />
             )}
             <span className="font-medium text-sm truncate">{member.ign}</span>
+            {isNew && (
+              <span
+                className="shrink-0 text-[10px] font-medium px-1 py-0.5 rounded bg-sky-500/20 text-sky-400 border border-sky-500/30"
+                title={`Joined ${member.first_seen}`}
+              >
+                new
+              </span>
+            )}
             {warnBadge && <span className="shrink-0 text-xs">{warnBadge}</span>}
           </div>
+          {overflowEnabled && member.bank_balance > 0 && (
+            <div
+              className="mt-0.5 text-[10px] text-amber-400/80 font-medium"
+              title={`Bank balance: ${member.bank_balance.toLocaleString()}g`}
+            >
+              🏦 {formatGold(member.bank_balance)}
+            </div>
+          )}
         </td>
         {/* Days inactive */}
         <td className={`px-3 py-2 text-center text-sm font-medium ${inactiveColor}`}>
@@ -209,6 +266,7 @@ function MemberRow({
         {/* Period cells */}
         {columns.map((col) => {
           const p = member.periods[col];
+          const beforeJoin = !p && member.first_seen ? isBeforeJoin(col, member.first_seen, period) : false;
           return (
             <td key={col} className="px-1 py-2 text-center">
               {p ? (
@@ -231,6 +289,8 @@ function MemberRow({
                     <CellDetail colKey={col} period={period} data={p} ign={member.ign} memberId={member.id} guildId={guildId} />
                   </PopoverContent>
                 </Popover>
+              ) : beforeJoin ? (
+                <div className="w-12 h-8 rounded mx-auto bg-muted/30 border border-muted-foreground/10" title="Not yet a member" />
               ) : (
                 <div className={`w-12 h-8 rounded mx-auto ${getCellBg('red')}`} />
               )}
@@ -391,6 +451,7 @@ function OverviewPageContent() {
   const columns = data?.columns ?? [];
   const members = data?.members ?? [];
   const summary = data?.summary ?? { safe: 0, warn1: 0, warn2: 0, kick: 0 };
+  const overflowEnabled = data?.config.overflow_enabled ?? true;
 
   return (
     <div className="space-y-6">
@@ -487,7 +548,7 @@ function OverviewPageContent() {
                 </thead>
                 <tbody>
                   {members.filter((m) => !m.is_alt || !m.main_id).map((member) => (
-                    <MemberRow key={member.id} member={member} columns={columns} period={period} guildId={selectedGuildId} />
+                    <MemberRow key={member.id} member={member} columns={columns} period={period} guildId={selectedGuildId} overflowEnabled={overflowEnabled} />
                   ))}
                 </tbody>
               </table>
@@ -504,10 +565,17 @@ function OverviewPageContent() {
           <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded bg-yellow-500/20 border border-yellow-500/40 inline-block" /> Partial (below req)</span>
           <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded bg-red-500/15 border border-red-400/30 inline-block" /> No activity</span>
           <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded bg-blue-500/20 border border-blue-500/40 inline-block" /> Covered by alt (2× req)</span>
+          <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded bg-muted/30 border border-muted-foreground/10 inline-block" /> Not yet a member</span>
+          <span className="flex items-center gap-1.5"><span className="text-sky-400 text-[10px] font-medium px-1 py-0.5 rounded bg-sky-500/20 border border-sky-500/30">new</span> Joined within 7 days</span>
         </div>
         <p className="text-xs mt-1">
           Warning badges: ⚠️ = Warn 1 (2d inactive), ⚠️⚠️ = Warn 2 (3d), 🚫 = Kick (4d+) — from last 7 days of warnings.
         </p>
+        {overflowEnabled && (
+          <p className="text-xs">
+            🏦 = Gold bank (overflow above daily req is banked, drawn on shortfall days). Max {formatGold(data?.config.overflow_limit ?? 10000)}.
+          </p>
+        )}
       </div>
     </div>
   );

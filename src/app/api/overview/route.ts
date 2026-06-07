@@ -10,12 +10,14 @@ export interface OverviewPeriod {
   met_requirement: boolean;
   cell_status: 'green' | 'yellow' | 'red';
   alt_covered: boolean;
+  bank_used: number;
+  bank_earned: number;
 }
 
 export interface OverviewAlt {
   id: string;
   ign: string;
-  periods: Record<string, Omit<OverviewPeriod, 'alt_covered'>>;
+  periods: Record<string, Omit<OverviewPeriod, 'alt_covered' | 'bank_used' | 'bank_earned'>>;
 }
 
 export interface OverviewMember {
@@ -24,6 +26,7 @@ export interface OverviewMember {
   position: string;
   avatar_url: string | null;
   discord_id: string | null;
+  first_seen: string | null;
   days_inactive: number;
   warning_level: 'safe' | 'warn1' | 'warn2' | 'kick';
   recent_warning: 'warn1' | 'warn2' | 'kick' | null;
@@ -31,6 +34,7 @@ export interface OverviewMember {
   main_id: string | null;
   periods: Record<string, OverviewPeriod>;
   alts: OverviewAlt[];
+  bank_balance: number;
 }
 
 export interface OverviewResponse {
@@ -39,6 +43,8 @@ export interface OverviewResponse {
     donation_requirement: number;
     weekly_donation_requirement: number;
     guild_name: string;
+    overflow_enabled: boolean;
+    overflow_limit: number;
   };
   columns: string[];
   members: OverviewMember[];
@@ -108,6 +114,8 @@ export async function GET(req: NextRequest) {
   const depositsOnly: boolean = configRow?.settings?.deposits_only ?? false;
   const donationReq: number = configRow?.donation_requirement ?? 5000;
   const guildName: string = configRow?.guild_name ?? guildId;
+  const overflowEnabled: boolean = configRow?.settings?.overflow_enabled ?? true;
+  const overflowLimit: number = configRow?.settings?.overflow_limit ?? 10000;
 
   const now = new Date();
 
@@ -146,7 +154,7 @@ export async function GET(req: NextRequest) {
 
   const { data: logs } = await supabase
     .from('daily_logs')
-    .select('member_id, log_date, gold_donated, deposits_gold, raids, met_requirement')
+    .select('member_id, log_date, gold_donated, deposits_gold, raids, met_requirement, bank_used, bank_earned')
     .eq('guild_id', guildId)
     .in('member_id', memberIds)
     .gte('log_date', fromDate)
@@ -154,21 +162,19 @@ export async function GET(req: NextRequest) {
 
   // Build periods map per member per column key
   // For weekly: aggregate by week key, recompute met_requirement
-  const rawLogsMap = new Map<string, Map<string, { gold: number; deposits: number; raids: number; met: boolean }>>();
+  const rawLogsMap = new Map<string, Map<string, { gold: number; deposits: number; raids: number; met: boolean; bank_used: number; bank_earned: number }>>();
 
   if (period === 'weekly') {
     for (const log of logs ?? []) {
       const weekKey = getISOWeekKey(log.log_date);
       if (!columns.includes(weekKey)) continue;
       const memberMap = rawLogsMap.get(log.member_id) ?? new Map();
-      const existing = memberMap.get(weekKey) ?? { gold: 0, deposits: 0, raids: 0, met: false };
-      const goldVal = depositsOnly ? (log.deposits_gold ?? 0) : ((log.gold_donated ?? 0) + (log.deposits_gold ?? 0));
+      const existing = memberMap.get(weekKey) ?? { gold: 0, deposits: 0, raids: 0, met: false, bank_used: 0, bank_earned: 0 };
       existing.gold += log.gold_donated ?? 0;
       existing.deposits += log.deposits_gold ?? 0;
       existing.raids += log.raids ?? 0;
-      existing.met = (existing.deposits + (depositsOnly ? 0 : existing.gold - existing.deposits)) >= weeklyReq
-        ? true
-        : existing.met;
+      existing.bank_used += log.bank_used ?? 0;
+      existing.bank_earned += log.bank_earned ?? 0;
       // Recompute met based on accumulated total
       const total = depositsOnly ? existing.deposits : (existing.gold + existing.deposits);
       existing.met = total >= weeklyReq;
@@ -193,6 +199,8 @@ export async function GET(req: NextRequest) {
         deposits: log.deposits_gold ?? 0,
         raids: log.raids ?? 0,
         met: log.met_requirement ?? false,
+        bank_used: log.bank_used ?? 0,
+        bank_earned: log.bank_earned ?? 0,
       });
       rawLogsMap.set(log.member_id, memberMap);
     }
@@ -233,6 +241,17 @@ export async function GET(req: NextRequest) {
     if (!existing || (levelRank[w.warning_level] ?? 0) > (levelRank[existing] ?? 0)) {
       recentWarningMap.set(w.member_id, w.warning_level as 'warn1' | 'warn2' | 'kick');
     }
+  }
+
+  // Fetch bank balances
+  const { data: bankRows } = await supabase
+    .from('member_gold_bank')
+    .select('member_id, balance')
+    .eq('guild_id', guildId)
+    .in('member_id', memberIds);
+  const bankBalanceMap = new Map<string, number>();
+  for (const row of bankRows ?? []) {
+    bankBalanceMap.set(row.member_id, row.balance ?? 0);
   }
 
   // Build inactivity map — only consider logs up to todayStr (= inactivityAnchor = yesterday).
@@ -331,13 +350,22 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      result[col] = { gold_donated: gold, deposits_gold: deps, raids, met_requirement: met, cell_status: status, alt_covered: altCovered };
+      result[col] = {
+        gold_donated: gold,
+        deposits_gold: deps,
+        raids,
+        met_requirement: met,
+        cell_status: status,
+        alt_covered: altCovered,
+        bank_used: entry?.bank_used ?? 0,
+        bank_earned: entry?.bank_earned ?? 0,
+      };
     }
     return result;
   };
 
-  const buildAltPeriods = (altId: string): Record<string, Omit<OverviewPeriod, 'alt_covered'>> => {
-    const result: Record<string, Omit<OverviewPeriod, 'alt_covered'>> = {};
+  const buildAltPeriods = (altId: string): Record<string, Omit<OverviewPeriod, 'alt_covered' | 'bank_used' | 'bank_earned'>> => {
+    const result: Record<string, Omit<OverviewPeriod, 'alt_covered' | 'bank_used' | 'bank_earned'>> = {};
     const altPeriods = rawLogsMap.get(altId);
     for (const col of columns) {
       const entry = altPeriods?.get(col);
@@ -373,7 +401,7 @@ export async function GET(req: NextRequest) {
       let lastDate = lastActivityMap.get(member.id);
       let daysSinceJoin = 999;
       if (member.first_seen) {
-        daysSinceJoin = Math.floor((refMs - new Date(member.first_seen).getTime()) / 86400000);
+        daysSinceJoin = Math.max(0, Math.floor((refMs - new Date(member.first_seen).getTime()) / 86400000));
       }
       let daysInactive: number;
       if (!lastDate) {
@@ -400,6 +428,7 @@ export async function GET(req: NextRequest) {
         position: member.position,
         avatar_url: member.avatar_url ?? null,
         discord_id: member.discord_id ?? null,
+        first_seen: member.first_seen ?? null,
         days_inactive: daysInactive,
         warning_level,
         recent_warning: recentWarningMap.get(member.id) ?? null,
@@ -407,6 +436,7 @@ export async function GET(req: NextRequest) {
         main_id: mainId,
         periods: buildPeriods(member.id, true, altIds),
         alts,
+        bank_balance: bankBalanceMap.get(member.id) ?? 0,
       };
     })
     .sort((a, b) => b.days_inactive - a.days_inactive);
@@ -417,6 +447,8 @@ export async function GET(req: NextRequest) {
       donation_requirement: donationReq,
       weekly_donation_requirement: weeklyReq,
       guild_name: guildName,
+      overflow_enabled: overflowEnabled,
+      overflow_limit: overflowLimit,
     },
     columns,
     members: resultMembers,
