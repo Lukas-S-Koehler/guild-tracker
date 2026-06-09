@@ -96,7 +96,8 @@ function computeSharedBankCoverage(
   preWindowBalances: Map<string, number>,
   overflowLimit: number,
   requirement: number,
-  depositsOnly: boolean
+  depositsOnly: boolean,
+  lastActivityMap: Map<string, string>,
 ): Map<string, Map<string, number>> {
   const combinedLimit = overflowLimit * linkedIds.length;
 
@@ -126,10 +127,20 @@ function computeSharedBankCoverage(
 
     sharedBank = Math.min(sharedBank + dayExcess, combinedLimit);
 
+    // Sort: most inactive first (ascending last-activity date; empty string = never active = highest priority)
+    shortfalls.sort((a, b) => {
+      const la = lastActivityMap.get(a.id) ?? '';
+      const lb = lastActivityMap.get(b.id) ?? '';
+      return la < lb ? -1 : la > lb ? 1 : 0;
+    });
+
     for (const { id, amount } of shortfalls) {
       if (sharedBank >= amount) {
         sharedBank -= amount;
         covered.get(id)!.set(col, amount);
+        // Update so subsequent days reflect this coverage when re-sorting
+        const existing = lastActivityMap.get(id);
+        if (!existing || col > existing) lastActivityMap.set(id, col);
       }
     }
   }
@@ -480,7 +491,7 @@ export async function GET(req: NextRequest) {
       const groupIds = [memberId, ...altIds];
       const groupCoverage = computeSharedBankCoverage(
         groupIds, columns, rawLogsMap, preWindowBalances,
-        overflowLimit, effectiveReq, depositsOnly
+        overflowLimit, effectiveReq, depositsOnly, lastActivityMap
       );
       for (const [id, cols] of Array.from(groupCoverage)) {
         sharedBankCoveredMap.set(id, cols);

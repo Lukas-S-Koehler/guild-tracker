@@ -90,6 +90,7 @@ export async function POST(req: NextRequest) {
       if (!members || members.length === 0) continue;
 
       const memberIds = members.map((m) => m.id);
+      const memberSet = new Set(memberIds);
 
       // Fetch daily logs (last 90 days, up to and including inactivityAnchor = yesterday).
       // Upper bound prevents donations in the new game day from masking missed activity in the checked day.
@@ -173,17 +174,22 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // For daily guilds: inactive days covered by individual bank count as met.
-      // Walk forward from each member's last met day; infer bank coverage on days with no log.
-      if (period === 'daily' && overflowEnabled) {
-        // memberId → date → { balance_after, met }
-        const bankByDate = new Map<string, Map<string, { balance: number; met: boolean }>>();
+      // Build log maps for bank simulations (individual + shared)
+      const bankByDate = new Map<string, Map<string, { balance: number; met: boolean }>>();
+      const rawLogsForGroup = new Map<string, Map<string, { gold: number; deposits: number; met: boolean }>>();
+      if (overflowEnabled) {
         for (const log of logs ?? []) {
-          const m = bankByDate.get(log.member_id) ?? new Map<string, { balance: number; met: boolean }>();
-          m.set(log.log_date, { balance: log.bank_balance_after ?? 0, met: log.met_requirement ?? false });
-          bankByDate.set(log.member_id, m);
+          const mb = bankByDate.get(log.member_id) ?? new Map<string, { balance: number; met: boolean }>();
+          mb.set(log.log_date, { balance: log.bank_balance_after ?? 0, met: log.met_requirement ?? false });
+          bankByDate.set(log.member_id, mb);
+          const mr = rawLogsForGroup.get(log.member_id) ?? new Map<string, { gold: number; deposits: number; met: boolean }>();
+          mr.set(log.log_date, { gold: log.gold_donated ?? 0, deposits: log.deposits_gold ?? 0, met: log.met_requirement ?? false });
+          rawLogsForGroup.set(log.member_id, mr);
         }
+      }
 
+      // Individual bank walk: inactive days covered by personal bank count as met.
+      if (period === 'daily' && overflowEnabled) {
         for (const member of members) {
           const memberId = member.id;
           const lastDate = lastActivityMap.get(memberId);
@@ -200,15 +206,92 @@ export async function POST(req: NextRequest) {
             const dateStr = new Date(ms).toISOString().split('T')[0];
             const dayEntry = memberDays.get(dateStr);
             if (dayEntry) {
-              // Day has a log: if met=true it's already in lastActivityMap; advance balance
               balance = dayEntry.balance;
             } else if (balance >= donationReq) {
-              // Inactive day fully covered by bank
               const existing = lastActivityMap.get(memberId);
               if (!existing || dateStr > existing) lastActivityMap.set(memberId, dateStr);
               balance = balance - donationReq;
             } else {
               balance = 0;
+            }
+          }
+        }
+      }
+
+      // Shared bank walk: linked alts pool their bank. Most-inactive alt covered first.
+      if (period === 'daily' && overflowEnabled) {
+        const processedGroups = new Set<string>();
+        for (const member of members) {
+          if (processedGroups.has(member.id)) continue;
+          const altIds = (mainToAlts.get(member.id) ?? []).filter(aid => memberSet.has(aid));
+          if (altIds.length === 0) { processedGroups.add(member.id); continue; }
+
+          const groupIds = [member.id, ...altIds];
+          groupIds.forEach(id => processedGroups.add(id));
+
+          const combinedLimit = overflowLimit * groupIds.length;
+
+          // Walk start = earliest lastActivityMap date in the group
+          const groupLastDates = groupIds.map(id => lastActivityMap.get(id)).filter(Boolean) as string[];
+          if (groupLastDates.length === 0) continue;
+          const walkStart = groupLastDates.reduce((a, b) => (a < b ? a : b));
+
+          // Starting shared bank = sum of each member's bank_balance_after at walkStart (drain gap days)
+          let sharedBank = 0;
+          for (const id of groupIds) {
+            const memberLogs = bankByDate.get(id);
+            if (!memberLogs) continue;
+            let latestBefore: string | null = null;
+            for (const [date] of Array.from(memberLogs.entries())) {
+              if (date <= walkStart && (latestBefore === null || date > latestBefore)) latestBefore = date;
+            }
+            if (latestBefore) {
+              let bal = memberLogs.get(latestBefore)!.balance;
+              const gapDays = Math.round(
+                (new Date(walkStart + 'T00:00:00Z').getTime() - new Date(latestBefore + 'T00:00:00Z').getTime()) / 86400000
+              );
+              for (let i = 0; i < gapDays && bal > 0; i++) bal = Math.max(0, bal - donationReq);
+              sharedBank += Math.min(bal, overflowLimit);
+            }
+          }
+          sharedBank = Math.min(sharedBank, combinedLimit);
+
+          const walkStartMs = new Date(walkStart + 'T00:00:00Z').getTime() + 86400000;
+          const endMs = today.getTime();
+
+          for (let ms = walkStartMs; ms <= endMs; ms += 86400000) {
+            const dateStr = new Date(ms).toISOString().split('T')[0];
+            let dayExcess = 0;
+            const shortfalls: Array<{ id: string; amount: number }> = [];
+
+            for (const id of groupIds) {
+              // Skip if already covered by own activity or individual bank
+              const alreadyCovered = (lastActivityMap.get(id) ?? '') >= dateStr;
+              const entry = rawLogsForGroup.get(id)?.get(dateStr);
+              const raw = entry ? (depositsOnly ? entry.deposits : (entry.gold + entry.deposits)) : 0;
+
+              if (raw >= donationReq) {
+                dayExcess += raw - donationReq;
+              } else if (!alreadyCovered) {
+                shortfalls.push({ id, amount: donationReq - raw });
+              }
+            }
+
+            sharedBank = Math.min(sharedBank + dayExcess, combinedLimit);
+
+            // Fill most-inactive alt first
+            shortfalls.sort((a, b) => {
+              const la = lastActivityMap.get(a.id) ?? '';
+              const lb = lastActivityMap.get(b.id) ?? '';
+              return la < lb ? -1 : la > lb ? 1 : 0;
+            });
+
+            for (const { id, amount } of shortfalls) {
+              if (sharedBank >= amount) {
+                sharedBank -= amount;
+                const existing = lastActivityMap.get(id);
+                if (!existing || dateStr > existing) lastActivityMap.set(id, dateStr);
+              }
             }
           }
         }
@@ -230,31 +313,12 @@ export async function POST(req: NextRequest) {
         recentlyWarnedSet.add(`${w.member_id}:${w.warning_level}`);
       }
 
-      const memberSet = new Set(memberIds);
-
       // Collect all inactive members for the full inactivity report
       const inactiveReport: Array<{ ign: string; daysInactive: number; warning_level: string; discord_id: string | null }> = [];
 
       for (const member of members) {
-        let lastDate = lastActivityMap.get(member.id);
+        const lastDate = lastActivityMap.get(member.id);
 
-        // Check if an alt in the same guild covers this member
-        const altIds = mainToAlts.get(member.id) ?? [];
-        const altInGuild = altIds.filter((aid) => memberSet.has(aid));
-        for (const altId of altInGuild) {
-          const altLast = lastActivityMap.get(altId);
-          if (altLast && (!lastDate || altLast > lastDate)) {
-            lastDate = altLast;
-          }
-        }
-        // Also check if this member is an alt of someone else in the guild
-        const mainId = altToMain.get(member.id);
-        if (mainId && memberSet.has(mainId)) {
-          const mainLast = lastActivityMap.get(mainId);
-          if (mainLast && (!lastDate || mainLast > lastDate)) {
-            lastDate = mainLast;
-          }
-        }
 
         let daysSinceJoin = 999;
         if (member.first_seen) {
@@ -294,9 +358,12 @@ export async function POST(req: NextRequest) {
         let dmError: string | null = null;
         const levelLabel = warning_level === 'warn1' ? '⚠️ Warning' : warning_level === 'warn2' ? '⚠️⚠️ Final Warning' : '🚫 Kick Notice';
 
-        const bankBalance = bankMap.get(member.id) ?? 0;
+        const linkedAltIds = (mainToAlts.get(member.id) ?? []).filter(aid => memberSet.has(aid));
+        const groupMemberIds = [member.id, ...linkedAltIds];
+        const combinedBankBalance = groupMemberIds.reduce((s, id) => s + (bankMap.get(id) ?? 0), 0);
+        const combinedBankLimit = overflowLimit * groupMemberIds.length;
         const bankLine = overflowEnabled
-          ? `\n💰 Bank balance: **${bankBalance.toLocaleString()}** / ${overflowLimit.toLocaleString()} gold${bankBalance >= overflowLimit ? ' ✅ (capped)' : ''}`
+          ? `\n💰 Bank balance: **${combinedBankBalance.toLocaleString()}** / ${combinedBankLimit.toLocaleString()} gold${combinedBankBalance >= combinedBankLimit ? ' ✅ (capped)' : ''}`
           : '';
 
         if (dmsPaused) {
@@ -341,29 +408,33 @@ export async function POST(req: NextRequest) {
       }
 
       // Post full inactivity report to guild log channel
-      if (logChannelId && botToken && inactiveReport.length > 0) {
+      if (logChannelId && botToken) {
         const kickList = inactiveReport.filter((m) => m.warning_level === 'kick').sort((a, b) => b.daysInactive - a.daysInactive);
         const warn2List = inactiveReport.filter((m) => m.warning_level === 'warn2').sort((a, b) => b.daysInactive - a.daysInactive);
         const warn1List = inactiveReport.filter((m) => m.warning_level === 'warn1').sort((a, b) => b.daysInactive - a.daysInactive);
 
         const gameDay = today.toISOString().split('T')[0];
-        const lines: string[] = [
-          `**${guildName} — Inactivity Report** · Checked game day: **${gameDay}** (11:50 UTC → next day 11:49 UTC)\n⚠️ Donations after **11:50 UTC today** count toward **tomorrow's** check, not this one.`,
-        ];
+        const lines: string[] = [];
         const fmtMember = (m: { ign: string; daysInactive: number; discord_id: string | null }) =>
           `• **${m.ign}**${!guildPingsDisabled && m.discord_id ? ` (<@${m.discord_id}>)` : ''} — ${m.daysInactive}d inactive`;
 
-        if (kickList.length) {
-          lines.push(`\n🚫 **Kick Notice** (${kickList.length})`);
-          kickList.forEach((m) => lines.push(fmtMember(m)));
-        }
-        if (warn2List.length) {
-          lines.push(`\n⚠️⚠️ **Final Warning** (${warn2List.length})`);
-          warn2List.forEach((m) => lines.push(fmtMember(m)));
-        }
-        if (warn1List.length) {
-          lines.push(`\n⚠️ **Warning** (${warn1List.length})`);
-          warn1List.forEach((m) => lines.push(fmtMember(m)));
+        if (inactiveReport.length === 0) {
+          lines.push(`**${guildName} — Inactivity Report** · Checked game day: **${gameDay}** (11:50 UTC → next day 11:49 UTC)\n✅ **All members active — no warnings issued!**`);
+        } else {
+          lines.push(`**${guildName} — Inactivity Report** · Checked game day: **${gameDay}** (11:50 UTC → next day 11:49 UTC)\n⚠️ Donations after **11:50 UTC today** count toward **tomorrow's** check, not this one.`);
+
+          if (kickList.length) {
+            lines.push(`\n🚫 **Kick Notice** (${kickList.length})`);
+            kickList.forEach((m) => lines.push(fmtMember(m)));
+          }
+          if (warn2List.length) {
+            lines.push(`\n⚠️⚠️ **Final Warning** (${warn2List.length})`);
+            warn2List.forEach((m) => lines.push(fmtMember(m)));
+          }
+          if (warn1List.length) {
+            lines.push(`\n⚠️ **Warning** (${warn1List.length})`);
+            warn1List.forEach((m) => lines.push(fmtMember(m)));
+          }
         }
 
         // Bank balance section — all active members with non-zero balance (no pings ever)

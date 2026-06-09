@@ -235,6 +235,11 @@ export async function processActivityEvents(
         donationRows.push({ item: d.item, qty: d.quantity, price, total });
       }
 
+      const zeroPriceItems = donationRows.filter(r => r.price === 0 && r.qty > 0).map(r => r.item);
+      if (zeroPriceItems.length > 0) {
+        console.warn(`[activity-processor] Zero-price items for ${charName} on ${date}: ${zeroPriceItems.join(', ')}`);
+      }
+
       let depositGold = 0;
       const depositRows: Array<{ item: string; qty: number; price: number; total: number; valid: boolean }> = [];
 
