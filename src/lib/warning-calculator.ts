@@ -86,3 +86,38 @@ export function getISOWeekKey(dateStr: string): string {
   const weekNum = Math.ceil((thursday.getTime() - jan4Monday.getTime()) / 604800000) + 1;
   return `${year}-W${String(weekNum).padStart(2, '0')}`;
 }
+
+/** Get Monday date string (YYYY-MM-DD) for an ISO week key. */
+export function getWeekStart(weekKey: string): string {
+  const [yearStr, weekStr] = weekKey.split('-W');
+  const year = parseInt(yearStr);
+  const week = parseInt(weekStr);
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const dayOfWeek = jan4.getUTCDay() || 7;
+  const monday1 = new Date(jan4);
+  monday1.setUTCDate(jan4.getUTCDate() - dayOfWeek + 1);
+  const targetMonday = new Date(monday1);
+  targetMonday.setUTCDate(monday1.getUTCDate() + (week - 1) * 7);
+  return targetMonday.toISOString().split('T')[0];
+}
+
+/** Get Sunday date string (YYYY-MM-DD) for an ISO week key. */
+export function getWeekSunday(weekKey: string): string {
+  const monday = getWeekStart(weekKey);
+  const d = new Date(monday + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + 6);
+  return d.toISOString().split('T')[0];
+}
+
+/** All ISO week keys from startWeek to endWeek inclusive (chronological order). */
+export function getWeekKeyRange(startWeek: string, endWeek: string): string[] {
+  const result: string[] = [];
+  const startDate = new Date(getWeekStart(startWeek) + 'T00:00:00Z');
+  const endDate = new Date(getWeekStart(endWeek) + 'T00:00:00Z');
+  const cur = new Date(startDate);
+  while (cur <= endDate) {
+    result.push(getISOWeekKey(cur.toISOString().split('T')[0]));
+    cur.setUTCDate(cur.getUTCDate() + 7);
+  }
+  return result;
+}

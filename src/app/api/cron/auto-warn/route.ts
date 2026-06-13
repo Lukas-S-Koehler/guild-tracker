@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 import { sendDirectMessage, postToChannel } from '@/lib/discord-api';
-import { getWarningInfo, findLastMetWeek, getISOWeekKey, RequirementPeriod } from '@/lib/warning-calculator';
+import { getWarningInfo, getEffectiveDaysInactive, findLastMetWeek, getISOWeekKey, getWeekSunday, getWeekKeyRange, RequirementPeriod } from '@/lib/warning-calculator';
 
 // POST /api/cron/auto-warn — auto-warn inactive members
 // Accepts either CRON_SECRET (all guilds) or officer session (single guild via x-guild-id)
@@ -146,10 +146,11 @@ export async function POST(req: NextRequest) {
 
       // Build last-activity map per member
       const lastActivityMap = new Map<string, string>();
+      // Hoisted so bank walk code can reuse it after lastActivityMap is built
+      const weeklyMap = new Map<string, Map<string, number>>(); // member_id → week → total
 
       if (period === 'weekly') {
         // Group deposits_gold by member + ISO week
-        const weeklyMap = new Map<string, Map<string, number>>(); // member_id → week → total
         for (const log of logs ?? []) {
           const weekKey = getISOWeekKey(log.log_date);
           const memberWeeks = weeklyMap.get(log.member_id) ?? new Map<string, number>();
@@ -166,9 +167,7 @@ export async function POST(req: NextRequest) {
         });
       } else {
         for (const log of logs ?? []) {
-          const goldField = depositsOnly ? (log.deposits_gold ?? 0) : null;
-          const counts = depositsOnly ? goldField !== null : log.met_requirement;
-          if (counts && !lastActivityMap.has(log.member_id)) {
+          if (log.met_requirement && !lastActivityMap.has(log.member_id)) {
             lastActivityMap.set(log.member_id, log.log_date);
           }
         }
@@ -188,38 +187,81 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Individual bank walk: inactive days covered by personal bank count as met.
-      if (period === 'daily' && overflowEnabled) {
-        for (const member of members) {
-          const memberId = member.id;
-          const lastDate = lastActivityMap.get(memberId);
-          if (!lastDate) continue;
+      // Individual bank walk: inactive periods covered by personal bank count as met.
+      if (overflowEnabled) {
+        if (period === 'daily') {
+          for (const member of members) {
+            const memberId = member.id;
+            const lastDate = lastActivityMap.get(memberId);
+            if (!lastDate) continue;
 
-          const memberDays = bankByDate.get(memberId) ?? new Map<string, { balance: number; met: boolean }>();
-          let balance = memberDays.get(lastDate)?.balance ?? 0;
-          if (balance === 0) continue;
+            const memberDays = bankByDate.get(memberId) ?? new Map<string, { balance: number; met: boolean }>();
+            let balance = memberDays.get(lastDate)?.balance ?? 0;
+            if (balance === 0) continue;
 
-          const startMs = new Date(lastDate + 'T00:00:00Z').getTime() + 86400000;
-          const endMs = today.getTime();
+            const startMs = new Date(lastDate + 'T00:00:00Z').getTime() + 86400000;
+            const endMs = today.getTime();
 
-          for (let ms = startMs; ms <= endMs && balance > 0; ms += 86400000) {
-            const dateStr = new Date(ms).toISOString().split('T')[0];
-            const dayEntry = memberDays.get(dateStr);
-            if (dayEntry) {
-              balance = dayEntry.balance;
-            } else if (balance >= donationReq) {
-              const existing = lastActivityMap.get(memberId);
-              if (!existing || dateStr > existing) lastActivityMap.set(memberId, dateStr);
-              balance = balance - donationReq;
-            } else {
-              balance = 0;
+            for (let ms = startMs; ms <= endMs && balance > 0; ms += 86400000) {
+              const dateStr = new Date(ms).toISOString().split('T')[0];
+              const dayEntry = memberDays.get(dateStr);
+              if (dayEntry) {
+                balance = dayEntry.balance;
+              } else if (balance >= donationReq) {
+                const existing = lastActivityMap.get(memberId);
+                if (!existing || dateStr > existing) lastActivityMap.set(memberId, dateStr);
+                balance = balance - donationReq;
+              } else {
+                balance = 0;
+              }
+            }
+          }
+        } else {
+          // Weekly: simulate bank from weekly totals and walk weeks after last met week
+          const currentWeekKey = getISOWeekKey(todayStr);
+          for (const member of members) {
+            const memberId = member.id;
+            const memberWeeks = weeklyMap.get(memberId);
+            if (!memberWeeks || memberWeeks.size === 0) continue;
+
+            const sortedWeeks = Array.from(memberWeeks.keys()).sort();
+            const firstWeek = sortedWeeks[0]!;
+            const lastLogWeek = sortedWeeks[sortedWeeks.length - 1]!;
+            const allHistoryWeeks = getWeekKeyRange(firstWeek, currentWeekKey);
+
+            // Simulate running balance through all historical weeks
+            let balance = 0;
+            for (const wk of allHistoryWeeks) {
+              const total = memberWeeks.get(wk) ?? 0;
+              if (total >= weeklyReq) {
+                balance = Math.min(balance + (total - weeklyReq), overflowLimit);
+              } else {
+                balance = Math.max(0, balance - (weeklyReq - total));
+              }
+            }
+            if (balance <= 0) continue;
+
+            // Walk weeks from lastLogWeek onward covering shortfalls
+            const futureWeeks = getWeekKeyRange(lastLogWeek, currentWeekKey).slice(1);
+            for (const wk of futureWeeks) {
+              const weekTotal = memberWeeks.get(wk) ?? 0;
+              const deficit = weeklyReq - weekTotal;
+              const bankUsed = Math.min(deficit, balance);
+              if (weekTotal + bankUsed >= weeklyReq) {
+                balance = Math.max(0, balance - bankUsed);
+                const sunday = getWeekSunday(wk);
+                const existing = lastActivityMap.get(memberId);
+                if (!existing || sunday > existing) lastActivityMap.set(memberId, sunday);
+              } else {
+                break;
+              }
             }
           }
         }
       }
 
       // Shared bank walk: linked alts pool their bank. Most-inactive alt covered first.
-      if (period === 'daily' && overflowEnabled) {
+      if (overflowEnabled) {
         const processedGroups = new Set<string>();
         for (const member of members) {
           if (processedGroups.has(member.id)) continue;
@@ -231,66 +273,110 @@ export async function POST(req: NextRequest) {
 
           const combinedLimit = overflowLimit * groupIds.length;
 
-          // Walk start = earliest lastActivityMap date in the group
-          const groupLastDates = groupIds.map(id => lastActivityMap.get(id)).filter(Boolean) as string[];
-          if (groupLastDates.length === 0) continue;
-          const walkStart = groupLastDates.reduce((a, b) => (a < b ? a : b));
+          if (period === 'daily') {
+            // Walk start = earliest lastActivityMap date in the group
+            const groupLastDates = groupIds.map(id => lastActivityMap.get(id)).filter(Boolean) as string[];
+            if (groupLastDates.length === 0) continue;
+            const walkStart = groupLastDates.reduce((a, b) => (a < b ? a : b));
 
-          // Starting shared bank = sum of each member's bank_balance_after at walkStart (drain gap days)
-          let sharedBank = 0;
-          for (const id of groupIds) {
-            const memberLogs = bankByDate.get(id);
-            if (!memberLogs) continue;
-            let latestBefore: string | null = null;
-            for (const [date] of Array.from(memberLogs.entries())) {
-              if (date <= walkStart && (latestBefore === null || date > latestBefore)) latestBefore = date;
-            }
-            if (latestBefore) {
-              let bal = memberLogs.get(latestBefore)!.balance;
-              const gapDays = Math.round(
-                (new Date(walkStart + 'T00:00:00Z').getTime() - new Date(latestBefore + 'T00:00:00Z').getTime()) / 86400000
-              );
-              for (let i = 0; i < gapDays && bal > 0; i++) bal = Math.max(0, bal - donationReq);
-              sharedBank += Math.min(bal, overflowLimit);
-            }
-          }
-          sharedBank = Math.min(sharedBank, combinedLimit);
-
-          const walkStartMs = new Date(walkStart + 'T00:00:00Z').getTime() + 86400000;
-          const endMs = today.getTime();
-
-          for (let ms = walkStartMs; ms <= endMs; ms += 86400000) {
-            const dateStr = new Date(ms).toISOString().split('T')[0];
-            let dayExcess = 0;
-            const shortfalls: Array<{ id: string; amount: number }> = [];
-
+            // Starting shared bank = sum of each member's bank_balance_after at walkStart
+            let sharedBank = 0;
             for (const id of groupIds) {
-              // Skip if already covered by own activity or individual bank
-              const alreadyCovered = (lastActivityMap.get(id) ?? '') >= dateStr;
-              const entry = rawLogsForGroup.get(id)?.get(dateStr);
-              const raw = entry ? (depositsOnly ? entry.deposits : (entry.gold + entry.deposits)) : 0;
-
-              if (raw >= donationReq) {
-                dayExcess += raw - donationReq;
-              } else if (!alreadyCovered) {
-                shortfalls.push({ id, amount: donationReq - raw });
+              const memberLogs = bankByDate.get(id);
+              if (!memberLogs) continue;
+              let latestBefore: string | null = null;
+              for (const [date] of Array.from(memberLogs.entries())) {
+                if (date <= walkStart && (latestBefore === null || date > latestBefore)) latestBefore = date;
+              }
+              if (latestBefore) {
+                let bal = memberLogs.get(latestBefore)!.balance;
+                const gapDays = Math.round(
+                  (new Date(walkStart + 'T00:00:00Z').getTime() - new Date(latestBefore + 'T00:00:00Z').getTime()) / 86400000
+                );
+                for (let i = 0; i < gapDays && bal > 0; i++) bal = Math.max(0, bal - donationReq);
+                sharedBank += Math.min(bal, overflowLimit);
               }
             }
+            sharedBank = Math.min(sharedBank, combinedLimit);
 
-            sharedBank = Math.min(sharedBank + dayExcess, combinedLimit);
+            const walkStartMs = new Date(walkStart + 'T00:00:00Z').getTime() + 86400000;
+            const endMs = today.getTime();
 
-            // Fill most-inactive alt first
-            shortfalls.sort((a, b) => {
-              const la = lastActivityMap.get(a.id) ?? '';
-              const lb = lastActivityMap.get(b.id) ?? '';
-              return la < lb ? -1 : la > lb ? 1 : 0;
-            });
+            for (let ms = walkStartMs; ms <= endMs; ms += 86400000) {
+              const dateStr = new Date(ms).toISOString().split('T')[0];
+              let dayExcess = 0;
+              const shortfalls: Array<{ id: string; amount: number }> = [];
 
-            for (const { id, amount } of shortfalls) {
-              if (sharedBank >= amount) {
-                sharedBank -= amount;
-                const existing = lastActivityMap.get(id);
-                if (!existing || dateStr > existing) lastActivityMap.set(id, dateStr);
+              for (const id of groupIds) {
+                const alreadyCovered = (lastActivityMap.get(id) ?? '') >= dateStr;
+                const entry = rawLogsForGroup.get(id)?.get(dateStr);
+                const raw = entry ? (depositsOnly ? entry.deposits : (entry.gold + entry.deposits)) : 0;
+                if (raw >= donationReq) {
+                  dayExcess += raw - donationReq;
+                } else if (!alreadyCovered) {
+                  shortfalls.push({ id, amount: donationReq - raw });
+                }
+              }
+
+              sharedBank = Math.min(sharedBank + dayExcess, combinedLimit);
+              shortfalls.sort((a, b) => {
+                const la = lastActivityMap.get(a.id) ?? '';
+                const lb = lastActivityMap.get(b.id) ?? '';
+                return la < lb ? -1 : la > lb ? 1 : 0;
+              });
+              for (const { id, amount } of shortfalls) {
+                if (sharedBank >= amount) {
+                  sharedBank -= amount;
+                  const existing = lastActivityMap.get(id);
+                  if (!existing || dateStr > existing) lastActivityMap.set(id, dateStr);
+                }
+              }
+            }
+          } else {
+            // Weekly shared bank walk
+            const allGroupWeekKeys = new Set<string>();
+            for (const id of groupIds) {
+              const mw = weeklyMap.get(id);
+              if (mw) Array.from(mw.keys()).forEach(wk => allGroupWeekKeys.add(wk));
+            }
+            if (allGroupWeekKeys.size === 0) continue;
+
+            const currentWeekKey = getISOWeekKey(todayStr);
+            const sortedGroupWeeks = Array.from(allGroupWeekKeys).sort();
+            const allWeeks = getWeekKeyRange(sortedGroupWeeks[0]!, currentWeekKey);
+
+            let sharedBank = 0;
+
+            for (const wk of allWeeks) {
+              let weekExcess = 0;
+              const shortfalls: Array<{ id: string; amount: number }> = [];
+
+              for (const id of groupIds) {
+                const lastDateForId = lastActivityMap.get(id) ?? '';
+                const lastWeekForId = lastDateForId ? getISOWeekKey(lastDateForId) : '';
+                const alreadyCovered = lastWeekForId >= wk;
+                const weekTotal = weeklyMap.get(id)?.get(wk) ?? 0;
+
+                if (weekTotal >= weeklyReq) {
+                  weekExcess += weekTotal - weeklyReq;
+                } else if (!alreadyCovered) {
+                  shortfalls.push({ id, amount: weeklyReq - weekTotal });
+                }
+              }
+
+              sharedBank = Math.min(sharedBank + weekExcess, combinedLimit);
+              shortfalls.sort((a, b) => {
+                const la = lastActivityMap.get(a.id) ?? '';
+                const lb = lastActivityMap.get(b.id) ?? '';
+                return la < lb ? -1 : la > lb ? 1 : 0;
+              });
+              for (const { id, amount } of shortfalls) {
+                if (sharedBank >= amount) {
+                  sharedBank -= amount;
+                  const sunday = getWeekSunday(wk);
+                  const existing = lastActivityMap.get(id);
+                  if (!existing || sunday > existing) lastActivityMap.set(id, sunday);
+                }
               }
             }
           }
@@ -319,7 +405,6 @@ export async function POST(req: NextRequest) {
       for (const member of members) {
         const lastDate = lastActivityMap.get(member.id);
 
-
         let daysSinceJoin = 999;
         if (member.first_seen) {
           daysSinceJoin = Math.max(0, Math.floor((today.getTime() - new Date(member.first_seen).getTime()) / 86400000));
@@ -344,8 +429,11 @@ export async function POST(req: NextRequest) {
         const ADMIN_HASHED_IDS = new Set(['6aDoyRnLyEey9LpV5AGX', 'AB1E9poQq7VOKYnakeJj', 'o31P7kZL6Z31BLveGxXO']);
         if (member.hashed_id && ADMIN_HASHED_IDS.has(member.hashed_id)) continue;
 
+        // Use effective days (grace-adjusted) for display
+        const effectiveDays = getEffectiveDaysInactive(daysInactive, period);
+
         // Add to full inactivity report (all inactive, regardless of warn status)
-        inactiveReport.push({ ign: member.ign, daysInactive, warning_level, discord_id: member.discord_id ?? null });
+        inactiveReport.push({ ign: member.ign, daysInactive: effectiveDays, warning_level, discord_id: member.discord_id ?? null });
 
         // Skip only if warned at this exact level in last 24h (prevent duplicates, allow escalation)
         if (recentlyWarnedSet.has(`${member.id}:${warning_level}`)) {
@@ -370,7 +458,9 @@ export async function POST(req: NextRequest) {
           dmError = 'DMs paused (admin setting)';
           noDiscord++;
         } else if (member.discord_id && botToken) {
-          const dmMsg = `${levelLabel}\nYour character **${member.ign}** in **${guildName}** has been flagged for inactivity (${daysInactive} days inactive).\nPlease ensure you meet the activity requirements to remain in the guild.${bankLine}\n📅 Each game day runs **11:50 UTC to 11:49 UTC** the following day. The daily check runs shortly after — donations made after **11:50 UTC today** count toward tomorrow's check, not today's.`;
+          const dmMsg = period === 'weekly'
+            ? `${levelLabel}\nYour character **${member.ign}** in **${guildName}** has been flagged for inactivity (${effectiveDays} effective days inactive, weekly req: **${weeklyReq.toLocaleString()}g**).\nPlease ensure you meet the weekly donation requirement to remain in the guild.${bankLine}\n📅 Weekly requirement resets each Monday at 11:50 UTC. Bank balance covers missed weeks automatically.`
+            : `${levelLabel}\nYour character **${member.ign}** in **${guildName}** has been flagged for inactivity (${effectiveDays} days inactive).\nPlease ensure you meet the activity requirements to remain in the guild.${bankLine}\n📅 Each game day runs **11:50 UTC to 11:49 UTC** the following day. The daily check runs shortly after — donations made after **11:50 UTC today** count toward tomorrow's check, not today's.`;
           const result = await sendDirectMessage(member.discord_id, dmMsg);
           dmSent = result.ok;
           dmError = result.error ?? null;
@@ -384,7 +474,7 @@ export async function POST(req: NextRequest) {
           member_id: member.id,
           guild_id: guildId,
           warning_level,
-          reason: `Auto-warn: ${daysInactive} days inactive`,
+          reason: `Auto-warn: ${effectiveDays}d inactive`,
           is_auto: true,
           discord_dm_sent: dmSent,
           discord_dm_error: dmError,
@@ -413,15 +503,30 @@ export async function POST(req: NextRequest) {
         const warn2List = inactiveReport.filter((m) => m.warning_level === 'warn2').sort((a, b) => b.daysInactive - a.daysInactive);
         const warn1List = inactiveReport.filter((m) => m.warning_level === 'warn1').sort((a, b) => b.daysInactive - a.daysInactive);
 
-        const gameDay = today.toISOString().split('T')[0];
         const lines: string[] = [];
         const fmtMember = (m: { ign: string; daysInactive: number; discord_id: string | null }) =>
           `• **${m.ign}**${!guildPingsDisabled && m.discord_id ? ` (<@${m.discord_id}>)` : ''} — ${m.daysInactive}d inactive`;
 
-        if (inactiveReport.length === 0) {
-          lines.push(`**${guildName} — Inactivity Report** · Checked game day: **${gameDay}** (11:50 UTC → next day 11:49 UTC)\n✅ **All members active — no warnings issued!**`);
+        const reqLabel = period === 'weekly'
+          ? `Weekly req: **${weeklyReq.toLocaleString()}g** · Daily req: ${donationReq.toLocaleString()}g`
+          : `Daily req: **${donationReq.toLocaleString()}g**`;
+
+        let headerLine: string;
+        let warningLine: string;
+        if (period === 'weekly') {
+          const checkedWeek = getISOWeekKey(today.toISOString().split('T')[0]);
+          headerLine = `**${guildName} — Inactivity Report** · Checked week: **${checkedWeek}** · ${reqLabel}`;
+          warningLine = `⚠️ Weekly req resets each **Monday 11:50 UTC**. Bank covers missed weeks automatically.`;
         } else {
-          lines.push(`**${guildName} — Inactivity Report** · Checked game day: **${gameDay}** (11:50 UTC → next day 11:49 UTC)\n⚠️ Donations after **11:50 UTC today** count toward **tomorrow's** check, not this one.`);
+          const gameDay = today.toISOString().split('T')[0];
+          headerLine = `**${guildName} — Inactivity Report** · Checked game day: **${gameDay}** (11:50 UTC → next day 11:49 UTC) · ${reqLabel}`;
+          warningLine = `⚠️ Donations after **11:50 UTC today** count toward **tomorrow's** check, not this one.`;
+        }
+
+        if (inactiveReport.length === 0) {
+          lines.push(`${headerLine}\n✅ **All members active — no warnings issued!**`);
+        } else {
+          lines.push(`${headerLine}\n${warningLine}`);
 
           if (kickList.length) {
             lines.push(`\n🚫 **Kick Notice** (${kickList.length})`);

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { verifyAuthOrPublic, isErrorResponse } from '@/lib/auth-helpers';
-import { getWarningInfo, findLastMetWeek, getISOWeekKey, RequirementPeriod } from '@/lib/warning-calculator';
+import { getWarningInfo, getEffectiveDaysInactive, findLastMetWeek, getISOWeekKey, getWeekStart, getWeekSunday, getWeekKeyRange, RequirementPeriod } from '@/lib/warning-calculator';
 
 export interface OverviewPeriod {
   gold_donated: number;
@@ -68,18 +68,6 @@ function getColumnKeys(period: RequirementPeriod, todayStr: string): string[] {
   }
 }
 
-function getWeekStart(weekKey: string): string {
-  const [yearStr, weekStr] = weekKey.split('-W');
-  const year = parseInt(yearStr);
-  const week = parseInt(weekStr);
-  const jan4 = new Date(Date.UTC(year, 0, 4));
-  const dayOfWeek = jan4.getUTCDay() || 7;
-  const monday1 = new Date(jan4);
-  monday1.setUTCDate(jan4.getUTCDate() - dayOfWeek + 1);
-  const targetMonday = new Date(monday1);
-  targetMonday.setUTCDate(monday1.getUTCDate() + (week - 1) * 7);
-  return targetMonday.toISOString().split('T')[0];
-}
 
 function cellStatus(gold: number, met: boolean): 'green' | 'yellow' | 'red' {
   if (met) return 'green';
@@ -331,6 +319,7 @@ export async function GET(req: NextRequest) {
   }
 
   // Compute live bank balance: latest log's bank_balance_after drained to today.
+  // For weekly guilds this query is still needed for the daily inferredBankMap fallback path.
   const { data: bankLogRows } = await supabase
     .from('daily_logs')
     .select('member_id, log_date, bank_balance_after')
@@ -346,25 +335,26 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Daily bank balance (overridden for weekly below)
   const bankBalanceMap = new Map<string, number>();
-  for (const memberId of memberIds) {
-    const latest = latestBankLog.get(memberId);
-    if (!latest || latest.bank_balance_after === 0) {
-      bankBalanceMap.set(memberId, 0);
-      continue;
+  if (period === 'daily') {
+    for (const memberId of memberIds) {
+      const latest = latestBankLog.get(memberId);
+      if (!latest || latest.bank_balance_after === 0) { bankBalanceMap.set(memberId, 0); continue; }
+      const daysSinceLog = Math.round(
+        (new Date(todayStr + 'T00:00:00Z').getTime() - new Date(latest.log_date + 'T00:00:00Z').getTime()) / 86400000
+      );
+      let balance = latest.bank_balance_after;
+      for (let i = 0; i < daysSinceLog && balance > 0; i++) balance = Math.max(0, balance - donationReq);
+      bankBalanceMap.set(memberId, balance);
     }
-    const daysSinceLog = Math.round(
-      (new Date(todayStr + 'T00:00:00Z').getTime() - new Date(latest.log_date + 'T00:00:00Z').getTime()) / 86400000
-    );
-    let balance = latest.bank_balance_after;
-    for (let i = 0; i < daysSinceLog && balance > 0; i++) {
-      balance = Math.max(0, balance - donationReq);
-    }
-    bankBalanceMap.set(memberId, balance);
   }
 
   // Build inactivity map — own activity only, no cross-member inheritance
   const lastActivityMap = new Map<string, string>();
+  // weeklyMap is hoisted so bank simulation can reuse it after lastActivityMap is built
+  const weeklyMap = new Map<string, Map<string, number>>();
+
   if (period === 'weekly') {
     // Fetch all logs for weekly calculation (need more than just 7 weeks for inactivity)
     const { data: allLogs } = await supabase
@@ -376,7 +366,6 @@ export async function GET(req: NextRequest) {
       .order('log_date', { ascending: false })
       .limit(1000);
 
-    const weeklyMap = new Map<string, Map<string, number>>();
     for (const log of allLogs ?? []) {
       const goldVal = depositsOnly ? (log.deposits_gold ?? 0) : ((log.gold_donated ?? 0) + (log.deposits_gold ?? 0));
       const wk = getISOWeekKey(log.log_date);
@@ -390,6 +379,32 @@ export async function GET(req: NextRequest) {
         lastActivityMap.set(memberId, lastMetSunday.toISOString().split('T')[0]);
       }
     });
+
+    // Weekly bank simulation: compute balance from weekly totals (daily bank_balance_after
+    // values are computed against the daily 5k req and are meaningless for weekly guilds).
+    if (overflowEnabled) {
+      const currentWeekKey = getISOWeekKey(todayStr);
+      weeklyMap.forEach((memberWeeks, memberId) => {
+        if (memberWeeks.size === 0) { bankBalanceMap.set(memberId, 0); return; }
+        const sortedWeeks = Array.from(memberWeeks.keys()).sort();
+        const allWeeks = getWeekKeyRange(sortedWeeks[0], currentWeekKey);
+        let balance = 0;
+        for (const wk of allWeeks) {
+          const total = memberWeeks.get(wk) ?? 0;
+          if (total >= weeklyReq) {
+            balance = Math.min(balance + (total - weeklyReq), overflowLimit);
+          } else {
+            balance = Math.max(0, balance - (weeklyReq - total));
+          }
+        }
+        bankBalanceMap.set(memberId, balance);
+      });
+      for (const memberId of memberIds) {
+        if (!bankBalanceMap.has(memberId)) bankBalanceMap.set(memberId, 0);
+      }
+    } else {
+      for (const memberId of memberIds) bankBalanceMap.set(memberId, 0);
+    }
   } else {
     const { data: metLogs } = await supabase
       .from('daily_logs')
@@ -407,7 +422,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Compute pre-window bank balances and inferred bank states for inactive days.
+  // Compute pre-window bank balances and inferred bank states for inactive periods.
   // Must happen before shared bank coverage so preWindowBalances can be passed in.
   const inferredBankMap = new Map<string, Map<string, { bank_used: number; met_requirement: boolean }>>();
   const preWindowBalances = new Map<string, number>(); // balance at start of columns[0]
@@ -464,13 +479,113 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Update lastActivityMap for inactive days covered by individual bank
+  // Weekly bank coverage: compute pre-window balances and per-column inferred coverage.
+  // Also replaces the aggregated daily bank_earned/bank_used in rawLogsMap with correct
+  // weekly-level values so cells show a single clean +/- instead of both.
+  if (period === 'weekly' && overflowEnabled) {
+    const currentWeekKey = getISOWeekKey(todayStr);
+
+    // Build a week-by-week balance timeline for each member (all weeks from first log → now)
+    const weeklyBankTimeline = new Map<string, Map<string, number>>(); // memberId → weekKey → balance after
+    weeklyMap.forEach((memberWeeks, memberId) => {
+      if (memberWeeks.size === 0) return;
+      const sortedWeeks = Array.from(memberWeeks.keys()).sort();
+      const allWeeks = getWeekKeyRange(sortedWeeks[0], currentWeekKey);
+      const timeline = new Map<string, number>();
+      let balance = 0;
+      for (const wk of allWeeks) {
+        const total = memberWeeks.get(wk) ?? 0;
+        if (total >= weeklyReq) {
+          balance = Math.min(balance + (total - weeklyReq), overflowLimit);
+        } else {
+          balance = Math.max(0, balance - (weeklyReq - total));
+        }
+        timeline.set(wk, balance);
+      }
+      weeklyBankTimeline.set(memberId, timeline);
+    });
+
+    for (const memberId of memberIds) {
+      const timeline = weeklyBankTimeline.get(memberId);
+
+      // preWindowBalance = balance at end of the latest week before columns[0]
+      let preBalance = 0;
+      if (timeline) {
+        for (const [wk, bal] of Array.from(timeline.entries())) {
+          if (wk < columns[0]) preBalance = bal;
+        }
+      }
+      preWindowBalances.set(memberId, preBalance);
+
+      // Walk display columns with a running balance derived from preWindowBalance.
+      // Replace daily-aggregated bank_earned/bank_used in rawLogsMap with weekly values.
+      const memberWeekData = rawLogsMap.get(memberId) ?? new Map<string, RawEntry>();
+      const colInferred = new Map<string, { bank_used: number; met_requirement: boolean }>();
+      let runningBalance = preBalance;
+
+      for (const col of columns) {
+        const entry = memberWeekData.get(col);
+        const total = entry ? (depositsOnly ? entry.deposits : (entry.gold + entry.deposits)) : 0;
+
+        if (entry) {
+          if (total >= weeklyReq) {
+            const earned = Math.min(total - weeklyReq, overflowLimit - runningBalance);
+            runningBalance = Math.min(runningBalance + earned, overflowLimit);
+            entry.bank_earned = earned;
+            entry.bank_used = 0;
+          } else if (runningBalance > 0) {
+            const deficit = weeklyReq - total;
+            const bankUsed = Math.min(deficit, runningBalance);
+            runningBalance = Math.max(0, runningBalance - bankUsed);
+            entry.bank_used = bankUsed;
+            entry.bank_earned = 0;
+            if (total + bankUsed >= weeklyReq) entry.met = true;
+          } else {
+            entry.bank_earned = 0;
+            entry.bank_used = 0;
+          }
+          memberWeekData.set(col, entry);
+        } else if (runningBalance > 0) {
+          const bank_used = Math.min(weeklyReq, runningBalance);
+          colInferred.set(col, { bank_used, met_requirement: runningBalance >= weeklyReq });
+          runningBalance = Math.max(0, runningBalance - weeklyReq);
+        }
+      }
+
+      if (memberWeekData.size > 0) rawLogsMap.set(memberId, memberWeekData);
+      if (colInferred.size > 0) inferredBankMap.set(memberId, colInferred);
+    }
+  }
+
+  // Update lastActivityMap for periods covered by individual bank
   if (period === 'daily') {
     for (const [memberId, colMap] of Array.from(inferredBankMap)) {
       for (const [col, inferred] of Array.from(colMap)) {
         if (inferred.met_requirement) {
           const existing = lastActivityMap.get(memberId);
           if (!existing || col > existing) lastActivityMap.set(memberId, col);
+        }
+      }
+    }
+  }
+  if (period === 'weekly') {
+    // Inferred bank coverage (empty weeks)
+    for (const [memberId, colMap] of Array.from(inferredBankMap)) {
+      for (const [col, inferred] of Array.from(colMap)) {
+        if (inferred.met_requirement) {
+          const sunday = getWeekSunday(col);
+          const existing = lastActivityMap.get(memberId);
+          if (!existing || sunday > existing) lastActivityMap.set(memberId, sunday);
+        }
+      }
+    }
+    // Bank-augmented entries (weeks with activity where bank covered the shortfall)
+    for (const [memberId, weekMap] of Array.from(rawLogsMap)) {
+      for (const [col, entry] of Array.from(weekMap)) {
+        if (columns.includes(col) && entry.met && entry.bank_used > 0) {
+          const sunday = getWeekSunday(col);
+          const existing = lastActivityMap.get(memberId);
+          if (!existing || sunday > existing) lastActivityMap.set(memberId, sunday);
         }
       }
     }
@@ -503,11 +618,12 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Update lastActivityMap for shared-bank-covered days
+  // Update lastActivityMap for shared-bank-covered periods
+  // Weekly: use Sunday (end of covered week) so days_inactive is computed consistently
   for (const [memberId, coveredColsMap] of Array.from(sharedBankCoveredMap)) {
     let latestCovered: string | null = null;
     for (const col of Array.from(coveredColsMap.keys())) {
-      const colDate = period === 'weekly' ? getWeekStart(col) : col;
+      const colDate = period === 'weekly' ? getWeekSunday(col) : col;
       if (!latestCovered || colDate > latestCovered) latestCovered = colDate;
     }
     if (latestCovered) {
@@ -622,7 +738,7 @@ export async function GET(req: NextRequest) {
         avatar_url: member.avatar_url ?? null,
         discord_id: member.discord_id ?? null,
         first_seen: member.first_seen ?? null,
-        days_inactive: daysInactive,
+        days_inactive: getEffectiveDaysInactive(daysInactive, period),
         warning_level,
         recent_warning: recentWarningMap.get(member.id) ?? null,
         is_alt: isAlt,

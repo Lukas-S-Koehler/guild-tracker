@@ -502,7 +502,16 @@ function OverviewPageContent() {
         <div>
           <h1 className="text-2xl font-bold">🗓️ Guild Overview</h1>
           <div className="flex items-center gap-3">
-            <p className="text-muted-foreground">7-{period === 'weekly' ? 'week' : 'day'} activity overview for all members</p>
+            <p className="text-muted-foreground">
+            7-{period === 'weekly' ? 'week' : 'day'} activity overview for all members
+            {data && (
+              <span className="ml-2 text-xs font-medium text-amber-400/80">
+                {period === 'weekly'
+                  ? `· Weekly req: ${data.config.weekly_donation_requirement.toLocaleString()}g · Daily req: ${data.config.donation_requirement.toLocaleString()}g`
+                  : `· Daily req: ${data.config.donation_requirement.toLocaleString()}g`}
+              </span>
+            )}
+          </p>
             <CronCountdown />
           </div>
         </div>
