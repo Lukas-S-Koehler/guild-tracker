@@ -1,0 +1,28 @@
+name: Price Cache Sync
+
+on:
+  schedule:
+    # Runs at 11:18 UTC daily — 30 min before activity fetch
+    - cron: '18 11 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync-prices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Sync price cache
+        run: |
+          echo "Syncing market price cache..."
+          response=$(curl -s -L -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/price-cache-sync" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | head -n -1)
+          echo "Response: $body"
+          echo "HTTP status: $http_code"
+          if [ "$http_code" != "200" ]; then
+            echo "ERROR: Price cache sync failed with status $http_code"
+            exit 1
+          fi
