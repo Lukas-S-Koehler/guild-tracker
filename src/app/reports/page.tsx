@@ -20,6 +20,9 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [guildName, setGuildName] = useState('Guild');
   const [hasWebhook, setHasWebhook] = useState(false);
+  const [donationReq, setDonationReq] = useState<number>(5000);
+  const [weeklyReq, setWeeklyReq] = useState<number>(35000);
+  const [requirementPeriod, setRequirementPeriod] = useState<string>('daily');
 
   const [copied, setCopied] = useState(false);
   const [sending, setSending] = useState(false);
@@ -50,6 +53,9 @@ export default function ReportsPage() {
         setEntries(Array.isArray(reportData) ? reportData : []);
         if (configData.guild_name) setGuildName(configData.guild_name);
         setHasWebhook(!!(configData.settings?.discord_webhook_url));
+        setDonationReq(configData.donation_requirement ?? 5000);
+        setWeeklyReq(configData.settings?.weekly_donation_requirement ?? 35000);
+        setRequirementPeriod(configData.settings?.requirement_period ?? 'daily');
       } catch (error) {
         console.error('Failed to fetch report:', error);
         setEntries([]);
@@ -355,7 +361,11 @@ export default function ReportsPage() {
           <p className="font-medium mb-1">📋 Activity Requirement</p>
           <p>A member is considered active if they meet either requirement:</p>
           <ul className="list-disc list-inside mt-1 space-y-1">
-            <li>Donated 5,000+ gold in a day, OR</li>
+            <li>
+              {requirementPeriod === 'weekly'
+                ? `Donated ${weeklyReq.toLocaleString()}+ gold in a week, OR`
+                : `Donated ${donationReq.toLocaleString()}+ gold in a day, OR`}
+            </li>
             <li>Donated 50% or more of the daily challenge requirement</li>
           </ul>
         </div>

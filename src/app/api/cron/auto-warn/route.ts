@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
     const depositsOnly: boolean = settings?.deposits_only ?? false;
     const overflowEnabled: boolean = settings?.overflow_enabled ?? true;
     const overflowLimit: number = settings?.overflow_limit ?? 10000;
-    const donationReq: number = donation_requirement ?? 5000;
+    const donationReq: number = settings?.donation_requirement ?? donation_requirement ?? 5000;
 
     let warned = 0;
     let skipped = 0;
