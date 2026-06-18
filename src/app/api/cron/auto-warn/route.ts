@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
       // Fetch active members (excluding leaders/deputies)
       const { data: members } = await supabase
         .from('members')
-        .select('id, ign, position, discord_id, first_seen, hashed_id')
+        .select('id, ign, position, discord_id, first_seen, hashed_id, character_id')
         .eq('current_guild_id', guildId)
         .eq('is_active', true)
         .not('position', 'in', '("LEADER","DEPUTY")');
@@ -127,21 +127,49 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Fetch alt relationships for same-guild coverage
-      const { data: altLinks } = await supabase
-        .from('member_alts')
-        .select('member_id, alt_member_id')
-        .in('member_id', memberIds)
-        .not('alt_member_id', 'is', null);
+      // Fetch alt relationships — both directions to catch external-main pairs (mirrors overview logic)
+      const [{ data: mainInGuildLinks }, { data: altInGuildLinks }] = await Promise.all([
+        supabase.from('member_alts').select('member_id, alt_member_id')
+          .in('member_id', memberIds).not('alt_member_id', 'is', null),
+        supabase.from('member_alts').select('member_id, alt_member_id')
+          .in('alt_member_id', memberIds).not('alt_member_id', 'is', null),
+      ]);
 
       const altToMain = new Map<string, string>(); // alt_member_id → member_id
       const mainToAlts = new Map<string, string[]>(); // member_id → [alt_member_ids]
-      for (const link of altLinks ?? []) {
-        if (!link.alt_member_id) continue;
+
+      // Links where main is in guild
+      for (const link of mainInGuildLinks ?? []) {
+        if (!link.alt_member_id || !memberSet.has(link.alt_member_id)) continue;
         altToMain.set(link.alt_member_id, link.member_id);
         const arr = mainToAlts.get(link.member_id) ?? [];
         arr.push(link.alt_member_id);
         mainToAlts.set(link.member_id, arr);
+      }
+
+      // Links where main is external — group in-guild alts sharing the same external main
+      const memberCharIdMap = new Map(members.map(m => [m.id, (m as any).character_id ?? Infinity]));
+      const externalGroups = new Map<string, string[]>();
+      for (const link of altInGuildLinks ?? []) {
+        if (!link.alt_member_id || !memberSet.has(link.alt_member_id)) continue;
+        if (memberSet.has(link.member_id)) continue; // already handled by mainInGuildLinks
+        const arr = externalGroups.get(link.member_id) ?? [];
+        arr.push(link.alt_member_id);
+        externalGroups.set(link.member_id, arr);
+      }
+      for (const [, peerIds] of Array.from(externalGroups)) {
+        if (peerIds.length < 2) continue;
+        const sorted = [...peerIds].sort(
+          (a, b) => (memberCharIdMap.get(a) ?? Infinity) - (memberCharIdMap.get(b) ?? Infinity)
+        );
+        const effectiveMain = sorted[0]!;
+        for (const altId of sorted.slice(1)) {
+          if (altToMain.has(altId)) continue;
+          altToMain.set(altId, effectiveMain);
+          const arr = mainToAlts.get(effectiveMain) ?? [];
+          arr.push(altId);
+          mainToAlts.set(effectiveMain, arr);
+        }
       }
 
       // Build last-activity map per member
@@ -259,6 +287,9 @@ export async function POST(req: NextRequest) {
           }
         }
       }
+
+      // Snapshot before shared bank walk — used to detect who gets covered by shared bank
+      const preSharedBankMap = new Map(lastActivityMap);
 
       // Shared bank walk: linked alts pool their bank. Most-inactive alt covered first.
       if (overflowEnabled) {
@@ -401,6 +432,7 @@ export async function POST(req: NextRequest) {
 
       // Collect all inactive members for the full inactivity report
       const inactiveReport: Array<{ ign: string; daysInactive: number; warning_level: string; discord_id: string | null }> = [];
+      const sharedBankCovered: Array<{ ign: string; discord_id: string | null }> = [];
 
       for (const member of members) {
         const lastDate = lastActivityMap.get(member.id);
@@ -419,7 +451,28 @@ export async function POST(req: NextRequest) {
         }
 
         const { warning_level } = getWarningInfo(daysInactive, period);
-        if (warning_level === 'safe') continue;
+        if (warning_level === 'safe') {
+          // Check if they were inactive before shared bank coverage was applied
+          const ignLower = member.ign?.toLowerCase() ?? '';
+          if (member.ign && !ignLower.includes('raw activity') && !ignLower.includes('log')) {
+            const ADMIN_HASHED_IDS = new Set(['6aDoyRnLyEey9LpV5AGX', 'AB1E9poQq7VOKYnakeJj', 'o31P7kZL6Z31BLveGxXO']);
+            if (!member.hashed_id || !ADMIN_HASHED_IDS.has(member.hashed_id)) {
+              const preLastDate = preSharedBankMap.get(member.id);
+              let preDaysInactive: number;
+              if (!preLastDate) {
+                preDaysInactive = Math.min(daysSinceJoin, 999);
+              } else {
+                preDaysInactive = Math.max(0, Math.floor((today.getTime() - new Date(preLastDate + 'T00:00:00Z').getTime()) / 86400000));
+                preDaysInactive = Math.min(preDaysInactive, daysSinceJoin);
+              }
+              const { warning_level: preLevel } = getWarningInfo(preDaysInactive, period);
+              if (preLevel !== 'safe') {
+                sharedBankCovered.push({ ign: member.ign, discord_id: member.discord_id ?? null });
+              }
+            }
+          }
+          continue;
+        }
 
         // Filter junk accounts (same as reports page)
         const ignLower = member.ign?.toLowerCase() ?? '';
@@ -523,7 +576,7 @@ export async function POST(req: NextRequest) {
           warningLine = `⚠️ Donations after **11:50 UTC today** count toward **tomorrow's** check, not this one.`;
         }
 
-        if (inactiveReport.length === 0) {
+        if (inactiveReport.length === 0 && sharedBankCovered.length === 0) {
           lines.push(`${headerLine}\n✅ **All members active — no warnings issued!**`);
         } else {
           lines.push(`${headerLine}\n${warningLine}`);
@@ -539,6 +592,12 @@ export async function POST(req: NextRequest) {
           if (warn1List.length) {
             lines.push(`\n⚠️ **Warning** (${warn1List.length})`);
             warn1List.forEach((m) => lines.push(fmtMember(m)));
+          }
+          if (sharedBankCovered.length) {
+            lines.push(`\n🏦 **Bank Covered** (${sharedBankCovered.length}) — inactivity covered by shared alt bank`);
+            sharedBankCovered.forEach((m) => {
+              lines.push(`• **${m.ign}**${!guildPingsDisabled && m.discord_id ? ` (<@${m.discord_id}>)` : ''}`);
+            });
           }
         }
 
