@@ -432,7 +432,7 @@ export async function POST(req: NextRequest) {
 
       // Collect all inactive members for the full inactivity report
       const inactiveReport: Array<{ ign: string; daysInactive: number; warning_level: string; discord_id: string | null }> = [];
-      const sharedBankCovered: Array<{ ign: string; discord_id: string | null }> = [];
+      const sharedBankCovered: Array<{ ign: string }> = [];
 
       for (const member of members) {
         const lastDate = lastActivityMap.get(member.id);
@@ -467,7 +467,7 @@ export async function POST(req: NextRequest) {
               }
               const { warning_level: preLevel } = getWarningInfo(preDaysInactive, period);
               if (preLevel !== 'safe') {
-                sharedBankCovered.push({ ign: member.ign, discord_id: member.discord_id ?? null });
+                sharedBankCovered.push({ ign: member.ign });
               }
             }
           }
@@ -596,7 +596,7 @@ export async function POST(req: NextRequest) {
           if (sharedBankCovered.length) {
             lines.push(`\n🏦 **Bank Covered** (${sharedBankCovered.length}) — inactivity covered by shared alt bank`);
             sharedBankCovered.forEach((m) => {
-              lines.push(`• **${m.ign}**${!guildPingsDisabled && m.discord_id ? ` (<@${m.discord_id}>)` : ''}`);
+              lines.push(`• **${m.ign}**`);
             });
           }
         }
