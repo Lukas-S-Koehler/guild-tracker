@@ -22,6 +22,12 @@ function fmt(n: number): string {
   return n.toLocaleString('en-US');
 }
 
+interface DbBuilding {
+  id: string;
+  name: string;
+  resources: Array<{ item: string; quantity: number }>;
+}
+
 // POST /api/cron/guild-hall — update guild hall stockpile message per guild
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get('Authorization');
@@ -31,14 +37,17 @@ export async function POST(req: NextRequest) {
 
   const supabase = createAdminClient();
 
-  const { data: configs, error } = await supabase
-    .from('guild_config')
-    .select('guild_id, guild_name, api_key, settings')
-    .neq('api_key', 'placeholder');
+  const [{ data: configs, error: configsError }, { data: allBuildings, error: buildingsError }] = await Promise.all([
+    supabase.from('guild_config').select('guild_id, guild_name, api_key, settings').neq('api_key', 'placeholder'),
+    supabase.from('guild_buildings').select('id, name, resources'),
+  ]);
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
+  if (configsError) return NextResponse.json({ error: configsError.message }, { status: 500 });
+  if (buildingsError) return NextResponse.json({ error: buildingsError.message }, { status: 500 });
+
+  const buildingMap = new Map<string, DbBuilding>(
+    (allBuildings ?? []).map((b: DbBuilding) => [b.id, b])
+  );
 
   const results: { guild: string; status: string }[] = [];
   const now = new Date();
@@ -60,7 +69,7 @@ export async function POST(req: NextRequest) {
       const data = await api.getGuildHall(config.guild_id);
       const hall = data.guild_hall;
 
-      // Filter upgrades matching active_buildings
+      // Filter upgrades matching active_buildings (API key is e.g. RAID_PLANNER, DB id is raid_planner)
       const activeUpgrades = hall.upgrades.filter(u =>
         activeBuildings.includes(u.blueprint.key.toLowerCase())
       );
@@ -85,22 +94,35 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Donation Priority — aggregate requirements across all active upgrades
+      // Full needed quantities from DB (full construction/repair-from-0% cost per building)
       const itemNeeded = new Map<string, number>();
-      const itemCurrent = new Map<string, number>();
-
       for (const upgrade of activeUpgrades) {
-        const reqs = upgrade.repair?.blueprint.requirements ?? [];
-        for (const req of reqs) {
-          const name = req.item.name;
-          itemNeeded.set(name, (itemNeeded.get(name) ?? 0) + req.quantity.needed);
-          if (req.quantity.current !== null && !itemCurrent.has(name)) {
-            itemCurrent.set(name, req.quantity.current);
+        const buildingId = upgrade.blueprint.key.toLowerCase();
+        const dbBuilding = buildingMap.get(buildingId);
+        if (!dbBuilding) continue;
+        for (const resource of dbBuilding.resources) {
+          itemNeeded.set(resource.item, (itemNeeded.get(resource.item) ?? 0) + resource.quantity);
+        }
+      }
+
+      // Current stockpile quantities from API — scan all requirement arrays across all upgrades
+      const itemCurrent = new Map<string, number>();
+      for (const upgrade of hall.upgrades) {
+        const sources = [
+          upgrade.repair?.blueprint.requirements ?? [],
+          upgrade.available_upgrade?.requirements ?? [],
+          upgrade.blueprint.requirements,
+        ];
+        for (const reqs of sources) {
+          for (const req of reqs) {
+            if (req.quantity.current !== null && !itemCurrent.has(req.item.name)) {
+              itemCurrent.set(req.item.name, req.quantity.current);
+            }
           }
         }
       }
 
-      // Only show items where we have stockpile visibility
+      // Build priority list — only items we have stockpile visibility for
       const priorityItems = Array.from(itemNeeded.entries())
         .filter(([name]) => itemCurrent.has(name))
         .map(([name, needed]) => {
@@ -134,7 +156,7 @@ export async function POST(req: NextRequest) {
       if (donationLines.length > 0) {
         parts.push(
           `### 🤝 Donation Priority`,
-          `*Total resources needed to fully repair each active building.*`,
+          `*Total resources needed to construct or fully repair (from 0%) each building.*`,
           ``,
           ...donationLines,
           ``,
@@ -144,7 +166,7 @@ export async function POST(req: NextRequest) {
 
       const content = parts.join('\n');
 
-      // Post or edit
+      // Post or edit existing message
       let storedMessageId: string | undefined = settings.guild_hall_message_id;
       let posted = false;
 
@@ -153,7 +175,7 @@ export async function POST(req: NextRequest) {
         if (editResult.ok) {
           posted = true;
         } else {
-          // Message was deleted — fall through to re-post
+          // Message deleted — fall through to re-post
           storedMessageId = undefined;
         }
       }
@@ -164,9 +186,7 @@ export async function POST(req: NextRequest) {
           storedMessageId = postResult.messageId;
           await supabase
             .from('guild_config')
-            .update({
-              settings: { ...settings, guild_hall_message_id: storedMessageId },
-            })
+            .update({ settings: { ...settings, guild_hall_message_id: storedMessageId } })
             .eq('guild_id', config.guild_id);
           posted = true;
         } else {
