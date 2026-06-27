@@ -43,6 +43,7 @@ interface GuildSettings {
   deposits_only: boolean;
   discord_log_channel_id: string;
   discord_server_id: string;
+  guild_hall_channel_id: string;
   overflow_enabled: boolean;
   overflow_limit: number;
 }
@@ -66,6 +67,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
     deposits_only: false,
     discord_log_channel_id: '',
     discord_server_id: '',
+    guild_hall_channel_id: '',
     overflow_enabled: true,
     overflow_limit: 10000,
   });
@@ -98,6 +100,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             deposits_only: data.settings?.deposits_only ?? false,
             discord_log_channel_id: data.settings?.discord_log_channel_id ?? '',
             discord_server_id: data.settings?.discord_server_id ?? '',
+            guild_hall_channel_id: data.settings?.guild_hall_channel_id ?? '',
             overflow_enabled: data.settings?.overflow_enabled ?? true,
             overflow_limit: data.settings?.overflow_limit ?? 10000,
           });
@@ -138,6 +141,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             deposits_only: settings.deposits_only,
             discord_log_channel_id: settings.discord_log_channel_id || null,
             discord_server_id: settings.discord_server_id || null,
+            guild_hall_channel_id: settings.guild_hall_channel_id || null,
             overflow_enabled: settings.overflow_enabled,
             overflow_limit: settings.overflow_limit,
           },
@@ -357,6 +361,16 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             value={settings.discord_server_id}
             onChange={e => setSettings(prev => ({ ...prev, discord_server_id: e.target.value }))}
             placeholder="Server snowflake ID"
+            className="mt-1"
+          />
+        </div>
+
+        <div>
+          <Label className="text-xs text-muted-foreground">Guild Hall Stockpile Channel ID (daily hall message)</Label>
+          <Input
+            value={settings.guild_hall_channel_id}
+            onChange={e => setSettings(prev => ({ ...prev, guild_hall_channel_id: e.target.value }))}
+            placeholder="Channel snowflake ID"
             className="mt-1"
           />
         </div>

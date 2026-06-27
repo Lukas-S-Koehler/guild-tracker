@@ -73,6 +73,39 @@ export async function postToChannel(
   }
 }
 
+/** Post a message to a channel and return the new message ID. */
+export async function postToChannelReturnId(
+  channelId: string,
+  content: string
+): Promise<{ ok: boolean; messageId?: string; error?: string }> {
+  try {
+    const msg = await discordFetch<{ id: string }>(`/channels/${channelId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    });
+    return { ok: true, messageId: msg.id };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+/** Edit an existing message in a channel. */
+export async function editChannelMessage(
+  channelId: string,
+  messageId: string,
+  content: string
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await discordFetch(`/channels/${channelId}/messages/${messageId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ content }),
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 /** Verify Discord Interactions request signature (ed25519). */
 export async function verifyDiscordSignature(
   rawBody: string,

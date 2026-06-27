@@ -1,0 +1,28 @@
+name: Guild Hall Stockpile Update
+
+on:
+  schedule:
+    # Runs at 15:50 UTC daily — 2 hours after game day boundary (13:50 UTC)
+    - cron: '50 15 * * *'
+  workflow_dispatch:
+
+jobs:
+  update-hall:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Update guild hall stockpile messages
+        run: |
+          echo "Updating guild hall stockpile messages..."
+          response=$(curl -s -L -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/guild-hall" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | head -n -1)
+          echo "Response: $body"
+          echo "HTTP status: $http_code"
+          if [ "$http_code" != "200" ]; then
+            echo "ERROR: Guild hall update failed with status $http_code"
+            exit 1
+          fi

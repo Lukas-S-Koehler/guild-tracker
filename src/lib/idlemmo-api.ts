@@ -88,6 +88,54 @@ interface GuildMembersResponse {
   pagination?: { current_page: number; has_more: boolean; next_page: number | null };
 }
 
+export interface GuildHallRequirement {
+  item: { id: number; name: string; image_url: string | null };
+  quantity: { needed: number; current: number | null };
+}
+
+export interface GuildHallBlueprint {
+  id: number;
+  key: string;
+  name: string;
+  type: string;
+  level_needed: number | null;
+  is_available: boolean;
+  image_url: string | null;
+  description: string;
+  cost: number;
+  length: { raw: number; readable: string };
+  requirements: GuildHallRequirement[];
+  is_replacement: boolean;
+  replaces_blueprint_id: number | null;
+  benefits: string[];
+}
+
+export interface GuildHallUpgrade {
+  id: number;
+  status: { key: string; readable: string };
+  ends_at: string | null;
+  ends_in: number | null;
+  repair: {
+    condition_percentage: string;
+    can_repair: boolean;
+    blueprint: GuildHallBlueprint;
+  } | null;
+  available_upgrade: GuildHallBlueprint | null;
+  blueprint: GuildHallBlueprint;
+}
+
+export interface GuildHallResponse {
+  guild_hall: {
+    id: number | null;
+    name: string;
+    location: { id: number | null; name: string | null };
+    slots: { total: number | null; free: number | null; occupied: number | null; remaining: number };
+    upgrades: GuildHallUpgrade[];
+    blueprints: GuildHallBlueprint[];
+  };
+  endpoint_updates_at: string;
+}
+
 export class IdleMMOApi {
   private apiKey: string;
 
@@ -262,5 +310,9 @@ export class IdleMMOApi {
     }
 
     return allEvents;
+  }
+
+  async getGuildHall(guildId: string): Promise<GuildHallResponse> {
+    return this.fetch<GuildHallResponse>(`${IDLEMMO_BASE_URL}/v1/guild/${guildId}/hall`);
   }
 }
