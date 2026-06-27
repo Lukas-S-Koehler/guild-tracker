@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
-import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand } from '@/lib/discord-api';
+import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerActivityBankCommand, registerWhipCommand } from '@/lib/discord-api';
 
 const INTERACTION_TYPE_PING = 1;
 const INTERACTION_TYPE_COMMAND = 2;
@@ -17,6 +17,14 @@ export async function GET(req: NextRequest) {
   }
   if (searchParams.get('action') === 'register-map') {
     const result = await registerMapCommand();
+    return NextResponse.json(result);
+  }
+  if (searchParams.get('action') === 'register-activity-bank') {
+    const result = await registerActivityBankCommand();
+    return NextResponse.json(result);
+  }
+  if (searchParams.get('action') === 'register-whip') {
+    const result = await registerWhipCommand();
     return NextResponse.json(result);
   }
   return NextResponse.json({ ok: true });
@@ -50,6 +58,14 @@ export async function POST(req: NextRequest) {
 
   if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'map') {
     return handleMapCommand(interaction);
+  }
+
+  if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'activity-bank') {
+    return handleActivityBankCommand(interaction);
+  }
+
+  if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'whip') {
+    return handleWhipCommand(interaction);
   }
 
   return NextResponse.json({ type: 1 });
@@ -152,6 +168,86 @@ async function handleMapAutocomplete(interaction: {
   const choices = (members ?? []).map((m) => ({ name: m.ign, value: m.ign }));
 
   return NextResponse.json({ type: 8, data: { choices } });
+}
+
+async function handleActivityBankCommand(_interaction: unknown) {
+  const supabase = createAdminClient();
+
+  const { data: config } = await supabase
+    .from('guild_config')
+    .select('overflow_enabled, overflow_limit')
+    .limit(1)
+    .maybeSingle();
+
+  const overflowEnabled = config?.overflow_enabled ?? false;
+  const overflowLimit = config?.overflow_limit ?? 0;
+
+  const statusLine = overflowEnabled
+    ? `📊 **Status:** Enabled (cap: **${overflowLimit.toLocaleString()}** gold)`
+    : `📊 **Status:** Disabled`;
+
+  const msg = [
+    '🏦 **Activity Bank**',
+    '',
+    'When you donate **more** than the daily gold requirement, the surplus is saved in your personal activity bank (up to the cap). On any future day where you fall short, the bank automatically covers the gap — so you still count as having met the requirement.',
+    '',
+    '**How it works:**',
+    '• Surplus gold → deposited into your bank (up to the cap)',
+    '• Shortfall → withdrawn from your bank automatically',
+    '• If your bank runs dry and you miss the requirement, the day counts as inactive',
+    '',
+    statusLine,
+  ].join('\n');
+
+  return NextResponse.json({
+    type: 4,
+    data: { content: msg },
+  });
+}
+
+const WHIP_GIF = 'https://tenor.com/view/fairy-tail-take-that-whip-lucy-heartfilia-anime-gif-16035520';
+
+const WHIP_LINES = [
+  'feels the crack of justice! ⚡',
+  'has been disciplined! No mercy! 😤',
+  'got absolutely roasted! 🔥',
+  'is shaking in their boots right now! 💀',
+  'didn\'t see that coming! *SNAP* 💥',
+  'has been put in their place! 👑',
+  'owes you an apology! 😈',
+  'is learning a very important lesson today! 📚',
+];
+
+async function handleWhipCommand(interaction: {
+  member?: { user?: { id: string; username: string } };
+  data: { options?: Array<{ name: string; value: string }> };
+}) {
+  const options = interaction.data?.options ?? [];
+  const targetId = options.find((o) => o.name === 'target')?.value as string;
+  const callerId = interaction.member?.user?.id;
+
+  if (!targetId) {
+    return NextResponse.json({
+      type: 4,
+      data: { content: 'Who are you whipping?? Pick a target!', flags: 64 },
+    });
+  }
+
+  const line = WHIP_LINES[Math.floor(Math.random() * WHIP_LINES.length)];
+  const callerMention = callerId ? `<@${callerId}>` : 'Someone';
+
+  const content = [
+    `# 🔥 *C R A C K* 💥`,
+    ``,
+    `${callerMention} just whipped <@${targetId}> — and they ${line}`,
+    ``,
+    WHIP_GIF,
+  ].join('\n');
+
+  return NextResponse.json({
+    type: 4,
+    data: { content },
+  });
 }
 
 async function handleMapCommand(interaction: {

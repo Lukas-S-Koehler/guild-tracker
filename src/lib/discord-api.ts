@@ -176,6 +176,56 @@ export async function registerWarnCommand(): Promise<{ ok: boolean; error?: stri
   }
 }
 
+/** Register the /activity-bank slash command on the Discord application. Call once via admin. */
+export async function registerActivityBankCommand(): Promise<{ ok: boolean; error?: string }> {
+  const appId = process.env.DISCORD_APPLICATION_ID;
+  if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };
+
+  const command = {
+    name: 'activity-bank',
+    description: 'Explains how the activity bank (overflow bank) works',
+  };
+
+  try {
+    await discordFetch(`/applications/${appId}/commands`, {
+      method: 'POST',
+      body: JSON.stringify(command),
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+/** Register the /whip slash command on the Discord application. Call once via admin. */
+export async function registerWhipCommand(): Promise<{ ok: boolean; error?: string }> {
+  const appId = process.env.DISCORD_APPLICATION_ID;
+  if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };
+
+  const command = {
+    name: 'whip',
+    description: '🔥 Whip a guild member into shape',
+    options: [
+      {
+        name: 'target',
+        type: 6, // USER type
+        description: 'The poor soul getting whipped',
+        required: true,
+      },
+    ],
+  };
+
+  try {
+    await discordFetch(`/applications/${appId}/commands`, {
+      method: 'POST',
+      body: JSON.stringify(command),
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 /** Register the /map slash command on the Discord application. Call once via admin. */
 export async function registerMapCommand(): Promise<{ ok: boolean; error?: string }> {
   const appId = process.env.DISCORD_APPLICATION_ID;
