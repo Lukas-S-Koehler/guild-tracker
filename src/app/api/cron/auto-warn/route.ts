@@ -62,6 +62,19 @@ export async function POST(req: NextRequest) {
   const now = new Date();
   const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
 
+  // Discord timestamps — render in each user's local timezone
+  const checkedDayBoundaryTs = Math.floor(
+    new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 11, 50)).getTime() / 1000
+  );
+  const nextDayBoundaryTs = Math.floor(
+    new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 11, 50)).getTime() / 1000
+  );
+  const dayOfWeek = now.getUTCDay();
+  const daysUntilMonday = dayOfWeek === 1 && now.getUTCHours() < 12 ? 0 : ((8 - dayOfWeek) % 7) || 7;
+  const nextWeeklyResetTs = Math.floor(
+    new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + daysUntilMonday, 11, 50)).getTime() / 1000
+  );
+
   for (const config of configs) {
     const { guild_id: guildId, guild_name: guildName, settings, donation_requirement } = config;
     if (guildActiveMap.get(guildId) === false) continue;
@@ -512,8 +525,8 @@ export async function POST(req: NextRequest) {
           noDiscord++;
         } else if (member.discord_id && botToken) {
           const dmMsg = period === 'weekly'
-            ? `${levelLabel}\nYour character **${member.ign}** in **${guildName}** has been flagged for inactivity (${effectiveDays} effective days inactive, weekly req: **${weeklyReq.toLocaleString()}g**).\nPlease ensure you meet the weekly donation requirement to remain in the guild.${bankLine}\n📅 Weekly requirement resets each Monday at 11:50 UTC. Bank balance covers missed weeks automatically.`
-            : `${levelLabel}\nYour character **${member.ign}** in **${guildName}** has been flagged for inactivity (${effectiveDays} days inactive).\nPlease ensure you meet the activity requirements to remain in the guild.${bankLine}\n📅 Each game day runs **11:50 UTC to 11:49 UTC** the following day. The daily check runs shortly after — donations made after **11:50 UTC today** count toward tomorrow's check, not today's.`;
+            ? `${levelLabel}\nYour character **${member.ign}** in **${guildName}** has been flagged for inactivity (${effectiveDays} effective days inactive, weekly req: **${weeklyReq.toLocaleString()}g**).\nPlease ensure you meet the weekly donation requirement to remain in the guild.${bankLine}\n📅 Weekly requirement resets each Monday at <t:${nextWeeklyResetTs}:t>. Bank balance covers missed weeks automatically.`
+            : `${levelLabel}\nYour character **${member.ign}** in **${guildName}** has been flagged for inactivity (${effectiveDays} days inactive).\nPlease ensure you meet the activity requirements to remain in the guild.${bankLine}\n📅 Checked game day: <t:${checkedDayBoundaryTs}:t> → <t:${nextDayBoundaryTs}:t> (your local time). Donations made after <t:${nextDayBoundaryTs}:t> count toward tomorrow's check, not today's.`;
           const result = await sendDirectMessage(member.discord_id, dmMsg);
           dmSent = result.ok;
           dmError = result.error ?? null;
@@ -569,11 +582,10 @@ export async function POST(req: NextRequest) {
         if (period === 'weekly') {
           const checkedWeek = getISOWeekKey(today.toISOString().split('T')[0]);
           headerLine = `**${guildName} — Inactivity Report** · Checked week: **${checkedWeek}** · ${reqLabel}`;
-          warningLine = `⚠️ Weekly req resets each **Monday 11:50 UTC**. Bank covers missed weeks automatically.`;
+          warningLine = `⚠️ Weekly req resets each **Monday <t:${nextWeeklyResetTs}:t>** (your local time). Bank covers missed weeks automatically.`;
         } else {
-          const gameDay = today.toISOString().split('T')[0];
-          headerLine = `**${guildName} — Inactivity Report** · Checked game day: **${gameDay}** (11:50 UTC → next day 11:49 UTC) · ${reqLabel}`;
-          warningLine = `⚠️ Donations after **11:50 UTC today** count toward **tomorrow's** check, not this one.`;
+          headerLine = `**${guildName} — Inactivity Report** · Checked game day: <t:${checkedDayBoundaryTs}:D> (<t:${checkedDayBoundaryTs}:t> → <t:${nextDayBoundaryTs}:t> your time) · ${reqLabel}`;
+          warningLine = `⚠️ Donations after <t:${nextDayBoundaryTs}:t> today count toward **tomorrow's** check, not this one.`;
         }
 
         if (inactiveReport.length === 0 && sharedBankCovered.length === 0) {

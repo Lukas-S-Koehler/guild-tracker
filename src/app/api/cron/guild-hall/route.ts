@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
 
   const results: { guild: string; status: string }[] = [];
   const now = new Date();
-  const dateLabel = now.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+  const dateLabel = `<t:${Math.floor(now.getTime() / 1000)}:f>`;
 
   for (const config of configs ?? []) {
     const guildName: string = config.guild_name ?? config.guild_id;
