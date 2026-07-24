@@ -44,6 +44,7 @@ interface GuildSettings {
   discord_log_channel_id: string;
   discord_server_id: string;
   guild_hall_channel_id: string;
+  energizing_pool_ping_role_id: string;
   overflow_enabled: boolean;
   overflow_limit: number;
 }
@@ -68,6 +69,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
     discord_log_channel_id: '',
     discord_server_id: '',
     guild_hall_channel_id: '',
+    energizing_pool_ping_role_id: '',
     overflow_enabled: true,
     overflow_limit: 10000,
   });
@@ -101,6 +103,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             discord_log_channel_id: data.settings?.discord_log_channel_id ?? '',
             discord_server_id: data.settings?.discord_server_id ?? '',
             guild_hall_channel_id: data.settings?.guild_hall_channel_id ?? '',
+            energizing_pool_ping_role_id: data.settings?.energizing_pool_ping_role_id ?? '',
             overflow_enabled: data.settings?.overflow_enabled ?? true,
             overflow_limit: data.settings?.overflow_limit ?? 10000,
           });
@@ -142,6 +145,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             discord_log_channel_id: settings.discord_log_channel_id || null,
             discord_server_id: settings.discord_server_id || null,
             guild_hall_channel_id: settings.guild_hall_channel_id || null,
+            energizing_pool_ping_role_id: settings.energizing_pool_ping_role_id || null,
             overflow_enabled: settings.overflow_enabled,
             overflow_limit: settings.overflow_limit,
           },
@@ -371,6 +375,16 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             value={settings.guild_hall_channel_id}
             onChange={e => setSettings(prev => ({ ...prev, guild_hall_channel_id: e.target.value }))}
             placeholder="Channel snowflake ID"
+            className="mt-1"
+          />
+        </div>
+
+        <div>
+          <Label className="text-xs text-muted-foreground">Energizing Pool Ping Role ID (pinged in log channel on activation)</Label>
+          <Input
+            value={settings.energizing_pool_ping_role_id}
+            onChange={e => setSettings(prev => ({ ...prev, energizing_pool_ping_role_id: e.target.value }))}
+            placeholder="Role snowflake ID"
             className="mt-1"
           />
         </div>

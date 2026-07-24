@@ -315,4 +315,21 @@ export class IdleMMOApi {
   async getGuildHall(guildId: string): Promise<GuildHallResponse> {
     return this.fetch<GuildHallResponse>(`${IDLEMMO_BASE_URL}/v1/guild/${guildId}/hall`);
   }
+
+  async getEnergizingPool(guildId: string): Promise<EnergizingPoolResponse> {
+    return this.fetch<EnergizingPoolResponse>(
+      `${IDLEMMO_BASE_URL}/v1/guild/${guildId}/energizing-pool/information`
+    );
+  }
+}
+
+export interface EnergizingPoolResponse {
+  guild: { id: number; name: string };
+  energizing_pool: {
+    id: number | null;
+    status: 'DORMANT' | 'ACTIVE_BUT_NOT_APPLIED' | 'ACTIVE_AND_APPLIED';
+    ends_at: string | null;
+    effects: string[];
+  };
+  endpoint_updates_at: string;
 }
