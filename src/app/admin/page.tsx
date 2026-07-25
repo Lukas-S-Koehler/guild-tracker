@@ -11,6 +11,7 @@ import { Loader2, UserPlus, Trash2, Shield, Crown, Users, AlertCircle, Check, Ch
 import { useApiClient } from '@/lib/api-client';
 import { useAuth } from '@/contexts/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
+import Link from 'next/link';
 
 interface GuildMember {
   user_id: string;
@@ -896,6 +897,9 @@ function SuperAdminPanel() {
             {loadingOverview ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
             {showOverview ? 'Hide Overview' : 'Show Overview'}
           </Button>
+          <Link href="/admin/raid-reminders">
+            <Button size="sm" variant="outline">Raid Reminders</Button>
+          </Link>
         </div>
 
         <p className="text-xs text-muted-foreground">
