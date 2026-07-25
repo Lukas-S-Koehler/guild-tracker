@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Trash2, ArrowLeft, Plus, AlertCircle, Check } from 'lucide-react';
+import { Loader2, Trash2, ArrowLeft, Plus, AlertCircle, Check, Pencil, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 
@@ -56,6 +56,56 @@ function RaidRemindersContent() {
   const [formChannelId, setFormChannelId] = useState('');
   const [formMessage, setFormMessage] = useState('');
   const [formRoleId, setFormRoleId] = useState('');
+
+  // Edit state (per-row)
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editTime, setEditTime] = useState('');
+  const [editChannelId, setEditChannelId] = useState('');
+  const [editMessage, setEditMessage] = useState('');
+  const [editRoleId, setEditRoleId] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const startEdit = (r: RaidReminder) => {
+    setEditingId(r.id);
+    setEditName(r.name);
+    setEditTime(utcToLocalHHMM(r.time_utc));
+    setEditChannelId(r.discord_channel_id);
+    setEditMessage(r.message);
+    setEditRoleId(r.role_ping_id ?? '');
+  };
+
+  const cancelEdit = () => setEditingId(null);
+
+  const saveEdit = async () => {
+    if (!editingId) return;
+    if (!editName || !editTime || !editChannelId || !editMessage) {
+      showMsg('error', 'Fill name, time, channel ID, message');
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      const res = await fetch(`/api/raid-reminders/${editingId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editName,
+          time_utc: localHHMMToUtc(editTime),
+          discord_channel_id: editChannelId,
+          message: editMessage,
+          role_ping_id: editRoleId || null,
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error ?? 'Save failed');
+      showMsg('success', 'Saved');
+      setEditingId(null);
+      await load();
+    } catch (e) {
+      showMsg('error', String(e));
+    } finally {
+      setSavingEdit(false);
+    }
+  };
 
   const showMsg = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
@@ -218,7 +268,41 @@ function RaidRemindersContent() {
             <p className="text-sm text-muted-foreground text-center py-4">No reminders yet.</p>
           ) : (
             <div className="space-y-2">
-              {reminders.map(r => (
+              {reminders.map(r => editingId === r.id ? (
+                <div key={r.id} className="p-3 border rounded-lg space-y-3 bg-muted/30">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <Label htmlFor={`edit-name-${r.id}`}>Name</Label>
+                      <Input id={`edit-name-${r.id}`} value={editName} onChange={e => setEditName(e.target.value)} />
+                    </div>
+                    <div>
+                      <Label htmlFor={`edit-time-${r.id}`}>Time (your local)</Label>
+                      <Input id={`edit-time-${r.id}`} type="time" value={editTime} onChange={e => setEditTime(e.target.value)} />
+                    </div>
+                    <div>
+                      <Label htmlFor={`edit-channel-${r.id}`}>Discord channel ID</Label>
+                      <Input id={`edit-channel-${r.id}`} value={editChannelId} onChange={e => setEditChannelId(e.target.value)} />
+                    </div>
+                    <div>
+                      <Label htmlFor={`edit-role-${r.id}`}>Role ping ID (optional)</Label>
+                      <Input id={`edit-role-${r.id}`} value={editRoleId} onChange={e => setEditRoleId(e.target.value)} />
+                    </div>
+                  </div>
+                  <div>
+                    <Label htmlFor={`edit-msg-${r.id}`}>Message</Label>
+                    <Textarea id={`edit-msg-${r.id}`} value={editMessage} onChange={e => setEditMessage(e.target.value)} rows={3} />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" size="sm" onClick={cancelEdit}>
+                      <X className="h-3 w-3 mr-1" /> Cancel
+                    </Button>
+                    <Button size="sm" onClick={saveEdit} disabled={savingEdit}>
+                      {savingEdit && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
+                      Save
+                    </Button>
+                  </div>
+                </div>
+              ) : (
                 <div key={r.id} className="flex items-center gap-3 p-3 border rounded-lg">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
@@ -238,6 +322,9 @@ function RaidRemindersContent() {
                     <div className="text-xs mt-1 whitespace-pre-wrap">{r.message}</div>
                   </div>
                   <div className="flex flex-col gap-1 shrink-0">
+                    <Button size="sm" variant="outline" onClick={() => startEdit(r)}>
+                      <Pencil className="h-3 w-3" />
+                    </Button>
                     <Button size="sm" variant="outline" onClick={() => handleToggle(r)}>
                       {r.enabled ? 'Disable' : 'Enable'}
                     </Button>

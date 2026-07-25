@@ -3,12 +3,12 @@
 -- ============================================================================
 --
 -- BEFORE APPLYING:
---   1. Set the deployed app URL in the cron.schedule() call below.
---   2. Set the CRON_SECRET in postgres config so pg_cron can authenticate:
---        ALTER DATABASE postgres SET app.cron_secret = 'YOUR_CRON_SECRET_HERE';
---        SELECT pg_reload_conf();
---   3. pg_cron + pg_net must be enabled in Supabase dashboard
---      (Database → Extensions).
+--   1. Replace REPLACE_WITH_APP_URL with deployed Next.js URL (no trailing /).
+--   2. Replace REPLACE_WITH_CRON_SECRET with same value as CRON_SECRET env var
+--      in Vercel/hosting. Must match, or /api/cron/raid-reminders returns 401.
+--   3. Enable pg_cron + pg_net in Supabase dashboard (Database → Extensions).
+--
+-- Secret sits in cron.job table. Readable only by superuser/service_role.
 -- ============================================================================
 
 CREATE EXTENSION IF NOT EXISTS pg_cron;
@@ -29,18 +29,22 @@ CREATE TABLE IF NOT EXISTS raid_reminders (
 CREATE INDEX IF NOT EXISTS idx_raid_reminders_time
   ON raid_reminders(time_utc) WHERE enabled;
 
--- Unschedule any previous version, then re-schedule
-SELECT cron.unschedule('raid-reminders-tick')
-  WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'raid-reminders-tick');
+-- Unschedule previous version, if any
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'raid-reminders-tick') THEN
+    PERFORM cron.unschedule('raid-reminders-tick');
+  END IF;
+END $$;
 
 SELECT cron.schedule(
   'raid-reminders-tick',
   '* * * * *',
   $$
   SELECT net.http_post(
-    url := 'https://REPLACE_WITH_APP_URL/api/cron/raid-reminders',
+    url := 'https://guild-tracker-9ys7.vercel.app/api/cron/raid-reminders',
     headers := jsonb_build_object(
-      'Authorization', 'Bearer ' || current_setting('app.cron_secret', true),
+      'Authorization', 'Bearer REPLACE_WITH_CRON_SECRET',
       'Content-Type', 'application/json'
     ),
     body := '{}'::jsonb
