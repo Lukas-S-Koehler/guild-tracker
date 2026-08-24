@@ -22,9 +22,14 @@ CREATE TABLE IF NOT EXISTS raid_reminders (
   message TEXT NOT NULL,
   role_ping_id TEXT,
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  -- UTC days of week to fire on. 0=Sun..6=Sat. NULL or empty = every day.
+  days_of_week INTEGER[],
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Migration for existing installs
+ALTER TABLE raid_reminders ADD COLUMN IF NOT EXISTS days_of_week INTEGER[];
 
 CREATE INDEX IF NOT EXISTS idx_raid_reminders_time
   ON raid_reminders(time_utc) WHERE enabled;

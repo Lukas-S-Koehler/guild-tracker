@@ -8,11 +8,21 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   const body = await req.json();
   const allowed: Record<string, unknown> = {};
-  for (const key of ['name', 'time_utc', 'discord_channel_id', 'message', 'role_ping_id', 'enabled']) {
+  for (const key of ['name', 'time_utc', 'discord_channel_id', 'message', 'role_ping_id', 'enabled', 'days_of_week']) {
     if (key in body) allowed[key] = body[key];
   }
   if (allowed.time_utc && !/^\d{2}:\d{2}(:\d{2})?$/.test(String(allowed.time_utc))) {
     return NextResponse.json({ error: 'time_utc must be HH:MM or HH:MM:SS' }, { status: 400 });
+  }
+  if ('days_of_week' in allowed) {
+    const d = allowed.days_of_week;
+    if (d != null) {
+      if (!Array.isArray(d) || !d.every(x => Number.isInteger(x) && (x as number) >= 0 && (x as number) <= 6)) {
+        return NextResponse.json({ error: 'days_of_week must be int[] with values 0..6' }, { status: 400 });
+      }
+      const clean = Array.from(new Set(d as number[])).sort();
+      allowed.days_of_week = clean.length === 0 ? null : clean;
+    }
   }
   allowed.updated_at = new Date().toISOString();
 

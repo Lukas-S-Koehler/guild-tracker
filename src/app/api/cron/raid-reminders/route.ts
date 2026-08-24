@@ -13,11 +13,12 @@ export async function POST(req: NextRequest) {
   const hh = String(now.getUTCHours()).padStart(2, '0');
   const mm = String(now.getUTCMinutes()).padStart(2, '0');
   const currentMinute = `${hh}:${mm}:00`;
+  const currentDow = now.getUTCDay(); // 0=Sun..6=Sat
 
   const supabase = createAdminClient();
   const { data: reminders, error } = await supabase
     .from('raid_reminders')
-    .select('id, name, message, discord_channel_id, role_ping_id')
+    .select('id, name, message, discord_channel_id, role_ping_id, days_of_week')
     .eq('enabled', true)
     .eq('time_utc', currentMinute);
 
@@ -25,6 +26,8 @@ export async function POST(req: NextRequest) {
 
   const results: Array<{ id: string; name: string; ok: boolean; error?: string }> = [];
   for (const r of reminders ?? []) {
+    const days = r.days_of_week as number[] | null;
+    if (days && days.length > 0 && !days.includes(currentDow)) continue;
     const prefix = r.role_ping_id ? `<@&${r.role_ping_id}> ` : '';
     const res = await postToChannel(r.discord_channel_id, `${prefix}${r.message}`);
     results.push({ id: r.id, name: r.name, ok: res.ok, error: res.error });

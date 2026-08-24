@@ -20,6 +20,7 @@ interface RaidReminder {
   message: string;
   role_ping_id: string | null;
   enabled: boolean;
+  days_of_week: number[] | null;
   created_at: string;
   updated_at: string;
 }
@@ -42,6 +43,56 @@ function localHHMMToUtc(local: string): string {
   return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:00`;
 }
 
+// Day shift between local and UTC at a given local HH:MM.
+// Returns delta d such that UTC_day = (local_day + d + 7) % 7.
+function localToUtcDayDelta(localHHMM: string): number {
+  const [h, m] = localHHMM.split(':').map(Number);
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  let raw = d.getUTCDay() - d.getDay();
+  if (raw > 1) raw -= 7;
+  if (raw < -1) raw += 7;
+  return raw;
+}
+
+// Convert selected local days + local time → UTC days (unique, sorted).
+function localDaysToUtc(localDays: number[], localHHMM: string): number[] {
+  const delta = localToUtcDayDelta(localHHMM);
+  return Array.from(new Set(localDays.map(d => ((d + delta) % 7 + 7) % 7))).sort();
+}
+
+// Reverse: UTC days + UTC HH:MM:SS → local days.
+function utcDaysToLocal(utcDays: number[], utcHHMMSS: string): number[] {
+  const localHHMM = utcToLocalHHMM(utcHHMMSS);
+  const delta = localToUtcDayDelta(localHHMM);
+  return Array.from(new Set(utcDays.map(d => ((d - delta) % 7 + 7) % 7))).sort();
+}
+
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function DayPicker({ value, onChange }: { value: number[]; onChange: (v: number[]) => void }) {
+  const toggle = (d: number) => {
+    onChange(value.includes(d) ? value.filter(x => x !== d) : [...value, d].sort());
+  };
+  return (
+    <div className="flex flex-wrap gap-1">
+      {DAY_LABELS.map((label, d) => {
+        const on = value.includes(d);
+        return (
+          <button
+            key={d}
+            type="button"
+            onClick={() => toggle(d)}
+            className={`text-xs px-2 py-1 rounded border ${on ? 'bg-primary text-primary-foreground border-primary' : 'bg-background hover:bg-muted'}`}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function RaidRemindersContent() {
   const { isSuperAdmin, loading: authLoading } = useAuth();
   const [reminders, setReminders] = useState<RaidReminder[]>([]);
@@ -56,6 +107,7 @@ function RaidRemindersContent() {
   const [formChannelId, setFormChannelId] = useState('');
   const [formMessage, setFormMessage] = useState('');
   const [formRoleId, setFormRoleId] = useState('');
+  const [formDays, setFormDays] = useState<number[]>([]);
 
   // Edit state (per-row)
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -64,6 +116,7 @@ function RaidRemindersContent() {
   const [editChannelId, setEditChannelId] = useState('');
   const [editMessage, setEditMessage] = useState('');
   const [editRoleId, setEditRoleId] = useState('');
+  const [editDays, setEditDays] = useState<number[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
 
   const startEdit = (r: RaidReminder) => {
@@ -73,6 +126,7 @@ function RaidRemindersContent() {
     setEditChannelId(r.discord_channel_id);
     setEditMessage(r.message);
     setEditRoleId(r.role_ping_id ?? '');
+    setEditDays(r.days_of_week && r.days_of_week.length > 0 ? utcDaysToLocal(r.days_of_week, r.time_utc) : []);
   };
 
   const cancelEdit = () => setEditingId(null);
@@ -94,6 +148,7 @@ function RaidRemindersContent() {
           discord_channel_id: editChannelId,
           message: editMessage,
           role_ping_id: editRoleId || null,
+          days_of_week: editDays.length === 0 ? null : localDaysToUtc(editDays, editTime),
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? 'Save failed');
@@ -129,7 +184,7 @@ function RaidRemindersContent() {
 
   const resetForm = () => {
     setFormName(''); setFormTime(''); setFormChannelId('');
-    setFormMessage(''); setFormRoleId('');
+    setFormMessage(''); setFormRoleId(''); setFormDays([]);
   };
 
   const handleCreate = async () => {
@@ -148,6 +203,7 @@ function RaidRemindersContent() {
           discord_channel_id: formChannelId,
           message: formMessage,
           role_ping_id: formRoleId || null,
+          days_of_week: formDays.length === 0 ? null : localDaysToUtc(formDays, formTime),
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? 'Failed');
@@ -243,6 +299,10 @@ function RaidRemindersContent() {
               </div>
             </div>
             <div>
+              <Label>Days (your local). Leave empty = every day.</Label>
+              <DayPicker value={formDays} onChange={setFormDays} />
+            </div>
+            <div>
               <Label htmlFor="rr-msg">Message</Label>
               <Textarea id="rr-msg" value={formMessage} onChange={e => setFormMessage(e.target.value)} rows={3} placeholder="Raid starting in 15 minutes!" />
             </div>
@@ -289,6 +349,10 @@ function RaidRemindersContent() {
                     </div>
                   </div>
                   <div>
+                    <Label>Days (your local). Leave empty = every day.</Label>
+                    <DayPicker value={editDays} onChange={setEditDays} />
+                  </div>
+                  <div>
                     <Label htmlFor={`edit-msg-${r.id}`}>Message</Label>
                     <Textarea id={`edit-msg-${r.id}`} value={editMessage} onChange={e => setEditMessage(e.target.value)} rows={3} />
                   </div>
@@ -315,6 +379,12 @@ function RaidRemindersContent() {
                       <span className="font-mono">{utcToLocalHHMM(r.time_utc)}</span> local
                       <span className="mx-1">·</span>
                       <span className="font-mono">{r.time_utc.slice(0, 5)}</span> UTC
+                      <span className="mx-1">·</span>
+                      <span>
+                        {r.days_of_week && r.days_of_week.length > 0
+                          ? utcDaysToLocal(r.days_of_week, r.time_utc).map(d => DAY_LABELS[d]).join(' ')
+                          : 'daily'}
+                      </span>
                       <span className="mx-1">·</span>
                       channel <span className="font-mono">{r.discord_channel_id}</span>
                       {r.role_ping_id && <><span className="mx-1">·</span>role <span className="font-mono">{r.role_ping_id}</span></>}
