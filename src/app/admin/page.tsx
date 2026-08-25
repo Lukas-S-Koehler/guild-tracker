@@ -48,6 +48,7 @@ interface GuildSettings {
   energizing_pool_ping_role_id: string;
   overflow_enabled: boolean;
   overflow_limit: number;
+  disable_pings: boolean;
 }
 
 interface Building {
@@ -73,6 +74,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
     energizing_pool_ping_role_id: '',
     overflow_enabled: true,
     overflow_limit: 10000,
+    disable_pings: false,
   });
   const [minLevel, setMinLevel] = useState<number>(currentMinLevel);
   const [isActive, setIsActive] = useState<boolean>(currentIsActive);
@@ -107,6 +109,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             energizing_pool_ping_role_id: data.settings?.energizing_pool_ping_role_id ?? '',
             overflow_enabled: data.settings?.overflow_enabled ?? true,
             overflow_limit: data.settings?.overflow_limit ?? 10000,
+            disable_pings: data.settings?.disable_pings ?? false,
           });
         }
 
@@ -149,6 +152,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             energizing_pool_ping_role_id: settings.energizing_pool_ping_role_id || null,
             overflow_enabled: settings.overflow_enabled,
             overflow_limit: settings.overflow_limit,
+            disable_pings: settings.disable_pings,
           },
         }, { guildId }),
         api.patch('/api/admin/guild-meta', { guild_id: guildId, min_level: minLevel, is_active: isActive }, { guildId }),
@@ -358,6 +362,18 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             placeholder="Channel snowflake ID"
             className="mt-1"
           />
+        </div>
+
+        <div>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={settings.disable_pings}
+              onChange={e => setSettings(prev => ({ ...prev, disable_pings: e.target.checked }))}
+              className="rounded"
+            />
+            <span>Disable @mentions for this guild in log channel reports</span>
+          </label>
         </div>
 
         <div>

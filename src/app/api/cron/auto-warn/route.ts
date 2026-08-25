@@ -86,6 +86,7 @@ export async function POST(req: NextRequest) {
     const overflowEnabled: boolean = settings?.overflow_enabled ?? true;
     const overflowLimit: number = settings?.overflow_limit ?? 10000;
     const donationReq: number = settings?.donation_requirement ?? donation_requirement ?? 5000;
+    const pingsDisabledForGuild: boolean = guildPingsDisabled || (settings?.disable_pings === true);
 
     let warned = 0;
     let skipped = 0;
@@ -571,7 +572,7 @@ export async function POST(req: NextRequest) {
 
         const lines: string[] = [];
         const fmtMember = (m: { ign: string; daysInactive: number; discord_id: string | null }) =>
-          `• **${m.ign}**${!guildPingsDisabled && m.discord_id ? ` (<@${m.discord_id}>)` : ''} — ${m.daysInactive}d inactive`;
+          `• **${m.ign}**${!pingsDisabledForGuild && m.discord_id ? ` (<@${m.discord_id}>)` : ''} — ${m.daysInactive}d inactive`;
 
         const reqLabel = period === 'weekly'
           ? `Weekly req: **${weeklyReq.toLocaleString()}g** · Daily req: ${donationReq.toLocaleString()}g`
