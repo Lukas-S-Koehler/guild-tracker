@@ -413,11 +413,22 @@ async function handleLeaderboardCommand(interaction: {
       filter,
     });
 
+    let guildLabel: string | null = null;
+    if (guildFilter) {
+      const { data: g } = await supabase
+        .from('guilds')
+        .select('name, nickname')
+        .eq('id', guildFilter)
+        .maybeSingle();
+      if (g) guildLabel = g.nickname ? `${g.nickname} - ${g.name}` : g.name;
+    }
+
     const periodLabel = period === 'week' ? 'This Week' : period === 'month' ? 'This Month' : 'All Time';
     const filterLabel = filter === 'locked' ? 'Market-Locked' : filter === 'non-locked' ? 'Non-Locked' : null;
+    const combinedLabel = [filterLabel, guildLabel].filter(Boolean).join(' · ') || null;
     const content = entries.length === 0
-      ? '_No entries match those filters._'
-      : formatLeaderboard(entries, periodLabel, filterLabel);
+      ? `_No entries match those filters._${guildLabel ? `\n_Guild: ${guildLabel}_` : ''}`
+      : formatLeaderboard(entries, periodLabel, combinedLabel);
 
     return NextResponse.json({
       type: 4,

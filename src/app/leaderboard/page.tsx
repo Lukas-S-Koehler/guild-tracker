@@ -86,7 +86,13 @@ export default function LeaderboardPage() {
   const handleCopy = async () => {
     const periodLabel = period === 'week' ? 'This Week' : period === 'month' ? 'This Month' : 'All Time';
     const filterLabel = filter === 'locked' ? 'Market-Locked' : filter === 'non-locked' ? 'Non-Locked' : null;
-    const text = formatLeaderboard(entries, periodLabel, filterLabel);
+    let guildLabel: string | null = null;
+    if (guildFilter !== 'all') {
+      const g = guilds.find((x) => x.id === guildFilter);
+      if (g) guildLabel = g.nickname ? `${g.nickname} - ${g.name}` : g.name;
+    }
+    const combinedLabel = [filterLabel, guildLabel].filter(Boolean).join(' · ') || null;
+    const text = formatLeaderboard(entries, periodLabel, combinedLabel);
     const ok = await copyToClipboard(text);
     if (ok) {
       setCopied(true);
