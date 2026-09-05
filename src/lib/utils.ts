@@ -139,15 +139,35 @@ export function formatInactivityReport(
 }
 
 export function formatLeaderboard(
-  entries: Array<{ ign: string; total_raids: number; total_gold: number; activity_score: number }>,
-  period: string
+  entries: Array<{
+    ign: string;
+    class?: string | null;
+    total_raids: number;
+    total_gold: number;
+    activity_score: number;
+    alt_count?: number;
+    alt_locked_count?: number;
+  }>,
+  period: string,
+  filterLabel?: string | null
 ): string {
-  let output = `**🏆 Activity Leaderboard - ${period}**\n\n`;
+  const suffix = filterLabel ? ` [${filterLabel}]` : '';
+  let output = `**🏆 Activity Leaderboard - ${period}${suffix}**\n\n`;
 
   entries.slice(0, 10).forEach((entry, i) => {
     const rank = i + 1;
     const medal = getRankEmoji(rank);
-    output += `${medal} **${entry.ign}** - ${formatGold(entry.activity_score)} pts\n`;
+    const isLocked = entry.class && ['banished', 'cursed'].includes(entry.class.toLowerCase());
+    const classTag = isLocked ? ` ⛓ ${entry.class}` : '';
+    const altTag =
+      entry.alt_count && entry.alt_count > 0
+        ? ` (+${entry.alt_count} alt${entry.alt_count > 1 ? 's' : ''}${
+            entry.alt_locked_count && entry.alt_locked_count > 0
+              ? `, ${entry.alt_locked_count} market-locked`
+              : ''
+          })`
+        : '';
+    output += `${medal} **${entry.ign}**${classTag}${altTag} - ${formatGold(entry.activity_score)} pts\n`;
     output += `   └ Raids: ${entry.total_raids} | Gold: ${formatGold(entry.total_gold)}\n`;
   });
 

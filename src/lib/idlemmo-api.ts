@@ -239,6 +239,12 @@ export class IdleMMOApi {
     return data.characters ?? [];
   }
 
+  async getCharacterClass(hashedCharId: string): Promise<string | null> {
+    const chars = await this.getCharacterAlts(hashedCharId);
+    const self = chars.find((c) => c.hashed_id === hashedCharId);
+    return self?.class ?? chars[0]?.class ?? null;
+  }
+
   async getGuildMembers(guildId: string, page = 1): Promise<GuildMembersResponse> {
     const url = `${IDLEMMO_BASE_URL}/v1/guild/${guildId}/members?page=${page}`;
     return this.fetch<GuildMembersResponse>(url);

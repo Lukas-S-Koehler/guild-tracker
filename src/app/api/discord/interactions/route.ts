@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
-import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerActivityBankCommand, registerWhipCommand } from '@/lib/discord-api';
+import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand } from '@/lib/discord-api';
+import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
+import { formatLeaderboard } from '@/lib/utils';
 
 const INTERACTION_TYPE_PING = 1;
 const INTERACTION_TYPE_COMMAND = 2;
@@ -27,6 +29,10 @@ export async function GET(req: NextRequest) {
     const result = await registerWhipCommand();
     return NextResponse.json(result);
   }
+  if (searchParams.get('action') === 'register-leaderboard') {
+    const result = await registerLeaderboardCommand();
+    return NextResponse.json(result);
+  }
   return NextResponse.json({ ok: true });
 }
 
@@ -50,6 +56,20 @@ export async function POST(req: NextRequest) {
 
   if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && interaction.data?.name === 'map') {
     return handleMapAutocomplete(interaction);
+  }
+
+  if (
+    interaction.type === INTERACTION_TYPE_AUTOCOMPLETE &&
+    (interaction.data?.name === 'leaderboard' || interaction.data?.name === 'lb')
+  ) {
+    return handleLeaderboardAutocomplete(interaction);
+  }
+
+  if (
+    interaction.type === INTERACTION_TYPE_COMMAND &&
+    (interaction.data?.name === 'leaderboard' || interaction.data?.name === 'lb')
+  ) {
+    return handleLeaderboardCommand(interaction);
   }
 
   if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'warn') {
@@ -339,4 +359,74 @@ async function handleMapCommand(interaction: {
     type: 4,
     data: { content: responseMsg, flags: 64 },
   });
+}
+
+async function handleLeaderboardAutocomplete(interaction: {
+  data: { options?: Array<{ name: string; value: string; focused?: boolean }> };
+}) {
+  const supabase = createAdminClient();
+  const focused = interaction.data?.options?.find((o) => o.focused);
+  if (focused?.name !== 'guild') {
+    return NextResponse.json({ type: 8, data: { choices: [] } });
+  }
+  const query = (focused?.value ?? '').toLowerCase();
+
+  const { data: guilds } = await supabase
+    .from('guilds')
+    .select('id, name, nickname')
+    .limit(100);
+
+  const filtered = (guilds ?? []).filter((g) => {
+    if (!query) return true;
+    return (
+      g.name?.toLowerCase().includes(query) ||
+      g.nickname?.toLowerCase().includes(query)
+    );
+  });
+
+  const choices = filtered.slice(0, 25).map((g) => ({
+    name: `${g.nickname ?? ''} - ${g.name ?? ''}`.slice(0, 100),
+    value: String(g.id),
+  }));
+
+  return NextResponse.json({ type: 8, data: { choices } });
+}
+
+async function handleLeaderboardCommand(interaction: {
+  data: { options?: Array<{ name: string; value: string }> };
+}) {
+  const supabase = createAdminClient();
+  const options = interaction.data?.options ?? [];
+
+  const period = (options.find((o) => o.name === 'period')?.value as LeaderboardPeriod) || 'week';
+  const filterRaw = (options.find((o) => o.name === 'filter')?.value as LeaderboardFilter) || 'all';
+  const filter: LeaderboardFilter =
+    filterRaw === 'locked' || filterRaw === 'non-locked' ? filterRaw : 'all';
+  const guildFilter = (options.find((o) => o.name === 'guild')?.value as string) || null;
+
+  try {
+    const entries = await fetchLeaderboard({
+      supabase,
+      period,
+      guildFilter,
+      merged: false,
+      filter,
+    });
+
+    const periodLabel = period === 'week' ? 'This Week' : period === 'month' ? 'This Month' : 'All Time';
+    const filterLabel = filter === 'locked' ? 'Market-Locked' : filter === 'non-locked' ? 'Non-Locked' : null;
+    const content = entries.length === 0
+      ? '_No entries match those filters._'
+      : formatLeaderboard(entries, periodLabel, filterLabel);
+
+    return NextResponse.json({
+      type: 4,
+      data: { content: content.slice(0, 2000) },
+    });
+  } catch (err) {
+    return NextResponse.json({
+      type: 4,
+      data: { content: `Error: ${(err as Error).message}`, flags: 64 },
+    });
+  }
 }

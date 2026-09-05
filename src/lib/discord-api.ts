@@ -226,6 +226,60 @@ export async function registerWhipCommand(): Promise<{ ok: boolean; error?: stri
   }
 }
 
+/** Register the /leaderboard and /lb slash commands. Call once via admin. */
+export async function registerLeaderboardCommand(): Promise<{ ok: boolean; error?: string }> {
+  const appId = process.env.DISCORD_APPLICATION_ID;
+  if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };
+
+  const options = [
+    {
+      name: 'period',
+      type: 3,
+      description: 'Time period',
+      required: false,
+      choices: [
+        { name: 'Week', value: 'week' },
+        { name: 'Month', value: 'month' },
+        { name: 'All Time', value: 'all' },
+      ],
+    },
+    {
+      name: 'filter',
+      type: 3,
+      description: 'Market-lock filter',
+      required: false,
+      choices: [
+        { name: 'All', value: 'all' },
+        { name: 'Non-Locked', value: 'non-locked' },
+        { name: 'Market-Locked', value: 'locked' },
+      ],
+    },
+    {
+      name: 'guild',
+      type: 3,
+      description: 'Guild filter',
+      required: false,
+      autocomplete: true,
+    },
+  ];
+
+  try {
+    for (const name of ['leaderboard', 'lb']) {
+      await discordFetch(`/applications/${appId}/commands`, {
+        method: 'POST',
+        body: JSON.stringify({
+          name,
+          description: 'Show the activity leaderboard',
+          options,
+        }),
+      });
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 /** Register the /map slash command on the Discord application. Call once via admin. */
 export async function registerMapCommand(): Promise<{ ok: boolean; error?: string }> {
   const appId = process.env.DISCORD_APPLICATION_ID;

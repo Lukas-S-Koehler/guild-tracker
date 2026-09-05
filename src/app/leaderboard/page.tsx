@@ -10,6 +10,7 @@ import { formatGold, getRankEmoji, formatLeaderboard, copyToClipboard } from '@/
 import { useApiClient } from '@/lib/api-client';
 
 type Period = 'week' | 'month' | 'all';
+type Filter = 'all' | 'non-locked' | 'locked';
 
 interface Guild {
   id: string;
@@ -21,6 +22,7 @@ interface Guild {
 interface LeaderboardEntry {
   id: string;
   ign: string;
+  class?: string | null;
   guild_nickname: string;
   guild_name: string;
   current_guild_id: string;
@@ -30,6 +32,7 @@ interface LeaderboardEntry {
   days_active: number;
   alt_count?: number;
   alt_igns?: string[];
+  alt_locked_count?: number;
   is_alt?: boolean;
   main_ign?: string | null;
 }
@@ -40,6 +43,7 @@ export default function LeaderboardPage() {
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<Period>('week');
   const [guildFilter, setGuildFilter] = useState<string>('all');
+  const [filter, setFilter] = useState<Filter>('all');
   const [merged, setMerged] = useState(false);
   const [copied, setCopied] = useState(false);
   const api = useApiClient();
@@ -63,7 +67,7 @@ export default function LeaderboardPage() {
     async function fetchLeaderboard() {
       setLoading(true);
       try {
-        const params = new URLSearchParams({ period, merged: String(merged) });
+        const params = new URLSearchParams({ period, merged: String(merged), filter });
         if (guildFilter !== 'all') params.set('guild', guildFilter);
         const res = await api.get(`/api/leaderboard?${params}`);
         const data = await res.json();
@@ -77,11 +81,12 @@ export default function LeaderboardPage() {
     }
     fetchLeaderboard();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period, guildFilter, merged]);
+  }, [period, guildFilter, merged, filter]);
 
   const handleCopy = async () => {
     const periodLabel = period === 'week' ? 'This Week' : period === 'month' ? 'This Month' : 'All Time';
-    const text = formatLeaderboard(entries, periodLabel);
+    const filterLabel = filter === 'locked' ? 'Market-Locked' : filter === 'non-locked' ? 'Non-Locked' : null;
+    const text = formatLeaderboard(entries, periodLabel, filterLabel);
     const ok = await copyToClipboard(text);
     if (ok) {
       setCopied(true);
@@ -111,6 +116,14 @@ export default function LeaderboardPage() {
                   <TabsTrigger value="week">Week</TabsTrigger>
                   <TabsTrigger value="month">Month</TabsTrigger>
                   <TabsTrigger value="all">All Time</TabsTrigger>
+                </TabsList>
+              </Tabs>
+
+              <Tabs value={filter} onValueChange={(v) => setFilter(v as Filter)}>
+                <TabsList>
+                  <TabsTrigger value="all">All</TabsTrigger>
+                  <TabsTrigger value="non-locked">Non-Locked</TabsTrigger>
+                  <TabsTrigger value="locked">⛓ Market-Locked</TabsTrigger>
                 </TabsList>
               </Tabs>
 
@@ -177,12 +190,25 @@ export default function LeaderboardPage() {
                         <td className="py-3">
                           <div>
                             <span className="font-medium">{entry.ign}</span>
+                            {entry.class && ['banished', 'cursed'].includes(entry.class.toLowerCase()) ? (
+                              <span
+                                className="ml-1.5 text-xs text-amber-400"
+                                title={`Market-locked class: ${entry.class}`}
+                              >
+                                ⛓ {entry.class}
+                              </span>
+                            ) : entry.class ? (
+                              <span className="ml-1.5 text-xs text-muted-foreground">{entry.class}</span>
+                            ) : null}
                             {merged && entry.alt_count && entry.alt_count > 0 ? (
                               <span
                                 className="ml-1.5 text-xs text-blue-400"
                                 title={`Alts: ${entry.alt_igns?.join(', ')}`}
                               >
                                 +{entry.alt_count} alt{entry.alt_count > 1 ? 's' : ''}
+                                {entry.alt_locked_count && entry.alt_locked_count > 0
+                                  ? ` (${entry.alt_locked_count} market-locked)`
+                                  : ''}
                               </span>
                             ) : null}
                             {!merged && entry.is_alt && entry.main_ign ? (
