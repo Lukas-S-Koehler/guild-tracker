@@ -98,6 +98,18 @@ async function handleWarnCommand(interaction: {
 }) {
   const supabase = createAdminClient();
 
+  const REQUIRED_ROLE_ID = '1444749350285611038';
+  const callerRoles = interaction.member?.roles ?? [];
+  if (!callerRoles.includes(REQUIRED_ROLE_ID)) {
+    return NextResponse.json({
+      type: 4,
+      data: {
+        content: `You lack permission to use this command. Requires role <@&${REQUIRED_ROLE_ID}>.`,
+        flags: 64,
+      },
+    });
+  }
+
   const options = interaction.data?.options ?? [];
   const targetDiscordId = options.find((o) => o.name === 'user')?.value as string;
   const reason = (options.find((o) => o.name === 'reason')?.value as string) || null;
