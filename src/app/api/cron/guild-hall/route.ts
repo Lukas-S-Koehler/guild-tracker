@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { postToChannelReturnId, editChannelMessage } from '@/lib/discord-api';
+import { formatGold } from '@/lib/utils';
 
 const NUMBER_EMOJIS = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'];
 
@@ -37,16 +38,22 @@ export async function POST(req: NextRequest) {
 
   const supabase = createAdminClient();
 
-  const [{ data: configs, error: configsError }, { data: allBuildings, error: buildingsError }] = await Promise.all([
+  const [{ data: configs, error: configsError }, { data: allBuildings, error: buildingsError }, { data: allPrices, error: pricesError }] = await Promise.all([
     supabase.from('guild_config').select('guild_id, guild_name, api_key, settings').neq('api_key', 'placeholder'),
     supabase.from('guild_buildings').select('id, name, resources'),
+    supabase.from('market_cache').select('item_name, price'),
   ]);
 
   if (configsError) return NextResponse.json({ error: configsError.message }, { status: 500 });
   if (buildingsError) return NextResponse.json({ error: buildingsError.message }, { status: 500 });
+  if (pricesError) return NextResponse.json({ error: pricesError.message }, { status: 500 });
 
   const buildingMap = new Map<string, DbBuilding>(
     (allBuildings ?? []).map((b: DbBuilding) => [b.id, b])
+  );
+
+  const priceMap = new Map<string, number>(
+    (allPrices ?? []).map((p: { item_name: string; price: number }) => [p.item_name.toLowerCase(), p.price])
   );
 
   const results: { guild: string; status: string }[] = [];
@@ -133,6 +140,7 @@ export async function POST(req: NextRequest) {
         .sort((a, b) => a.ratio - b.ratio);
 
       const donationLines: string[] = [];
+      let totalRemainingGold = 0;
       for (let i = 0; i < priorityItems.length; i++) {
         const { name, needed, current, ratio } = priorityItems[i];
         const remaining = Math.max(0, needed - current);
@@ -140,8 +148,13 @@ export async function POST(req: NextRequest) {
         const pctStr = pctNum >= 0 ? `+${pctNum}%` : `${pctNum}%`;
         const emoji = NUMBER_EMOJIS[i] ?? `${i + 1}.`;
         const colorEmoji = remaining === 0 ? '✅' : fillEmoji(ratio);
+        const price = priceMap.get(name.toLowerCase());
+        const goldStr = price !== undefined
+          ? ` · \`${formatGold(remaining * price)}g\``
+          : '';
+        if (price !== undefined) totalRemainingGold += remaining * price;
         donationLines.push(
-          `${emoji} **${name}** — \`${fmt(current)} / ${fmt(needed)}\` · \`${pctStr}\` · need \`${fmt(remaining)}\` more ${colorEmoji}`
+          `${emoji} **${name}** — \`${fmt(current)} / ${fmt(needed)}\` · \`${pctStr}\` · need \`${fmt(remaining)}\` more${goldStr} ${colorEmoji}`
         );
       }
 
@@ -160,7 +173,9 @@ export async function POST(req: NextRequest) {
           ``,
           ...donationLines,
           ``,
-          `-# Resources sorted by fill ratio — items at the top are the highest priority for donations.`
+          `**Total remaining value:** \`${formatGold(totalRemainingGold)}g\``,
+          ``,
+          `-# Resources sorted by fill ratio — items at the top are the highest priority for donations. Gold values use cached market prices.`
         );
       }
 
