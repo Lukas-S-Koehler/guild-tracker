@@ -207,10 +207,10 @@ export class IdleMMOApi {
 
       let price = vendorPrice;
 
-      const tier0Sales = (marketData.latest_sold ?? []).filter(s => s.tier === 0);
+      const sales = marketData.latest_sold ?? [];
 
-      if (tier0Sales.length > 0) {
-        const samples = tier0Sales.map(s => ({
+      if (sales.length > 0) {
+        const samples = sales.map(s => ({
           price: s.price_per_item,
           weight: Math.max(1, s.quantity ?? 1),
         }));
