@@ -202,7 +202,7 @@ export class IdleMMOApi {
       const vendorPrice = item.vendor_price || 0;
 
       // Step 2: Get market history
-      const marketUrl = `${IDLEMMO_BASE_URL}/v1/item/${hashedId}/market-history?tier=0&type=listings`;
+      const marketUrl = `${IDLEMMO_BASE_URL}/v1/item/${hashedId}/market-history?tier=0&type=orders`;
       const marketData = await this.fetch<MarketHistoryResponse>(marketUrl);
 
       let price = vendorPrice;
