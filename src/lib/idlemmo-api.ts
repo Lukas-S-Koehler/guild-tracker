@@ -45,22 +45,36 @@ interface SearchItem {
   vendor_price: number;
 }
 
-interface MarketListing {
-  price_per_item: number;
-}
-
 interface MarketSale {
   price_per_item: number;
+  quantity: number;
+  tier: number;
+  sold_at: string;
 }
 
 interface HistoryData {
+  date: string;
   average_price: number;
+  total_sold: number;
 }
 
 interface MarketHistoryResponse {
-  current_listings?: MarketListing[];
   latest_sold?: MarketSale[];
   history_data?: HistoryData[];
+}
+
+function weightedMedian(samples: Array<{ price: number; weight: number }>): number {
+  if (samples.length === 0) return 0;
+  const sorted = [...samples].sort((a, b) => a.price - b.price);
+  const total = sorted.reduce((s, x) => s + x.weight, 0);
+  if (total <= 0) return sorted[Math.floor(sorted.length / 2)].price;
+  const half = total / 2;
+  let acc = 0;
+  for (const s of sorted) {
+    acc += s.weight;
+    if (acc >= half) return s.price;
+  }
+  return sorted[sorted.length - 1].price;
 }
 
 interface AltCharacterResponse {
@@ -193,18 +207,15 @@ export class IdleMMOApi {
 
       let price = vendorPrice;
 
-      // Use current market listings (most accurate)
-      if (marketData.current_listings && marketData.current_listings.length > 0) {
-        const listingPrices = marketData.current_listings.map(l => l.price_per_item);
-        price = Math.min(...listingPrices);
-      }
-      // Fall back to recent sales average
-      else if (marketData.latest_sold && marketData.latest_sold.length > 0) {
-        const recentPrices = marketData.latest_sold.map(s => s.price_per_item);
-        price = Math.round(recentPrices.reduce((a, b) => a + b, 0) / recentPrices.length);
-      }
-      // Fall back to historical average
-      else if (marketData.history_data && marketData.history_data.length > 0) {
+      const tier0Sales = (marketData.latest_sold ?? []).filter(s => s.tier === 0);
+
+      if (tier0Sales.length > 0) {
+        const samples = tier0Sales.map(s => ({
+          price: s.price_per_item,
+          weight: Math.max(1, s.quantity ?? 1),
+        }));
+        price = weightedMedian(samples);
+      } else if (marketData.history_data && marketData.history_data.length > 0) {
         const latestData = marketData.history_data[marketData.history_data.length - 1];
         price = latestData.average_price || vendorPrice;
       }
