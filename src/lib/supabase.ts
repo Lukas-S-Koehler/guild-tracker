@@ -1,13 +1,22 @@
 import { createBrowserClient } from '@supabase/ssr';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+let _client: SupabaseClient | null = null;
 
-// Client for browser - stores session in cookies for SSR compatibility
-export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
-
-// Function to create browser client (for client-side use)
-// This uses cookies instead of localStorage for SSR compatibility
-export function createClient() {
-  return createBrowserClient(supabaseUrl, supabaseAnonKey);
+export function createClient(): SupabaseClient {
+  if (_client) return _client;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !key) {
+    throw new Error('Supabase env vars missing: NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY');
+  }
+  _client = createBrowserClient(url, key);
+  return _client;
 }
+
+export const supabase: SupabaseClient = new Proxy({} as SupabaseClient, {
+  get(_t, prop) {
+    const c = createClient() as unknown as Record<string | symbol, unknown>;
+    return c[prop];
+  },
+});
