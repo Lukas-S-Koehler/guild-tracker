@@ -3,6 +3,8 @@ import { createAdminClient } from '@/lib/supabase-server';
 import { IdleMMOApi, ActivityEvent } from '@/lib/idlemmo-api';
 import { storeActivityEvents, processActivityEvents, drainInactiveBanks } from '@/lib/activity-processor';
 
+export const dynamic = 'force-dynamic';
+
 function verifyCronSecret(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;

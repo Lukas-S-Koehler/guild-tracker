@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { verifySuperAdmin, isErrorResponse } from '@/lib/auth-helpers';
 
+export const dynamic = 'force-dynamic';
+
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const auth = await verifySuperAdmin(req);
   if (isErrorResponse(auth)) return auth;

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { verifyAuthOrPublic, isErrorResponse } from '@/lib/auth-helpers';
 
+export const dynamic = 'force-dynamic';
+
 // GET /api/activity/history — public, no auth required
 export async function GET(req: NextRequest) {
   const auth = await verifyAuthOrPublic(req);

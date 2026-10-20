@@ -4,6 +4,8 @@ import { verifySuperAdminOrRole, isErrorResponse } from '@/lib/auth-helpers';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { storeActivityEvents, processActivityEvents } from '@/lib/activity-processor';
 
+export const dynamic = 'force-dynamic';
+
 // POST /api/admin/trigger-fetch
 // Officers can manually trigger an activity fetch for their current guild
 export async function POST(req: NextRequest) {

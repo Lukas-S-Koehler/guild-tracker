@@ -3,6 +3,8 @@ import { createAdminClient } from '@/lib/supabase-server';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { postToChannel } from '@/lib/discord-api';
 
+export const dynamic = 'force-dynamic';
+
 type PoolStatus = 'DORMANT' | 'ACTIVE_BUT_NOT_APPLIED' | 'ACTIVE_AND_APPLIED';
 
 function isActiveStatus(s: string | undefined | null): boolean {

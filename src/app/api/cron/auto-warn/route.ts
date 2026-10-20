@@ -4,6 +4,8 @@ import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 import { sendDirectMessage, postToChannel } from '@/lib/discord-api';
 import { getWarningInfo, getEffectiveDaysInactive, findLastMetWeek, getISOWeekKey, getWeekSunday, getWeekKeyRange, RequirementPeriod } from '@/lib/warning-calculator';
 
+export const dynamic = 'force-dynamic';
+
 // POST /api/cron/auto-warn — auto-warn inactive members
 // Accepts either CRON_SECRET (all guilds) or officer session (single guild via x-guild-id)
 export async function POST(req: NextRequest) {

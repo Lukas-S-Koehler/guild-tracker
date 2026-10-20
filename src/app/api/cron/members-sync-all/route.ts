@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 
+export const dynamic = 'force-dynamic';
+
 function verifyCronSecret(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;

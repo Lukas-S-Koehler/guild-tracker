@@ -4,6 +4,8 @@ import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { postToChannelReturnId, editChannelMessage } from '@/lib/discord-api';
 import { formatGold } from '@/lib/utils';
 
+export const dynamic = 'force-dynamic';
+
 const NUMBER_EMOJIS = ['1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'];
 
 function conditionEmoji(pct: number): string {

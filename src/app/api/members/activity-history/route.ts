@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { verifyAnyGuildAccess, isErrorResponse } from '@/lib/auth-helpers';
 
+export const dynamic = 'force-dynamic';
+
 /**
  * GET /api/members/activity-history?member_id=xxx
  * Returns last 7 days of activity for a member (any authenticated guild member can view)

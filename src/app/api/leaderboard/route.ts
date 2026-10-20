@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
 
+export const dynamic = 'force-dynamic';
+
 // GET /api/leaderboard — public, no auth required
 export async function GET(req: NextRequest) {
   const supabase = createAdminClient();

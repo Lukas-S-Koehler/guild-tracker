@@ -8,6 +8,13 @@ export function createClient(): SupabaseClient {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) {
+    if (typeof window === 'undefined') {
+      return new Proxy({} as SupabaseClient, {
+        get() {
+          throw new Error('Supabase env vars missing at runtime');
+        },
+      });
+    }
     throw new Error('Supabase env vars missing: NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY');
   }
   _client = createBrowserClient(url, key);

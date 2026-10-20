@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, createAdminClient } from '@/lib/supabase-server';
 
+export const dynamic = 'force-dynamic';
+
 // GET /api/auth/memberships — returns guild memberships for the authenticated user
 export async function GET(req: NextRequest) {
   const supabase = createServerClient(req);

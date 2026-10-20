@@ -3,6 +3,8 @@ import { createServerClient } from '@/lib/supabase-server';
 import { verifyAdminOrLeader, isErrorResponse } from '@/lib/auth-helpers';
 import { getMemberApiKey } from '@/lib/member-api-key';
 
+export const dynamic = 'force-dynamic';
+
 /**
  * POST /api/members/sync
  * Sync in-game members for the current user's guild from IdleMMO API

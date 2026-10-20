@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: NextRequest) {
   const auth = await verifyAuth(req, 'OFFICER');
   if (isErrorResponse(auth)) return auth;

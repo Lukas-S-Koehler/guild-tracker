@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 import { verifySuperAdminOrRole, isErrorResponse } from '@/lib/auth-helpers';
 
+export const dynamic = 'force-dynamic';
+
 /**
  * PATCH /api/activity/edit
  * Edit a specific daily_log entry

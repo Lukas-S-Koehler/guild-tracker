@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { verifySuperAdmin, isErrorResponse } from '@/lib/auth-helpers';
 
+export const dynamic = 'force-dynamic';
+
 // POST /api/admin/backfill-bank
 // Replays all historical daily_logs in chronological order and recomputes
 // bank_earned, bank_used, bank_balance_after, met_requirement for every member.

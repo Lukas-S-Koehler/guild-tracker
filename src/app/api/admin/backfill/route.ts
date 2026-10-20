@@ -5,6 +5,8 @@ import { isErrorResponse } from '@/lib/auth-helpers';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { storeActivityEvents, processActivityEvents } from '@/lib/activity-processor';
 
+export const dynamic = 'force-dynamic';
+
 // POST /api/admin/backfill
 // Dream Bandits leader can trigger a historical backfill for any guild
 export async function POST(req: NextRequest) {

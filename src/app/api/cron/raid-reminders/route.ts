@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { postToChannel } from '@/lib/discord-api';
 
+export const dynamic = 'force-dynamic';
+
 // pg_cron fires this every minute. We pick reminders whose time_utc == current UTC HH:MM.
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get('Authorization');

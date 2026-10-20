@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { postToChannel } from '@/lib/discord-api';
 
+export const dynamic = 'force-dynamic';
+
 const UNMAPPED_CHANNEL_ID = '1444748653435682949';
 
 // POST /api/cron/unmapped-report — post unmapped members per guild to Discord

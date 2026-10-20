@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { verifyAuthOrPublic, verifySuperAdminOrRole, isErrorResponse } from '@/lib/auth-helpers';
 
+export const dynamic = 'force-dynamic';
+
 // GET /api/members/list — public, no auth required
 export async function GET(req: NextRequest) {
   const authResult = await verifyAuthOrPublic(req);

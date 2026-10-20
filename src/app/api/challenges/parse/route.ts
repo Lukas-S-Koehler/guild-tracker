@@ -5,6 +5,8 @@ import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { parseChallengeData } from '@/lib/parsers';
 import { getMemberApiKey } from '@/lib/member-api-key';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: NextRequest) {
   // Verify authentication and get guild context
   const authResult = await verifyAuth(req);

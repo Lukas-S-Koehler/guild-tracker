@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, createAdminClient } from '@/lib/supabase-server';
 import { verifyAdminOrLeader, isErrorResponse } from '@/lib/auth-helpers';
 
+export const dynamic = 'force-dynamic';
+
 /**
  * PATCH /api/admin/guild-meta
  * Update guild metadata (min_level).

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
 
+export const dynamic = 'force-dynamic';
+
 /**
  * GET /api/member-keys
  * Get the current user's API key (account-based, shared across all guilds)

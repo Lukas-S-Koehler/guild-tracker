@@ -3,6 +3,8 @@ import { createServerClient } from '@/lib/supabase-server';
 import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 import type { ProcessedMember } from '@/types';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   // Verify authentication (members can view)
   const auth = await verifyAuth(req, 'MEMBER');

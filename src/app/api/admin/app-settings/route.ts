@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { verifyAdminOrLeader, isErrorResponse } from '@/lib/auth-helpers';
 
+export const dynamic = 'force-dynamic';
+
 // GET /api/admin/app-settings — read global app settings (superadmin only)
 export async function GET(req: NextRequest) {
   const auth = await verifyAdminOrLeader(req);

@@ -3,6 +3,8 @@ import { createServerClient } from '@/lib/supabase-server';
 import { verifyAnyGuildAccess, isErrorResponse } from '@/lib/auth-helpers';
 import { getLastCompletedDay } from '@/lib/utils';
 
+export const dynamic = 'force-dynamic';
+
 // GET /api/guild-activity?date=YYYY-MM-DD
 // Returns processed daily activity for any guild (any authenticated guild member can view)
 export async function GET(req: NextRequest) {

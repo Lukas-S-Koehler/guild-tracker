@@ -6,6 +6,8 @@ import { parseActivityLog, getUniqueItems } from '@/lib/parsers';
 import { getMemberApiKey } from '@/lib/member-api-key';
 import type { ProcessedMember } from '@/types';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: NextRequest) {
   // Verify authentication and get guild context
   const authResult = await verifyAuth(req);

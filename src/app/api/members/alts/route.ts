@@ -3,6 +3,8 @@ import { createAdminClient } from '@/lib/supabase-server';
 import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 
+export const dynamic = 'force-dynamic';
+
 // GET /api/members/alts — list alt relationships for a guild
 export async function GET(req: NextRequest) {
   const auth = await verifyAuth(req);

@@ -3,6 +3,8 @@ import { createAdminClient } from '@/lib/supabase-server';
 import { verifySuperAdmin, isErrorResponse, SUPER_ADMIN_EMAIL } from '@/lib/auth-helpers';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 
+export const dynamic = 'force-dynamic';
+
 const SUPER_ADMIN_USER_ID = '5f33bb41-86ab-4024-a1da-6a2fea5fb36b';
 
 // POST /api/admin/backfill-hashed-ids

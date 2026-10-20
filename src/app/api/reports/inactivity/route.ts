@@ -3,6 +3,8 @@ import { createAdminClient } from '@/lib/supabase-server';
 import { verifyAuthOrPublic, isErrorResponse } from '@/lib/auth-helpers';
 import { getWarningInfo, findLastMetWeek, getISOWeekKey, RequirementPeriod } from '@/lib/warning-calculator';
 
+export const dynamic = 'force-dynamic';
+
 // GET /api/reports/inactivity — public, no auth required
 export async function GET(req: NextRequest) {
   const auth = await verifyAuthOrPublic(req);

@@ -4,6 +4,8 @@ import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registe
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
 import { formatLeaderboard } from '@/lib/utils';
 
+export const dynamic = 'force-dynamic';
+
 const INTERACTION_TYPE_PING = 1;
 const INTERACTION_TYPE_COMMAND = 2;
 const INTERACTION_TYPE_AUTOCOMPLETE = 4;

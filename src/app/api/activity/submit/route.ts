@@ -4,6 +4,8 @@ import { createServerClient } from '@/lib/supabase-server';
 import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 import type { ProcessedMember } from '@/types';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: NextRequest) {
   // Verify authentication and get guild context
   const authResult = await verifyAuth(req);

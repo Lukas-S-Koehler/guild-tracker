@@ -3,6 +3,8 @@ import { createAdminClient } from '@/lib/supabase-server';
 import { verifyAuth, verifyAuthOrPublic, isErrorResponse } from '@/lib/auth-helpers';
 import { sendDirectMessage } from '@/lib/discord-api';
 
+export const dynamic = 'force-dynamic';
+
 // GET /api/warnings — list warnings for a guild
 export async function GET(req: NextRequest) {
   const auth = await verifyAuthOrPublic(req);

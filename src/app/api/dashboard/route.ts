@@ -3,6 +3,8 @@ import { createAdminClient } from '@/lib/supabase-server';
 import { getLastCompletedDay } from '@/lib/utils';
 import { getWarningInfo, getISOWeekKey, findLastMetWeek } from '@/lib/warning-calculator';
 
+export const dynamic = 'force-dynamic';
+
 // GET /api/dashboard
 // Universal dashboard data across all guilds. Public — no auth required.
 export async function GET(req: NextRequest) {

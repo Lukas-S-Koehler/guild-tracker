@@ -3,6 +3,8 @@ import { createAdminClient } from '@/lib/supabase-server';
 import { verifyAuthOrPublic, isErrorResponse } from '@/lib/auth-helpers';
 import { getWarningInfo, getEffectiveDaysInactive, findLastMetWeek, getISOWeekKey, getWeekStart, getWeekSunday, getWeekKeyRange, RequirementPeriod } from '@/lib/warning-calculator';
 
+export const dynamic = 'force-dynamic';
+
 export interface OverviewPeriod {
   gold_donated: number;
   deposits_gold: number;
