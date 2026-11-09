@@ -16,6 +16,7 @@ interface BumpConfig {
   bump_king_role_id: string;
   bump_button_message_id: string;
   current_bump_king_discord_id: string;
+  bump_source_url: string;
 }
 
 const BLANK: BumpConfig = {
@@ -24,6 +25,7 @@ const BLANK: BumpConfig = {
   bump_king_role_id: '',
   bump_button_message_id: '',
   current_bump_king_discord_id: '',
+  bump_source_url: '',
 };
 
 function BumpsContent() {
@@ -71,6 +73,7 @@ function BumpsContent() {
           bump_server_id: edit.bump_server_id,
           bump_channel_id: edit.bump_channel_id,
           bump_king_role_id: edit.bump_king_role_id,
+          bump_source_url: edit.bump_source_url,
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? 'Save failed');
@@ -97,6 +100,7 @@ function BumpsContent() {
           bump_server_id: edit.bump_server_id,
           bump_channel_id: edit.bump_channel_id,
           bump_king_role_id: edit.bump_king_role_id,
+          bump_source_url: edit.bump_source_url,
           install: true,
         }),
       });
@@ -205,6 +209,19 @@ function BumpsContent() {
               placeholder="Role snowflake ID"
               className="mt-1"
             />
+          </div>
+
+          <div>
+            <Label className="text-xs text-muted-foreground">Main Bump Channel URL (shown as link button)</Label>
+            <Input
+              value={edit.bump_source_url}
+              onChange={(e) => setEdit({ ...edit, bump_source_url: e.target.value })}
+              placeholder="https://discord.com/channels/.../..."
+              className="mt-1"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Clicking this button in Discord jumps members to the main IdleMMO bump channel.
+            </p>
           </div>
 
           {config.bump_button_message_id && (

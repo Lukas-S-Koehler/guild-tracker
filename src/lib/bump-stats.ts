@@ -11,6 +11,7 @@ export type BumpConfig = {
   bump_king_role_id: string;
   bump_button_message_id: string;
   current_bump_king_discord_id: string;
+  bump_source_url: string;
 };
 
 export type BumpEntry = {
@@ -33,6 +34,7 @@ const CONFIG_KEYS: (keyof BumpConfig)[] = [
   'bump_king_role_id',
   'bump_button_message_id',
   'current_bump_king_discord_id',
+  'bump_source_url',
 ];
 
 export async function readBumpConfig(supabase: SupabaseClient): Promise<BumpConfig> {
@@ -46,6 +48,7 @@ export async function readBumpConfig(supabase: SupabaseClient): Promise<BumpConf
     bump_king_role_id: '',
     bump_button_message_id: '',
     current_bump_king_discord_id: '',
+    bump_source_url: '',
   };
   for (const row of (data ?? []) as Array<{ key: string; value: string }>) {
     if ((CONFIG_KEYS as string[]).includes(row.key)) {

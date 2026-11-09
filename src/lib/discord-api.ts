@@ -282,14 +282,46 @@ export async function registerLeaderboardCommand(): Promise<{ ok: boolean; error
 
 /** Post persistent "I Bumped!" button message in channel. Returns new message id. */
 export async function postBumpButton(
-  channelId: string
+  channelId: string,
+  sourceUrl?: string
 ): Promise<{ ok: boolean; messageId?: string; error?: string }> {
   try {
+    const buttons: Array<Record<string, unknown>> = [];
+    if (sourceUrl) {
+      buttons.push({
+        type: 2,
+        style: 5, // LINK
+        label: '🔗 Go Bump!',
+        url: sourceUrl,
+      });
+    }
+    buttons.push({
+      type: 2,
+      style: 1,
+      label: '🚀 I Bumped!',
+      custom_id: 'bump_click',
+    });
+    buttons.push({
+      type: 2,
+      style: 2,
+      label: '📊 Leaderboard',
+      custom_id: 'bump_leaderboard',
+    });
+
+    const steps = sourceUrl
+      ? [
+          '**How it works:**',
+          '1. Click 🔗 **Go Bump!** → opens main IdleMMO bump channel',
+          '2. Post "bump" there, delete your message',
+          '3. Come back and click 🚀 **I Bumped!** to log it',
+        ].join('\n')
+      : 'Bumped our guild ad in the main IdleMMO Discord? Click 🚀 **I Bumped!** below to log it.';
+
     const payload = {
       content: [
         '# 🚀 Guild Bumping',
         '',
-        'Bumped our guild ad in the main IdleMMO Discord? Click below to log it!',
+        steps,
         '',
         '**Rules:**',
         '• Max 1 bump per 2 hours (same as main server)',
@@ -298,25 +330,7 @@ export async function postBumpButton(
         '',
         'Run `/bumps` to see the leaderboard.',
       ].join('\n'),
-      components: [
-        {
-          type: 1,
-          components: [
-            {
-              type: 2,
-              style: 1,
-              label: '🚀 I Bumped!',
-              custom_id: 'bump_click',
-            },
-            {
-              type: 2,
-              style: 2,
-              label: '📊 Leaderboard',
-              custom_id: 'bump_leaderboard',
-            },
-          ],
-        },
-      ],
+      components: [{ type: 1, components: buttons }],
     };
     const msg = await discordFetch<{ id: string }>(`/channels/${channelId}/messages`, {
       method: 'POST',

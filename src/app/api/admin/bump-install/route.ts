@@ -41,10 +41,11 @@ export async function POST(req: NextRequest) {
   if (forbidden) return forbidden;
 
   const body = await req.json().catch(() => ({}));
-  const { bump_server_id, bump_channel_id, bump_king_role_id, install } = body as {
+  const { bump_server_id, bump_channel_id, bump_king_role_id, bump_source_url, install } = body as {
     bump_server_id?: string;
     bump_channel_id?: string;
     bump_king_role_id?: string;
+    bump_source_url?: string;
     install?: boolean;
   };
 
@@ -54,15 +55,17 @@ export async function POST(req: NextRequest) {
   if (bump_server_id !== undefined) patch.bump_server_id = bump_server_id;
   if (bump_channel_id !== undefined) patch.bump_channel_id = bump_channel_id;
   if (bump_king_role_id !== undefined) patch.bump_king_role_id = bump_king_role_id;
+  if (bump_source_url !== undefined) patch.bump_source_url = bump_source_url;
 
   let newMessageId: string | undefined;
   if (install) {
     const current = await readBumpConfig(supabase);
     const channel = bump_channel_id ?? current.bump_channel_id;
+    const url = bump_source_url ?? current.bump_source_url;
     if (!channel) {
       return NextResponse.json({ error: 'bump_channel_id required to install' }, { status: 400 });
     }
-    const result = await postBumpButton(channel);
+    const result = await postBumpButton(channel, url || undefined);
     if (!result.ok) {
       return NextResponse.json({ error: result.error ?? 'Failed to post button' }, { status: 500 });
     }
