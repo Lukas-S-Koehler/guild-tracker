@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-export const COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2h
+export const COOLDOWN_MS = 60 * 60 * 1000; // 1h — rule is per-guild, not per-user
 
 export const MILESTONES = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000];
 export const STREAK_MILESTONES = [3, 7, 14, 30, 60, 100];
@@ -67,19 +67,19 @@ export async function writeBumpConfig(
   await supabase.from('app_settings').upsert(rows);
 }
 
-export async function getLastBumpMs(
-  supabase: SupabaseClient,
-  discordId: string
-): Promise<number | null> {
+/** Most recent bump by ANY user (cooldown is per-guild/global, not per-user). */
+export async function getLastBumpMs(supabase: SupabaseClient): Promise<{
+  ms: number;
+  discord_id: string;
+} | null> {
   const { data } = await supabase
     .from('bumps')
-    .select('bumped_at')
-    .eq('discord_id', discordId)
+    .select('bumped_at, discord_id')
     .order('bumped_at', { ascending: false })
     .limit(1)
     .maybeSingle();
   if (!data) return null;
-  return new Date(data.bumped_at).getTime();
+  return { ms: new Date(data.bumped_at).getTime(), discord_id: data.discord_id };
 }
 
 export async function insertBump(

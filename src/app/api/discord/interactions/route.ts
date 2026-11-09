@@ -512,18 +512,20 @@ async function handleBumpClick(interaction: BumpInteraction) {
     });
   }
 
-  // Cooldown check
-  const lastMs = await getLastBumpMs(supabase, user.id);
+  // GLOBAL cooldown — main server rule is 1 bump per guild per hour, not per user.
+  const last = await getLastBumpMs(supabase);
   const now = Date.now();
-  if (lastMs !== null) {
-    const elapsed = now - lastMs;
+  if (last !== null) {
+    const elapsed = now - last.ms;
     if (elapsed < COOLDOWN_MS) {
       const remaining = COOLDOWN_MS - elapsed;
+      const who = last.discord_id === user.id ? 'You' : `<@${last.discord_id}>`;
       return NextResponse.json({
         type: 4,
         data: {
-          content: `⏰ Chill! You can bump again in **${formatCooldown(remaining)}**.`,
+          content: `⏰ ${who} already bumped. Guild can bump again in **${formatCooldown(remaining)}** (1h per guild, not per person).`,
           flags: 64,
+          allowed_mentions: { parse: [] },
         },
       });
     }
@@ -570,7 +572,7 @@ async function handleBumpClick(interaction: BumpInteraction) {
   return NextResponse.json({
     type: 4,
     data: {
-      content: `✅ Bump logged! Total: **${total}**${streakLine} • Next in 2h`,
+      content: `✅ Bump logged! Total: **${total}**${streakLine} • Guild can bump again in 1h`,
       flags: 64,
     },
   });
