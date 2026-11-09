@@ -10,25 +10,31 @@ import { Loader2, ArrowLeft, Check, AlertCircle, Rocket } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 
-interface BumpGuild {
-  guild_id: string;
-  guild_name: string;
-  discord_server_id: string;
+interface BumpConfig {
+  bump_server_id: string;
   bump_channel_id: string;
   bump_king_role_id: string;
   bump_button_message_id: string;
   current_bump_king_discord_id: string;
 }
 
+const BLANK: BumpConfig = {
+  bump_server_id: '',
+  bump_channel_id: '',
+  bump_king_role_id: '',
+  bump_button_message_id: '',
+  current_bump_king_discord_id: '',
+};
+
 function BumpsContent() {
   const { isSuperAdmin, loading: authLoading } = useAuth();
-  const [guilds, setGuilds] = useState<BumpGuild[]>([]);
+  const [config, setConfig] = useState<BumpConfig>(BLANK);
+  const [edit, setEdit] = useState<BumpConfig>(BLANK);
   const [loading, setLoading] = useState(true);
-  const [savingId, setSavingId] = useState<string | null>(null);
-  const [installingId, setInstallingId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [installing, setInstalling] = useState(false);
   const [registering, setRegistering] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [edits, setEdits] = useState<Record<string, { bump_channel_id: string; bump_king_role_id: string }>>({});
 
   const showMsg = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
@@ -41,15 +47,9 @@ function BumpsContent() {
       const res = await fetch('/api/admin/bump-install');
       if (!res.ok) throw new Error((await res.json()).error ?? 'Load failed');
       const data = await res.json();
-      setGuilds(data.guilds ?? []);
-      const initial: Record<string, { bump_channel_id: string; bump_king_role_id: string }> = {};
-      for (const g of data.guilds ?? []) {
-        initial[g.guild_id] = {
-          bump_channel_id: g.bump_channel_id,
-          bump_king_role_id: g.bump_king_role_id,
-        };
-      }
-      setEdits(initial);
+      const c: BumpConfig = { ...BLANK, ...(data.config ?? {}) };
+      setConfig(c);
+      setEdit(c);
     } catch (e) {
       showMsg('error', String(e));
     } finally {
@@ -61,15 +61,14 @@ function BumpsContent() {
     if (!authLoading && isSuperAdmin) load();
   }, [authLoading, isSuperAdmin, load]);
 
-  const save = async (guildId: string) => {
-    setSavingId(guildId);
+  const save = async () => {
+    setSaving(true);
     try {
-      const edit = edits[guildId];
       const res = await fetch('/api/admin/bump-install', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          guild_id: guildId,
+          bump_server_id: edit.bump_server_id,
           bump_channel_id: edit.bump_channel_id,
           bump_king_role_id: edit.bump_king_role_id,
         }),
@@ -80,23 +79,22 @@ function BumpsContent() {
     } catch (e) {
       showMsg('error', String(e));
     } finally {
-      setSavingId(null);
+      setSaving(false);
     }
   };
 
-  const install = async (guildId: string) => {
-    const edit = edits[guildId];
-    if (!edit?.bump_channel_id) {
+  const install = async () => {
+    if (!edit.bump_channel_id) {
       showMsg('error', 'Enter Bump Channel ID first');
       return;
     }
-    setInstallingId(guildId);
+    setInstalling(true);
     try {
       const res = await fetch('/api/admin/bump-install', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          guild_id: guildId,
+          bump_server_id: edit.bump_server_id,
           bump_channel_id: edit.bump_channel_id,
           bump_king_role_id: edit.bump_king_role_id,
           install: true,
@@ -108,7 +106,7 @@ function BumpsContent() {
     } catch (e) {
       showMsg('error', String(e));
     } finally {
-      setInstallingId(null);
+      setInstalling(false);
     }
   };
 
@@ -144,18 +142,12 @@ function BumpsContent() {
   }
 
   return (
-    <div className="space-y-4 max-w-3xl mx-auto p-4">
-      <div className="flex items-center justify-between">
-        <Link href="/admin">
-          <Button size="sm" variant="ghost">
-            <ArrowLeft className="h-4 w-4 mr-1" /> Back
-          </Button>
-        </Link>
-        <Button size="sm" variant="outline" onClick={registerCmd} disabled={registering}>
-          {registering ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
-          Register /bumps Slash Command
+    <div className="space-y-4 max-w-2xl mx-auto p-4">
+      <Link href="/admin">
+        <Button size="sm" variant="ghost">
+          <ArrowLeft className="h-4 w-4 mr-1" /> Back
         </Button>
-      </div>
+      </Link>
 
       <Card>
         <CardHeader>
@@ -164,7 +156,7 @@ function BumpsContent() {
             Bump Tracker
           </CardTitle>
           <CardDescription className="text-xs">
-            Per-guild bump tracking. Members click a button in the chosen channel after bumping the guild ad in main IdleMMO Discord. 2h cooldown enforced. Monthly top bumper gets the Bump King role.
+            One global tally across the family of guilds. Members click the button in the chosen channel after bumping the ad in the main IdleMMO Discord. 2h cooldown. Monthly top bumper gets the Bump King role.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -185,92 +177,61 @@ function BumpsContent() {
             </div>
           )}
 
-          {guilds.length === 0 && (
-            <p className="text-sm text-muted-foreground">No guilds configured.</p>
+          <div>
+            <Label className="text-xs text-muted-foreground">Discord Server ID (where role is granted)</Label>
+            <Input
+              value={edit.bump_server_id}
+              onChange={(e) => setEdit({ ...edit, bump_server_id: e.target.value })}
+              placeholder="Server snowflake ID"
+              className="mt-1"
+            />
+          </div>
+
+          <div>
+            <Label className="text-xs text-muted-foreground">Bump Channel ID (where button + announcements post)</Label>
+            <Input
+              value={edit.bump_channel_id}
+              onChange={(e) => setEdit({ ...edit, bump_channel_id: e.target.value })}
+              placeholder="Channel snowflake ID"
+              className="mt-1"
+            />
+          </div>
+
+          <div>
+            <Label className="text-xs text-muted-foreground">Bump King Role ID (awarded monthly)</Label>
+            <Input
+              value={edit.bump_king_role_id}
+              onChange={(e) => setEdit({ ...edit, bump_king_role_id: e.target.value })}
+              placeholder="Role snowflake ID"
+              className="mt-1"
+            />
+          </div>
+
+          {config.bump_button_message_id && (
+            <p className="text-xs text-muted-foreground">
+              Button installed (message ID: <code>{config.bump_button_message_id}</code>)
+            </p>
+          )}
+          {config.current_bump_king_discord_id && (
+            <p className="text-xs text-muted-foreground">
+              Current Bump King: <code>{config.current_bump_king_discord_id}</code>
+            </p>
           )}
 
-          {guilds.map((g) => {
-            const e = edits[g.guild_id] ?? { bump_channel_id: '', bump_king_role_id: '' };
-            const noServerId = !g.discord_server_id;
-            return (
-              <div key={g.guild_id} className="border rounded-lg p-3 space-y-3 bg-muted/20">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-sm">{g.guild_name}</p>
-                    <p className="text-xs text-muted-foreground font-mono">{g.guild_id}</p>
-                  </div>
-                  {g.bump_button_message_id && (
-                    <span className="text-xs text-green-600 flex items-center gap-1">
-                      <Check className="h-3 w-3" /> Button installed
-                    </span>
-                  )}
-                </div>
-
-                {noServerId && (
-                  <p className="text-xs text-orange-500">
-                    ⚠️ Set Discord Server ID in this guild&apos;s settings before bumps will work.
-                  </p>
-                )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Bump Channel ID</Label>
-                    <Input
-                      value={e.bump_channel_id}
-                      onChange={(ev) =>
-                        setEdits((prev) => ({
-                          ...prev,
-                          [g.guild_id]: { ...e, bump_channel_id: ev.target.value },
-                        }))
-                      }
-                      placeholder="Channel snowflake ID"
-                      className="mt-1"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Bump King Role ID</Label>
-                    <Input
-                      value={e.bump_king_role_id}
-                      onChange={(ev) =>
-                        setEdits((prev) => ({
-                          ...prev,
-                          [g.guild_id]: { ...e, bump_king_role_id: ev.target.value },
-                        }))
-                      }
-                      placeholder="Role snowflake ID"
-                      className="mt-1"
-                    />
-                  </div>
-                </div>
-
-                {g.current_bump_king_discord_id && (
-                  <p className="text-xs text-muted-foreground">
-                    Current King: <code>{g.current_bump_king_discord_id}</code>
-                  </p>
-                )}
-
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" onClick={() => save(g.guild_id)} disabled={savingId === g.guild_id}>
-                    {savingId === g.guild_id ? (
-                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                    ) : null}
-                    Save
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => install(g.guild_id)}
-                    disabled={installingId === g.guild_id}
-                  >
-                    {installingId === g.guild_id ? (
-                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                    ) : null}
-                    {g.bump_button_message_id ? 'Re-post Button' : 'Install Button'}
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
+          <div className="flex flex-wrap gap-2 pt-2">
+            <Button size="sm" onClick={save} disabled={saving}>
+              {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+              Save
+            </Button>
+            <Button size="sm" variant="outline" onClick={install} disabled={installing}>
+              {installing ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+              {config.bump_button_message_id ? 'Re-post Button' : 'Install Button'}
+            </Button>
+            <Button size="sm" variant="outline" onClick={registerCmd} disabled={registering}>
+              {registering ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+              Register /bumps Command
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </div>

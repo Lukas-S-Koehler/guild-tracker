@@ -5,6 +5,14 @@ export const COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2h
 export const MILESTONES = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000];
 export const STREAK_MILESTONES = [3, 7, 14, 30, 60, 100];
 
+export type BumpConfig = {
+  bump_server_id: string;
+  bump_channel_id: string;
+  bump_king_role_id: string;
+  bump_button_message_id: string;
+  current_bump_king_discord_id: string;
+};
+
 export type BumpEntry = {
   discord_id: string;
   discord_username: string | null;
@@ -19,78 +27,50 @@ export type StreakEntry = {
   streak: number;
 };
 
-type BumpRow = {
-  discord_id: string;
-  discord_username: string | null;
-  member_id: string | null;
-  bumped_at: string;
-};
+const CONFIG_KEYS: (keyof BumpConfig)[] = [
+  'bump_server_id',
+  'bump_channel_id',
+  'bump_king_role_id',
+  'bump_button_message_id',
+  'current_bump_king_discord_id',
+];
 
-/** Resolve game guild_id from Discord guild/server id via guild_config.settings. */
-export async function resolveGameGuildId(
-  supabase: SupabaseClient,
-  discordGuildId: string
-): Promise<string | null> {
+export async function readBumpConfig(supabase: SupabaseClient): Promise<BumpConfig> {
   const { data } = await supabase
-    .from('guild_config')
-    .select('guild_id, settings')
-    .limit(500);
-  if (!data) return null;
-  const match = data.find(
-    (r: { settings: { discord_server_id?: string } | null }) =>
-      r.settings?.discord_server_id === discordGuildId
-  );
-  return (match as { guild_id: string } | undefined)?.guild_id ?? null;
+    .from('app_settings')
+    .select('key, value')
+    .in('key', CONFIG_KEYS as string[]);
+  const out: BumpConfig = {
+    bump_server_id: '',
+    bump_channel_id: '',
+    bump_king_role_id: '',
+    bump_button_message_id: '',
+    current_bump_king_discord_id: '',
+  };
+  for (const row of (data ?? []) as Array<{ key: string; value: string }>) {
+    if ((CONFIG_KEYS as string[]).includes(row.key)) {
+      (out as unknown as Record<string, string>)[row.key] = row.value ?? '';
+    }
+  }
+  return out;
 }
 
-async function getBumpSettings(
+export async function writeBumpConfig(
   supabase: SupabaseClient,
-  guildId: string
-): Promise<Record<string, unknown>> {
-  const { data } = await supabase
-    .from('guild_config')
-    .select('settings')
-    .eq('guild_id', guildId)
-    .maybeSingle();
-  return (data?.settings as Record<string, unknown>) ?? {};
-}
-
-export async function readBumpConfig(
-  supabase: SupabaseClient,
-  guildId: string
-): Promise<{
-  bump_channel_id?: string;
-  bump_button_message_id?: string;
-  bump_king_role_id?: string;
-  current_bump_king_discord_id?: string;
-  discord_server_id?: string;
-}> {
-  const s = await getBumpSettings(supabase, guildId);
-  return s as never;
-}
-
-export async function updateBumpConfig(
-  supabase: SupabaseClient,
-  guildId: string,
-  patch: Record<string, unknown>
+  patch: Partial<BumpConfig>
 ): Promise<void> {
-  const current = await getBumpSettings(supabase, guildId);
-  await supabase
-    .from('guild_config')
-    .update({ settings: { ...current, ...patch } })
-    .eq('guild_id', guildId);
+  const rows = Object.entries(patch).map(([key, value]) => ({ key, value: value ?? '' }));
+  if (rows.length === 0) return;
+  await supabase.from('app_settings').upsert(rows);
 }
 
-/** Most recent bump timestamp for a user in a guild (ms since epoch), or null. */
 export async function getLastBumpMs(
   supabase: SupabaseClient,
-  guildId: string,
   discordId: string
 ): Promise<number | null> {
   const { data } = await supabase
     .from('bumps')
     .select('bumped_at')
-    .eq('guild_id', guildId)
     .eq('discord_id', discordId)
     .order('bumped_at', { ascending: false })
     .limit(1)
@@ -101,86 +81,34 @@ export async function getLastBumpMs(
 
 export async function insertBump(
   supabase: SupabaseClient,
-  row: {
-    guild_id: string;
-    discord_id: string;
-    discord_username: string | null;
-    member_id: string | null;
-  }
+  row: { discord_id: string; discord_username: string | null; member_id: string | null }
 ): Promise<void> {
   await supabase.from('bumps').insert(row);
 }
 
 export async function countBumpsForUser(
   supabase: SupabaseClient,
-  guildId: string,
   discordId: string
 ): Promise<number> {
   const { count } = await supabase
     .from('bumps')
     .select('*', { count: 'exact', head: true })
-    .eq('guild_id', guildId)
     .eq('discord_id', discordId);
   return count ?? 0;
-}
-
-export async function getAllTimeLeaderboard(
-  supabase: SupabaseClient,
-  guildId: string,
-  limit: number
-): Promise<BumpEntry[]> {
-  const { data } = await supabase
-    .from('bumps')
-    .select('discord_id, discord_username, members:member_id(ign)')
-    .eq('guild_id', guildId);
-  return aggregate(data as unknown as BumpRowWithMember[] | null, limit);
-}
-
-export async function getMonthlyLeaderboard(
-  supabase: SupabaseClient,
-  guildId: string,
-  limit: number
-): Promise<BumpEntry[]> {
-  const start = new Date();
-  start.setUTCDate(1);
-  start.setUTCHours(0, 0, 0, 0);
-  const { data } = await supabase
-    .from('bumps')
-    .select('discord_id, discord_username, members:member_id(ign)')
-    .eq('guild_id', guildId)
-    .gte('bumped_at', start.toISOString());
-  return aggregate(data as unknown as BumpRowWithMember[] | null, limit);
-}
-
-/** Previous calendar month's top bumper. */
-export async function getPrevMonthTop(
-  supabase: SupabaseClient,
-  guildId: string
-): Promise<BumpEntry | null> {
-  const now = new Date();
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const { data } = await supabase
-    .from('bumps')
-    .select('discord_id, discord_username, members:member_id(ign)')
-    .eq('guild_id', guildId)
-    .gte('bumped_at', start.toISOString())
-    .lt('bumped_at', end.toISOString());
-  const agg = aggregate(data as unknown as BumpRowWithMember[] | null, 1);
-  return agg[0] ?? null;
 }
 
 type BumpRowWithMember = {
   discord_id: string;
   discord_username: string | null;
+  bumped_at?: string;
   members: { ign: string } | { ign: string }[] | null;
 };
 
 function aggregate(rows: BumpRowWithMember[] | null, limit: number): BumpEntry[] {
   const map = new Map<string, BumpEntry>();
   for (const r of rows ?? []) {
-    const existing = map.get(r.discord_id);
     const ign = Array.isArray(r.members) ? r.members[0]?.ign ?? null : r.members?.ign ?? null;
+    const existing = map.get(r.discord_id);
     if (existing) {
       existing.count++;
       if (!existing.member_ign && ign) existing.member_ign = ign;
@@ -197,7 +125,43 @@ function aggregate(rows: BumpRowWithMember[] | null, limit: number): BumpEntry[]
   return Array.from(map.values()).sort((a, b) => b.count - a.count).slice(0, limit);
 }
 
-/** Streak of consecutive UTC days ending today (or yesterday if nothing today). */
+export async function getAllTimeLeaderboard(
+  supabase: SupabaseClient,
+  limit: number
+): Promise<BumpEntry[]> {
+  const { data } = await supabase
+    .from('bumps')
+    .select('discord_id, discord_username, members:member_id(ign)');
+  return aggregate(data as unknown as BumpRowWithMember[] | null, limit);
+}
+
+export async function getMonthlyLeaderboard(
+  supabase: SupabaseClient,
+  limit: number
+): Promise<BumpEntry[]> {
+  const start = new Date();
+  start.setUTCDate(1);
+  start.setUTCHours(0, 0, 0, 0);
+  const { data } = await supabase
+    .from('bumps')
+    .select('discord_id, discord_username, members:member_id(ign)')
+    .gte('bumped_at', start.toISOString());
+  return aggregate(data as unknown as BumpRowWithMember[] | null, limit);
+}
+
+export async function getPrevMonthTop(supabase: SupabaseClient): Promise<BumpEntry | null> {
+  const now = new Date();
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const { data } = await supabase
+    .from('bumps')
+    .select('discord_id, discord_username, members:member_id(ign)')
+    .gte('bumped_at', start.toISOString())
+    .lt('bumped_at', end.toISOString());
+  const agg = aggregate(data as unknown as BumpRowWithMember[] | null, 1);
+  return agg[0] ?? null;
+}
+
 export function computeStreak(bumpTimes: Date[], now = new Date()): number {
   if (bumpTimes.length === 0) return 0;
   const days = new Set<string>(bumpTimes.map(utcDayKey));
@@ -223,14 +187,12 @@ function utcDayKey(d: Date): string {
 
 export async function getUserStreak(
   supabase: SupabaseClient,
-  guildId: string,
   discordId: string
 ): Promise<number> {
   const lookback = new Date(Date.now() - 65 * 86400000);
   const { data } = await supabase
     .from('bumps')
     .select('bumped_at')
-    .eq('guild_id', guildId)
     .eq('discord_id', discordId)
     .gte('bumped_at', lookback.toISOString());
   const times = (data ?? []).map((r) => new Date(r.bumped_at));
@@ -239,27 +201,25 @@ export async function getUserStreak(
 
 export async function getStreakLeaderboard(
   supabase: SupabaseClient,
-  guildId: string,
   limit: number
 ): Promise<StreakEntry[]> {
   const lookback = new Date(Date.now() - 65 * 86400000);
   const { data } = await supabase
     .from('bumps')
     .select('discord_id, discord_username, bumped_at, members:member_id(ign)')
-    .eq('guild_id', guildId)
     .gte('bumped_at', lookback.toISOString());
 
   const byUser = new Map<string, { times: Date[]; username: string | null; ign: string | null }>();
-  for (const r of (data ?? []) as unknown as (BumpRow & { members: { ign: string } | { ign: string }[] | null })[]) {
+  for (const r of (data ?? []) as unknown as BumpRowWithMember[]) {
     const ign = Array.isArray(r.members) ? r.members[0]?.ign ?? null : r.members?.ign ?? null;
     const existing = byUser.get(r.discord_id);
     if (existing) {
-      existing.times.push(new Date(r.bumped_at));
+      if (r.bumped_at) existing.times.push(new Date(r.bumped_at));
       if (!existing.ign && ign) existing.ign = ign;
       if (!existing.username && r.discord_username) existing.username = r.discord_username;
     } else {
       byUser.set(r.discord_id, {
-        times: [new Date(r.bumped_at)],
+        times: r.bumped_at ? [new Date(r.bumped_at)] : [],
         username: r.discord_username,
         ign,
       });
@@ -284,7 +244,11 @@ export function formatCooldown(msRemaining: number): string {
   return `${h}h ${m}m`;
 }
 
-export function displayName(e: { discord_id: string; discord_username: string | null; member_ign: string | null }): string {
+export function displayName(e: {
+  discord_id: string;
+  discord_username: string | null;
+  member_ign: string | null;
+}): string {
   if (e.member_ign) return e.member_ign;
   if (e.discord_username) return e.discord_username;
   return `<@${e.discord_id}>`;

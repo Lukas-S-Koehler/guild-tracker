@@ -17,7 +17,6 @@ import {
   getUserStreak,
   insertBump,
   medal,
-  resolveGameGuildId,
 } from '@/lib/bump-stats';
 
 export const dynamic = 'force-dynamic';
@@ -492,24 +491,20 @@ async function handleLeaderboardCommand(interaction: {
 // ──────────────────────────── BUMP TRACKER ────────────────────────────
 
 type BumpInteraction = {
-  guild_id?: string;
   token: string;
   application_id: string;
   member?: { user?: { id: string; username: string; global_name?: string } };
+  user?: { id: string; username: string; global_name?: string };
   data?: { options?: Array<{ name: string; value: string | number }>; custom_id?: string };
 };
 
-async function resolveBumpGuild(
-  supabase: ReturnType<typeof createAdminClient>,
-  discordGuildId: string | undefined
-): Promise<string | null> {
-  if (!discordGuildId) return null;
-  return resolveGameGuildId(supabase, discordGuildId);
+function getInteractionUser(i: BumpInteraction) {
+  return i.member?.user ?? i.user;
 }
 
 async function handleBumpClick(interaction: BumpInteraction) {
   const supabase = createAdminClient();
-  const user = interaction.member?.user;
+  const user = getInteractionUser(interaction);
   if (!user) {
     return NextResponse.json({
       type: 4,
@@ -517,19 +512,8 @@ async function handleBumpClick(interaction: BumpInteraction) {
     });
   }
 
-  const gameGuildId = await resolveBumpGuild(supabase, interaction.guild_id);
-  if (!gameGuildId) {
-    return NextResponse.json({
-      type: 4,
-      data: {
-        content: '⚠️ This Discord server is not linked to a tracked guild. Ask an officer to set `discord_server_id` in guild config.',
-        flags: 64,
-      },
-    });
-  }
-
   // Cooldown check
-  const lastMs = await getLastBumpMs(supabase, gameGuildId, user.id);
+  const lastMs = await getLastBumpMs(supabase, user.id);
   const now = Date.now();
   if (lastMs !== null) {
     const elapsed = now - lastMs;
@@ -545,7 +529,7 @@ async function handleBumpClick(interaction: BumpInteraction) {
     }
   }
 
-  // Resolve member_id (nullable)
+  // Resolve member_id (nullable — bumper may not be a tracked member)
   const { data: member } = await supabase
     .from('members')
     .select('id')
@@ -556,15 +540,13 @@ async function handleBumpClick(interaction: BumpInteraction) {
   const displayUsername = user.global_name ?? user.username;
 
   await insertBump(supabase, {
-    guild_id: gameGuildId,
     discord_id: user.id,
     discord_username: displayUsername,
     member_id: member?.id ?? null,
   });
 
-  // Tallies
-  const total = await countBumpsForUser(supabase, gameGuildId, user.id);
-  const streak = await getUserStreak(supabase, gameGuildId, user.id);
+  const total = await countBumpsForUser(supabase, user.id);
+  const streak = await getUserStreak(supabase, user.id);
 
   // Fire milestone / streak follow-ups (public) asynchronously; don't block response.
   const appId = interaction.application_id;
@@ -596,13 +578,6 @@ async function handleBumpClick(interaction: BumpInteraction) {
 
 async function handleBumpsCommand(interaction: BumpInteraction) {
   const supabase = createAdminClient();
-  const gameGuildId = await resolveBumpGuild(supabase, interaction.guild_id);
-  if (!gameGuildId) {
-    return NextResponse.json({
-      type: 4,
-      data: { content: '⚠️ This Discord server is not linked to a tracked guild.', flags: 64 },
-    });
-  }
 
   const options = interaction.data?.options ?? [];
   const period = (options.find((o) => o.name === 'period')?.value as string) || 'all';
@@ -613,20 +588,20 @@ async function handleBumpsCommand(interaction: BumpInteraction) {
   let lines: string[];
 
   if (period === 'streak') {
-    const entries = await getStreakLeaderboard(supabase, gameGuildId, limit);
+    const entries = await getStreakLeaderboard(supabase, limit);
     title = '🔥 **Bump Streak Leaderboard**';
     lines = entries.length === 0
       ? ['_No active streaks yet. Click the button to start!_']
       : entries.map((e, i) => `${medal(i)} **${displayName(e)}** — 🔥 ${e.streak}d`);
   } else if (period === 'month') {
-    const entries = await getMonthlyLeaderboard(supabase, gameGuildId, limit);
+    const entries = await getMonthlyLeaderboard(supabase, limit);
     const monthName = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
     title = `📊 **Bumps — ${monthName}**`;
     lines = entries.length === 0
       ? ['_No bumps this month yet._']
       : entries.map((e, i) => `${medal(i)} **${displayName(e)}** — ${e.count}`);
   } else {
-    const entries = await getAllTimeLeaderboard(supabase, gameGuildId, limit);
+    const entries = await getAllTimeLeaderboard(supabase, limit);
     title = '🏆 **Bump Leaderboard — All Time**';
     lines = entries.length === 0
       ? ['_No bumps yet. Be the first!_']
