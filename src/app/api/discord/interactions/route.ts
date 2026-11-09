@@ -1,13 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
-import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand } from '@/lib/discord-api';
+import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, sendInteractionFollowup } from '@/lib/discord-api';
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
 import { formatLeaderboard } from '@/lib/utils';
+import {
+  COOLDOWN_MS,
+  MILESTONES,
+  STREAK_MILESTONES,
+  countBumpsForUser,
+  displayName,
+  formatCooldown,
+  getAllTimeLeaderboard,
+  getLastBumpMs,
+  getMonthlyLeaderboard,
+  getStreakLeaderboard,
+  getUserStreak,
+  insertBump,
+  medal,
+  resolveGameGuildId,
+} from '@/lib/bump-stats';
 
 export const dynamic = 'force-dynamic';
 
 const INTERACTION_TYPE_PING = 1;
 const INTERACTION_TYPE_COMMAND = 2;
+const INTERACTION_TYPE_COMPONENT = 3;
 const INTERACTION_TYPE_AUTOCOMPLETE = 4;
 
 // GET /api/discord/interactions
@@ -33,6 +50,10 @@ export async function GET(req: NextRequest) {
   }
   if (searchParams.get('action') === 'register-leaderboard') {
     const result = await registerLeaderboardCommand();
+    return NextResponse.json(result);
+  }
+  if (searchParams.get('action') === 'register-bumps') {
+    const result = await registerBumpsCommand();
     return NextResponse.json(result);
   }
   return NextResponse.json({ ok: true });
@@ -88,6 +109,18 @@ export async function POST(req: NextRequest) {
 
   if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'whip') {
     return handleWhipCommand(interaction);
+  }
+
+  if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'bumps') {
+    return handleBumpsCommand(interaction);
+  }
+
+  if (interaction.type === INTERACTION_TYPE_COMPONENT && interaction.data?.custom_id === 'bump_click') {
+    return handleBumpClick(interaction);
+  }
+
+  if (interaction.type === INTERACTION_TYPE_COMPONENT && interaction.data?.custom_id === 'bump_leaderboard') {
+    return handleBumpsCommand(interaction);
   }
 
   return NextResponse.json({ type: 1 });
@@ -454,4 +487,156 @@ async function handleLeaderboardCommand(interaction: {
       data: { content: `Error: ${(err as Error).message}`, flags: 64 },
     });
   }
+}
+
+// ──────────────────────────── BUMP TRACKER ────────────────────────────
+
+type BumpInteraction = {
+  guild_id?: string;
+  token: string;
+  application_id: string;
+  member?: { user?: { id: string; username: string; global_name?: string } };
+  data?: { options?: Array<{ name: string; value: string | number }>; custom_id?: string };
+};
+
+async function resolveBumpGuild(
+  supabase: ReturnType<typeof createAdminClient>,
+  discordGuildId: string | undefined
+): Promise<string | null> {
+  if (!discordGuildId) return null;
+  return resolveGameGuildId(supabase, discordGuildId);
+}
+
+async function handleBumpClick(interaction: BumpInteraction) {
+  const supabase = createAdminClient();
+  const user = interaction.member?.user;
+  if (!user) {
+    return NextResponse.json({
+      type: 4,
+      data: { content: 'Could not identify user.', flags: 64 },
+    });
+  }
+
+  const gameGuildId = await resolveBumpGuild(supabase, interaction.guild_id);
+  if (!gameGuildId) {
+    return NextResponse.json({
+      type: 4,
+      data: {
+        content: '⚠️ This Discord server is not linked to a tracked guild. Ask an officer to set `discord_server_id` in guild config.',
+        flags: 64,
+      },
+    });
+  }
+
+  // Cooldown check
+  const lastMs = await getLastBumpMs(supabase, gameGuildId, user.id);
+  const now = Date.now();
+  if (lastMs !== null) {
+    const elapsed = now - lastMs;
+    if (elapsed < COOLDOWN_MS) {
+      const remaining = COOLDOWN_MS - elapsed;
+      return NextResponse.json({
+        type: 4,
+        data: {
+          content: `⏰ Chill! You can bump again in **${formatCooldown(remaining)}**.`,
+          flags: 64,
+        },
+      });
+    }
+  }
+
+  // Resolve member_id (nullable)
+  const { data: member } = await supabase
+    .from('members')
+    .select('id')
+    .eq('discord_id', user.id)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  const displayUsername = user.global_name ?? user.username;
+
+  await insertBump(supabase, {
+    guild_id: gameGuildId,
+    discord_id: user.id,
+    discord_username: displayUsername,
+    member_id: member?.id ?? null,
+  });
+
+  // Tallies
+  const total = await countBumpsForUser(supabase, gameGuildId, user.id);
+  const streak = await getUserStreak(supabase, gameGuildId, user.id);
+
+  // Fire milestone / streak follow-ups (public) asynchronously; don't block response.
+  const appId = interaction.application_id;
+  const token = interaction.token;
+  const hitMilestone = MILESTONES.includes(total);
+  const hitStreak = STREAK_MILESTONES.includes(streak);
+  if (hitMilestone) {
+    sendInteractionFollowup(appId, token, {
+      content: `🎉 <@${user.id}> just hit **${total}** bumps! 🚀`,
+      allowed_mentions: { users: [user.id] },
+    }).catch(() => {});
+  }
+  if (hitStreak) {
+    sendInteractionFollowup(appId, token, {
+      content: `🔥 <@${user.id}> is on a **${streak}-day** bump streak!`,
+      allowed_mentions: { users: [user.id] },
+    }).catch(() => {});
+  }
+
+  const streakLine = streak > 1 ? ` • Streak: 🔥${streak}d` : '';
+  return NextResponse.json({
+    type: 4,
+    data: {
+      content: `✅ Bump logged! Total: **${total}**${streakLine} • Next in 2h`,
+      flags: 64,
+    },
+  });
+}
+
+async function handleBumpsCommand(interaction: BumpInteraction) {
+  const supabase = createAdminClient();
+  const gameGuildId = await resolveBumpGuild(supabase, interaction.guild_id);
+  if (!gameGuildId) {
+    return NextResponse.json({
+      type: 4,
+      data: { content: '⚠️ This Discord server is not linked to a tracked guild.', flags: 64 },
+    });
+  }
+
+  const options = interaction.data?.options ?? [];
+  const period = (options.find((o) => o.name === 'period')?.value as string) || 'all';
+  const rawLimit = options.find((o) => o.name === 'limit')?.value as number | undefined;
+  const limit = Math.min(Math.max(rawLimit ?? 10, 1), 25);
+
+  let title: string;
+  let lines: string[];
+
+  if (period === 'streak') {
+    const entries = await getStreakLeaderboard(supabase, gameGuildId, limit);
+    title = '🔥 **Bump Streak Leaderboard**';
+    lines = entries.length === 0
+      ? ['_No active streaks yet. Click the button to start!_']
+      : entries.map((e, i) => `${medal(i)} **${displayName(e)}** — 🔥 ${e.streak}d`);
+  } else if (period === 'month') {
+    const entries = await getMonthlyLeaderboard(supabase, gameGuildId, limit);
+    const monthName = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+    title = `📊 **Bumps — ${monthName}**`;
+    lines = entries.length === 0
+      ? ['_No bumps this month yet._']
+      : entries.map((e, i) => `${medal(i)} **${displayName(e)}** — ${e.count}`);
+  } else {
+    const entries = await getAllTimeLeaderboard(supabase, gameGuildId, limit);
+    title = '🏆 **Bump Leaderboard — All Time**';
+    lines = entries.length === 0
+      ? ['_No bumps yet. Be the first!_']
+      : entries.map((e, i) => `${medal(i)} **${displayName(e)}** — ${e.count}`);
+  }
+
+  const content = [title, '', ...lines].join('\n').slice(0, 2000);
+
+  return NextResponse.json({
+    type: 4,
+    data: { content, allowed_mentions: { parse: [] } },
+  });
 }

@@ -1,0 +1,28 @@
+name: Monthly Bump King
+
+on:
+  schedule:
+    # 00:05 UTC on 1st of month
+    - cron: '5 0 1 * *'
+  workflow_dispatch:
+
+jobs:
+  crown:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Crown monthly bump king
+        run: |
+          echo "Running monthly bump king..."
+          response=$(curl -s -L -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/monthly-bump-king" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | head -n -1)
+          echo "Response: $body"
+          echo "HTTP status: $http_code"
+          if [ "$http_code" != "200" ]; then
+            echo "ERROR: Monthly bump king failed with status $http_code"
+            exit 1
+          fi

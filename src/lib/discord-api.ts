@@ -280,6 +280,151 @@ export async function registerLeaderboardCommand(): Promise<{ ok: boolean; error
   }
 }
 
+/** Post persistent "I Bumped!" button message in channel. Returns new message id. */
+export async function postBumpButton(
+  channelId: string
+): Promise<{ ok: boolean; messageId?: string; error?: string }> {
+  try {
+    const payload = {
+      content: [
+        '# 🚀 Guild Bumping',
+        '',
+        'Bumped our guild ad in the main IdleMMO Discord? Click below to log it!',
+        '',
+        '**Rules:**',
+        '• Max 1 bump per 2 hours (same as main server)',
+        '• Top bumper each month earns 👑 **Bump King** role',
+        '• Streaks, milestones, bragging rights 🔥',
+        '',
+        'Run `/bumps` to see the leaderboard.',
+      ].join('\n'),
+      components: [
+        {
+          type: 1,
+          components: [
+            {
+              type: 2,
+              style: 1,
+              label: '🚀 I Bumped!',
+              custom_id: 'bump_click',
+            },
+            {
+              type: 2,
+              style: 2,
+              label: '📊 Leaderboard',
+              custom_id: 'bump_leaderboard',
+            },
+          ],
+        },
+      ],
+    };
+    const msg = await discordFetch<{ id: string }>(`/channels/${channelId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return { ok: true, messageId: msg.id };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+/** Add role to a guild member. */
+export async function addGuildMemberRole(
+  guildId: string,
+  userId: string,
+  roleId: string
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await discordFetch(`/guilds/${guildId}/members/${userId}/roles/${roleId}`, {
+      method: 'PUT',
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+/** Remove role from a guild member. */
+export async function removeGuildMemberRole(
+  guildId: string,
+  userId: string,
+  roleId: string
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await discordFetch(`/guilds/${guildId}/members/${userId}/roles/${roleId}`, {
+      method: 'DELETE',
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+/** Send a follow-up message to an interaction (uses webhook token, no bot auth needed). */
+export async function sendInteractionFollowup(
+  applicationId: string,
+  interactionToken: string,
+  payload: { content?: string; flags?: number; allowed_mentions?: unknown }
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(
+      `${DISCORD_API}/webhooks/${applicationId}/${interactionToken}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }
+    );
+    if (!res.ok) {
+      const text = await res.text();
+      return { ok: false, error: `Followup ${res.status}: ${text}` };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+/** Register the /bumps slash command. Call once via admin. */
+export async function registerBumpsCommand(): Promise<{ ok: boolean; error?: string }> {
+  const appId = process.env.DISCORD_APPLICATION_ID;
+  if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };
+
+  const command = {
+    name: 'bumps',
+    description: 'Show the bump leaderboard',
+    options: [
+      {
+        name: 'period',
+        type: 3,
+        description: 'Leaderboard period',
+        required: false,
+        choices: [
+          { name: 'All Time', value: 'all' },
+          { name: 'This Month', value: 'month' },
+          { name: 'Streaks', value: 'streak' },
+        ],
+      },
+      {
+        name: 'limit',
+        type: 4, // INTEGER
+        description: 'Entries to show (default 10, max 25)',
+        required: false,
+      },
+    ],
+  };
+
+  try {
+    await discordFetch(`/applications/${appId}/commands`, {
+      method: 'POST',
+      body: JSON.stringify(command),
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 /** Register the /map slash command on the Discord application. Call once via admin. */
 export async function registerMapCommand(): Promise<{ ok: boolean; error?: string }> {
   const appId = process.env.DISCORD_APPLICATION_ID;
