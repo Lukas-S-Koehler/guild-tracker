@@ -49,9 +49,6 @@ interface GuildSettings {
   overflow_enabled: boolean;
   overflow_limit: number;
   disable_pings: boolean;
-  bump_channel_id: string;
-  bump_king_role_id: string;
-  bump_button_message_id: string;
 }
 
 interface Building {
@@ -78,9 +75,6 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
     overflow_enabled: true,
     overflow_limit: 10000,
     disable_pings: false,
-    bump_channel_id: '',
-    bump_king_role_id: '',
-    bump_button_message_id: '',
   });
   const [minLevel, setMinLevel] = useState<number>(currentMinLevel);
   const [isActive, setIsActive] = useState<boolean>(currentIsActive);
@@ -89,8 +83,6 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [backfillingBank, setBackfillingBank] = useState(false);
-  const [installingBump, setInstallingBump] = useState(false);
-  const [registeringBumpCmd, setRegisteringBumpCmd] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
@@ -118,9 +110,6 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             overflow_enabled: data.settings?.overflow_enabled ?? true,
             overflow_limit: data.settings?.overflow_limit ?? 10000,
             disable_pings: data.settings?.disable_pings ?? false,
-            bump_channel_id: data.settings?.bump_channel_id ?? '',
-            bump_king_role_id: data.settings?.bump_king_role_id ?? '',
-            bump_button_message_id: data.settings?.bump_button_message_id ?? '',
           });
         }
 
@@ -164,9 +153,6 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             overflow_enabled: settings.overflow_enabled,
             overflow_limit: settings.overflow_limit,
             disable_pings: settings.disable_pings,
-            bump_channel_id: settings.bump_channel_id || null,
-            bump_king_role_id: settings.bump_king_role_id || null,
-            bump_button_message_id: settings.bump_button_message_id || null,
           },
         }, { guildId }),
         api.patch('/api/admin/guild-meta', { guild_id: guildId, min_level: minLevel, is_active: isActive }, { guildId }),
@@ -220,48 +206,6 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
       showMsg('error', err instanceof Error ? err.message : 'Backfill failed');
     } finally {
       setBackfillingBank(false);
-    }
-  };
-
-  const handleInstallBumpButton = async () => {
-    if (!settings.bump_channel_id) {
-      showMsg('error', 'Enter a Bump Channel ID first, then save, then install.');
-      return;
-    }
-    setInstallingBump(true);
-    try {
-      const res = await api.post(
-        '/api/admin/bump-install',
-        { guild_id: guildId, channel_id: settings.bump_channel_id },
-        { guildId }
-      );
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Install failed');
-      }
-      const data = await res.json();
-      setSettings(prev => ({ ...prev, bump_button_message_id: data.message_id || '' }));
-      showMsg('success', 'Bump button posted to channel');
-    } catch (err) {
-      showMsg('error', err instanceof Error ? err.message : 'Install failed');
-    } finally {
-      setInstallingBump(false);
-    }
-  };
-
-  const handleRegisterBumpCommand = async () => {
-    setRegisteringBumpCmd(true);
-    try {
-      const res = await api.get('/api/admin/bump-install?action=register-command', { guildId });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Register failed');
-      }
-      showMsg('success', '/bumps slash command registered');
-    } catch (err) {
-      showMsg('error', err instanceof Error ? err.message : 'Register failed');
-    } finally {
-      setRegisteringBumpCmd(false);
     }
   };
 
@@ -462,50 +406,6 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
           />
         </div>
 
-        <div className="border rounded-lg p-3 space-y-3 bg-muted/20">
-          <p className="text-xs font-medium text-foreground">🚀 Bump Tracker</p>
-          <p className="text-xs text-muted-foreground">
-            Tracks who bumps the guild ad in the main IdleMMO Discord. Members click a button in the channel below (2h cooldown). Top bumper each month gets the Bump King role.
-          </p>
-          <div>
-            <Label className="text-xs text-muted-foreground">Bump Channel ID</Label>
-            <Input
-              value={settings.bump_channel_id}
-              onChange={e => setSettings(prev => ({ ...prev, bump_channel_id: e.target.value }))}
-              placeholder="Channel snowflake ID"
-              className="mt-1"
-            />
-          </div>
-          <div>
-            <Label className="text-xs text-muted-foreground">Bump King Role ID (awarded monthly)</Label>
-            <Input
-              value={settings.bump_king_role_id}
-              onChange={e => setSettings(prev => ({ ...prev, bump_king_role_id: e.target.value }))}
-              placeholder="Role snowflake ID"
-              className="mt-1"
-            />
-          </div>
-          {settings.bump_button_message_id && (
-            <p className="text-xs text-muted-foreground">
-              Button installed (message ID: <code>{settings.bump_button_message_id}</code>)
-            </p>
-          )}
-          <div className="flex flex-wrap gap-2 pt-1">
-            <Button size="sm" variant="outline" onClick={handleInstallBumpButton} disabled={installingBump}>
-              {installingBump ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
-              {settings.bump_button_message_id ? 'Re-post Bump Button' : 'Install Bump Button'}
-            </Button>
-            {isSuperAdmin && (
-              <Button size="sm" variant="outline" onClick={handleRegisterBumpCommand} disabled={registeringBumpCmd}>
-                {registeringBumpCmd ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
-                Register /bumps Command
-              </Button>
-            )}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Save settings first, then click Install to post the button to the channel. Requires Discord Server ID set above.
-          </p>
-        </div>
 
         {buildings.length > 0 && (
           <div>
@@ -1016,6 +916,9 @@ function SuperAdminPanel() {
           </Button>
           <Link href="/admin/raid-reminders">
             <Button size="sm" variant="outline">Raid Reminders</Button>
+          </Link>
+          <Link href="/admin/bumps">
+            <Button size="sm" variant="outline">Bump Tracker</Button>
           </Link>
         </div>
 
