@@ -559,26 +559,31 @@ async function handleBumpClick(interaction: BumpInteraction) {
   const total = await countBumpsForUser(supabase, user.id);
   const streak = await getUserStreak(supabase, user.id);
 
-  // Refresh the pinned bump message with new "recent bumps" + next-bump time.
+  // Refresh the pinned bump message. MUST await — serverless cuts fire-and-forget.
   const cfg = await readBumpConfig(supabase);
   if (cfg.bump_channel_id && cfg.bump_button_message_id) {
-    const [recent, monthly, last] = await Promise.all([
-      getRecentBumps(supabase, 3),
-      getMonthlyLeaderboardWithStreaks(supabase, 3),
-      getLastBumpMs(supabase),
-    ]);
-    const payload = buildBumpMessage({
-      sourceUrl: cfg.bump_source_url || undefined,
-      recent,
-      monthly,
-      lastBumpMs: last?.ms ?? null,
-      cooldownMs: COOLDOWN_MS,
-    });
-    editChannelMessageRich(
-      cfg.bump_channel_id,
-      cfg.bump_button_message_id,
-      payload as unknown as Record<string, unknown>
-    ).catch(() => {});
+    try {
+      const [recent, monthly, last] = await Promise.all([
+        getRecentBumps(supabase, 3),
+        getMonthlyLeaderboardWithStreaks(supabase, 3),
+        getLastBumpMs(supabase),
+      ]);
+      const payload = buildBumpMessage({
+        sourceUrl: cfg.bump_source_url || undefined,
+        recent,
+        monthly,
+        lastBumpMs: last?.ms ?? null,
+        cooldownMs: COOLDOWN_MS,
+      });
+      const editRes = await editChannelMessageRich(
+        cfg.bump_channel_id,
+        cfg.bump_button_message_id,
+        payload as unknown as Record<string, unknown>
+      );
+      if (!editRes.ok) console.error('[bump] edit failed:', editRes.error);
+    } catch (err) {
+      console.error('[bump] refresh error:', err);
+    }
   }
 
   // Fire milestone / streak follow-ups (public) asynchronously; don't block response.
