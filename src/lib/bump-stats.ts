@@ -19,6 +19,7 @@ export type BumpEntry = {
   discord_username: string | null;
   member_ign: string | null;
   count: number;
+  streak?: number;
 };
 
 export type StreakEntry = {
@@ -191,6 +192,16 @@ export async function getMonthlyLeaderboard(
   return aggregate(data as unknown as BumpRowWithMember[] | null, limit);
 }
 
+/** Monthly top-N with streak field populated for each entry. */
+export async function getMonthlyLeaderboardWithStreaks(
+  supabase: SupabaseClient,
+  limit: number
+): Promise<BumpEntry[]> {
+  const entries = await getMonthlyLeaderboard(supabase, limit);
+  const streaks = await Promise.all(entries.map((e) => getUserStreak(supabase, e.discord_id)));
+  return entries.map((e, i) => ({ ...e, streak: streaks[i] }));
+}
+
 export async function getPrevMonthTop(supabase: SupabaseClient): Promise<BumpEntry | null> {
   const now = new Date();
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
@@ -327,16 +338,16 @@ export function buildBumpMessage(opts: {
       ].join('\n')
     : 'Bumped our guild ad in the main IdleMMO Discord? Click 🚀 **I Bumped!** below to log it.';
 
+  // Oldest first, newest at bottom.
+  const recentOrdered = [...recent].reverse();
   const activityLines =
-    recent.length === 0
+    recentOrdered.length === 0
       ? ['_No bumps yet — be the first!_']
-      : recent.map((r, i) => {
-          const rank = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
-          // Prefer Discord server nickname, fall back to game IGN, then mention.
+      : recentOrdered.map((r) => {
           const name = r.discord_username || r.member_ign || `<@${r.discord_id}>`;
           const ts = Math.floor(new Date(r.bumped_at).getTime() / 1000);
-          const streak = r.streak_for_user > 1 ? ` • 🔥${r.streak_for_user}d` : '';
-          return `${rank} **${name}** — total ${r.total_for_user}${streak} • <t:${ts}:R>`;
+          const streak = r.streak_for_user > 1 ? ` 🔥${r.streak_for_user}d` : '';
+          return `• **${name}**${streak} — <t:${ts}:R>`;
         });
 
   const monthName = new Date().toLocaleString('en-US', {
@@ -350,10 +361,16 @@ export function buildBumpMessage(opts: {
       : monthly.map((m, i) => {
           const rank = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
           const name = m.discord_username || m.member_ign || `<@${m.discord_id}>`;
-          return `${rank} **${name}** — ${m.count}`;
+          const streak = m.streak && m.streak > 1 ? ` 🔥${m.streak}d` : '';
+          return `${rank} **${name}**${streak} — ${m.count}`;
         });
 
   const content = [
+    `## 🏆 ${monthName} Leaderboard`,
+    ...monthlyLines,
+    '',
+    '━━━━━━━━━━━━━━━━━━━━',
+    '',
     '# 🚀 Guild Bumping',
     '',
     steps,
@@ -365,11 +382,8 @@ export function buildBumpMessage(opts: {
     '',
     nextLine,
     '',
-    '## 🔄 Recent bumps',
+    '**🔄 Recent bumps**',
     ...activityLines,
-    '',
-    `## 🏆 ${monthName} Leaderboard`,
-    ...monthlyLines,
     '',
     '_Run `/bumps` for full leaderboard._',
   ].join('\n');

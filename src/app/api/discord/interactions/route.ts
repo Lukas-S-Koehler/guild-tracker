@@ -14,6 +14,7 @@ import {
   getAllTimeLeaderboard,
   getLastBumpMs,
   getMonthlyLeaderboard,
+  getMonthlyLeaderboardWithStreaks,
   getRecentBumps,
   getStreakLeaderboard,
   getUserStreak,
@@ -563,7 +564,7 @@ async function handleBumpClick(interaction: BumpInteraction) {
   if (cfg.bump_channel_id && cfg.bump_button_message_id) {
     const [recent, monthly, last] = await Promise.all([
       getRecentBumps(supabase, 3),
-      getMonthlyLeaderboard(supabase, 3),
+      getMonthlyLeaderboardWithStreaks(supabase, 3),
       getLastBumpMs(supabase),
     ]);
     const payload = buildBumpMessage({

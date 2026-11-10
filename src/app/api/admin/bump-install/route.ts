@@ -6,7 +6,7 @@ import {
   COOLDOWN_MS,
   buildBumpMessage,
   getLastBumpMs,
-  getMonthlyLeaderboard,
+  getMonthlyLeaderboardWithStreaks,
   getRecentBumps,
   readBumpConfig,
   writeBumpConfig,
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
     }
     const [recent, monthly, last] = await Promise.all([
       getRecentBumps(supabase, 3),
-      getMonthlyLeaderboard(supabase, 3),
+      getMonthlyLeaderboardWithStreaks(supabase, 3),
       getLastBumpMs(supabase),
     ]);
     const payload = buildBumpMessage({
