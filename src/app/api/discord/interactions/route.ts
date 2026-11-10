@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { waitUntil } from '@vercel/functions';
 import { createAdminClient } from '@/lib/supabase-server';
-import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, sendInteractionFollowup, editChannelMessageRich } from '@/lib/discord-api';
+import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, sendInteractionFollowup, editOriginalInteractionResponse, editChannelMessageRich } from '@/lib/discord-api';
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
 import { formatLeaderboard } from '@/lib/utils';
 import {
@@ -511,7 +512,6 @@ function getDisplayName(i: BumpInteraction): string | null {
 }
 
 async function handleBumpClick(interaction: BumpInteraction) {
-  const supabase = createAdminClient();
   const user = getInteractionUser(interaction);
   if (!user) {
     return NextResponse.json({
@@ -520,50 +520,70 @@ async function handleBumpClick(interaction: BumpInteraction) {
     });
   }
 
-  // GLOBAL cooldown — main server rule is 1 bump per guild per hour, not per user.
-  const last = await getLastBumpMs(supabase);
-  const now = Date.now();
-  if (last !== null) {
-    const elapsed = now - last.ms;
-    if (elapsed < COOLDOWN_MS) {
-      const remaining = COOLDOWN_MS - elapsed;
-      const who = last.discord_id === user.id ? 'You' : `<@${last.discord_id}>`;
-      return NextResponse.json({
-        type: 4,
-        data: {
-          content: `⏰ ${who} already bumped. Guild can bump again in **${formatCooldown(remaining)}** (1h per guild, not per person).`,
-          flags: 64,
-          allowed_mentions: { parse: [] },
-        },
-      });
-    }
-  }
+  // Ack immediately with deferred ephemeral so Discord doesn't time out (3s).
+  // All work happens after via waitUntil + followup webhook.
+  waitUntil(processBump(interaction));
 
-  // Resolve member_id (nullable — bumper may not be a tracked member)
-  const { data: member } = await supabase
-    .from('members')
-    .select('id')
-    .eq('discord_id', user.id)
-    .eq('is_active', true)
-    .maybeSingle();
-
-  // Prefer server nickname over global username for display.
-  const displayUsername = getDisplayName(interaction) ?? user.username;
-
-  await insertBump(supabase, {
-    discord_id: user.id,
-    discord_username: displayUsername,
-    member_id: member?.id ?? null,
+  return NextResponse.json({
+    type: 5, // DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE
+    data: { flags: 64 },
   });
+}
 
-  const total = await countBumpsForUser(supabase, user.id);
-  const streak = await getUserStreak(supabase, user.id);
+async function processBump(interaction: BumpInteraction) {
+  const supabase = createAdminClient();
+  const user = getInteractionUser(interaction);
+  if (!user) return;
+  const appId = interaction.application_id;
+  const token = interaction.token;
 
-  // Refresh the pinned bump message. MUST await — serverless cuts fire-and-forget.
-  const cfg = await readBumpConfig(supabase);
-  if (cfg.bump_channel_id && cfg.bump_button_message_id) {
-    try {
-      const [recent, monthly, last] = await Promise.all([
+  try {
+    // GLOBAL cooldown — 1 bump per guild per hour.
+    const last = await getLastBumpMs(supabase);
+    const now = Date.now();
+    if (last !== null) {
+      const elapsed = now - last.ms;
+      if (elapsed < COOLDOWN_MS) {
+        const remaining = COOLDOWN_MS - elapsed;
+        const who = last.discord_id === user.id ? 'You' : `<@${last.discord_id}>`;
+        await editOriginalInteractionResponse(appId, token, {
+          content: `⏰ ${who} already bumped. Guild can bump again in **${formatCooldown(remaining)}** (1h per guild, not per person).`,
+          allowed_mentions: { parse: [] },
+        });
+        return;
+      }
+    }
+
+    const { data: member } = await supabase
+      .from('members')
+      .select('id')
+      .eq('discord_id', user.id)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    const displayUsername = getDisplayName(interaction) ?? user.username;
+
+    await insertBump(supabase, {
+      discord_id: user.id,
+      discord_username: displayUsername,
+      member_id: member?.id ?? null,
+    });
+
+    const [total, streak] = await Promise.all([
+      countBumpsForUser(supabase, user.id),
+      getUserStreak(supabase, user.id),
+    ]);
+
+    // Fulfill the deferred ephemeral with the real confirmation.
+    const streakLine = streak > 1 ? ` • Streak: 🔥${streak}d` : '';
+    await editOriginalInteractionResponse(appId, token, {
+      content: `✅ Bump logged! Total: **${total}**${streakLine} • Guild can bump again in 1h`,
+    });
+
+    // Refresh the pinned bump message.
+    const cfg = await readBumpConfig(supabase);
+    if (cfg.bump_channel_id && cfg.bump_button_message_id) {
+      const [recent, monthly, lastAfter] = await Promise.all([
         getRecentBumps(supabase, 3),
         getMonthlyLeaderboardWithStreaks(supabase, 3),
         getLastBumpMs(supabase),
@@ -572,7 +592,7 @@ async function handleBumpClick(interaction: BumpInteraction) {
         sourceUrl: cfg.bump_source_url || undefined,
         recent,
         monthly,
-        lastBumpMs: last?.ms ?? null,
+        lastBumpMs: lastAfter?.ms ?? null,
         cooldownMs: COOLDOWN_MS,
       });
       const editRes = await editChannelMessageRich(
@@ -581,37 +601,27 @@ async function handleBumpClick(interaction: BumpInteraction) {
         payload as unknown as Record<string, unknown>
       );
       if (!editRes.ok) console.error('[bump] edit failed:', editRes.error);
-    } catch (err) {
-      console.error('[bump] refresh error:', err);
     }
-  }
 
-  // Fire milestone / streak follow-ups (public) asynchronously; don't block response.
-  const appId = interaction.application_id;
-  const token = interaction.token;
-  const hitMilestone = MILESTONES.includes(total);
-  const hitStreak = STREAK_MILESTONES.includes(streak);
-  if (hitMilestone) {
-    sendInteractionFollowup(appId, token, {
-      content: `🎉 <@${user.id}> just hit **${total}** bumps! 🚀`,
-      allowed_mentions: { users: [user.id] },
+    // Public milestone / streak follow-ups.
+    if (MILESTONES.includes(total)) {
+      await sendInteractionFollowup(appId, token, {
+        content: `🎉 <@${user.id}> just hit **${total}** bumps! 🚀`,
+        allowed_mentions: { users: [user.id] },
+      });
+    }
+    if (STREAK_MILESTONES.includes(streak)) {
+      await sendInteractionFollowup(appId, token, {
+        content: `🔥 <@${user.id}> is on a **${streak}-day** bump streak!`,
+        allowed_mentions: { users: [user.id] },
+      });
+    }
+  } catch (err) {
+    console.error('[bump] processBump error:', err);
+    await editOriginalInteractionResponse(appId, token, {
+      content: '⚠️ Something went wrong logging your bump. Try again in a moment.',
     }).catch(() => {});
   }
-  if (hitStreak) {
-    sendInteractionFollowup(appId, token, {
-      content: `🔥 <@${user.id}> is on a **${streak}-day** bump streak!`,
-      allowed_mentions: { users: [user.id] },
-    }).catch(() => {});
-  }
-
-  const streakLine = streak > 1 ? ` • Streak: 🔥${streak}d` : '';
-  return NextResponse.json({
-    type: 4,
-    data: {
-      content: `✅ Bump logged! Total: **${total}**${streakLine} • Guild can bump again in 1h`,
-      flags: 64,
-    },
-  });
 }
 
 async function handleBumpsCommand(interaction: BumpInteraction) {

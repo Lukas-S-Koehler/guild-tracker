@@ -346,6 +346,31 @@ export async function removeGuildMemberRole(
   }
 }
 
+/** Edit the original (deferred) interaction response. */
+export async function editOriginalInteractionResponse(
+  applicationId: string,
+  interactionToken: string,
+  payload: { content?: string; flags?: number; allowed_mentions?: unknown }
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(
+      `${DISCORD_API}/webhooks/${applicationId}/${interactionToken}/messages/@original`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }
+    );
+    if (!res.ok) {
+      const text = await res.text();
+      return { ok: false, error: `Edit original ${res.status}: ${text}` };
+    }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 /** Send a follow-up message to an interaction (uses webhook token, no bot auth needed). */
 export async function sendInteractionFollowup(
   applicationId: string,
