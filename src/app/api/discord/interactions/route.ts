@@ -496,13 +496,21 @@ async function handleLeaderboardCommand(interaction: {
 type BumpInteraction = {
   token: string;
   application_id: string;
-  member?: { user?: { id: string; username: string; global_name?: string } };
+  member?: {
+    nick?: string | null;
+    user?: { id: string; username: string; global_name?: string };
+  };
   user?: { id: string; username: string; global_name?: string };
   data?: { options?: Array<{ name: string; value: string | number }>; custom_id?: string };
 };
 
 function getInteractionUser(i: BumpInteraction) {
   return i.member?.user ?? i.user;
+}
+
+function getDisplayName(i: BumpInteraction): string | null {
+  const u = getInteractionUser(i);
+  return i.member?.nick ?? u?.global_name ?? u?.username ?? null;
 }
 
 async function handleBumpClick(interaction: BumpInteraction) {
@@ -542,7 +550,8 @@ async function handleBumpClick(interaction: BumpInteraction) {
     .eq('is_active', true)
     .maybeSingle();
 
-  const displayUsername = user.global_name ?? user.username;
+  // Prefer server nickname over global username for display.
+  const displayUsername = getDisplayName(interaction) ?? user.username;
 
   await insertBump(supabase, {
     discord_id: user.id,

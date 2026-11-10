@@ -332,7 +332,8 @@ export function buildBumpMessage(opts: {
       ? ['_No bumps yet — be the first!_']
       : recent.map((r, i) => {
           const rank = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
-          const name = displayName(r);
+          // Prefer Discord server nickname, fall back to game IGN, then mention.
+          const name = r.discord_username || r.member_ign || `<@${r.discord_id}>`;
           const ts = Math.floor(new Date(r.bumped_at).getTime() / 1000);
           const streak = r.streak_for_user > 1 ? ` • 🔥${r.streak_for_user}d` : '';
           return `${rank} **${name}** — total ${r.total_for_user}${streak} • <t:${ts}:R>`;
