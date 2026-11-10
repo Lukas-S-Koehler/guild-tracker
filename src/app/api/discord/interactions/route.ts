@@ -121,10 +121,6 @@ export async function POST(req: NextRequest) {
     return handleBumpClick(interaction);
   }
 
-  if (interaction.type === INTERACTION_TYPE_COMPONENT && interaction.data?.custom_id === 'bump_leaderboard') {
-    return handleBumpsCommand(interaction);
-  }
-
   return NextResponse.json({ type: 1 });
 }
 
@@ -565,13 +561,15 @@ async function handleBumpClick(interaction: BumpInteraction) {
   // Refresh the pinned bump message with new "recent bumps" + next-bump time.
   const cfg = await readBumpConfig(supabase);
   if (cfg.bump_channel_id && cfg.bump_button_message_id) {
-    const [recent, last] = await Promise.all([
+    const [recent, monthly, last] = await Promise.all([
       getRecentBumps(supabase, 3),
+      getMonthlyLeaderboard(supabase, 3),
       getLastBumpMs(supabase),
     ]);
     const payload = buildBumpMessage({
       sourceUrl: cfg.bump_source_url || undefined,
       recent,
+      monthly,
       lastBumpMs: last?.ms ?? null,
       cooldownMs: COOLDOWN_MS,
     });

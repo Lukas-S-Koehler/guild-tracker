@@ -6,6 +6,7 @@ import {
   COOLDOWN_MS,
   buildBumpMessage,
   getLastBumpMs,
+  getMonthlyLeaderboard,
   getRecentBumps,
   readBumpConfig,
   writeBumpConfig,
@@ -72,13 +73,15 @@ export async function POST(req: NextRequest) {
     if (!channel) {
       return NextResponse.json({ error: 'bump_channel_id required to install' }, { status: 400 });
     }
-    const [recent, last] = await Promise.all([
+    const [recent, monthly, last] = await Promise.all([
       getRecentBumps(supabase, 3),
+      getMonthlyLeaderboard(supabase, 3),
       getLastBumpMs(supabase),
     ]);
     const payload = buildBumpMessage({
       sourceUrl: url || undefined,
       recent,
+      monthly,
       lastBumpMs: last?.ms ?? null,
       cooldownMs: COOLDOWN_MS,
     });

@@ -299,17 +299,17 @@ export function displayName(e: {
 export function buildBumpMessage(opts: {
   sourceUrl?: string;
   recent: RecentBump[];
+  monthly: BumpEntry[];
   lastBumpMs: number | null;
   cooldownMs: number;
 }): { content: string; components: unknown[] } {
-  const { sourceUrl, recent, lastBumpMs, cooldownMs } = opts;
+  const { sourceUrl, recent, monthly, lastBumpMs, cooldownMs } = opts;
 
   const buttons: Array<Record<string, unknown>> = [];
   if (sourceUrl) {
     buttons.push({ type: 2, style: 5, label: '🔗 Go Bump!', url: sourceUrl });
   }
   buttons.push({ type: 2, style: 1, label: '🚀 I Bumped!', custom_id: 'bump_click' });
-  buttons.push({ type: 2, style: 2, label: '📊 Leaderboard', custom_id: 'bump_leaderboard' });
 
   const now = Date.now();
   const nextMs = lastBumpMs !== null ? lastBumpMs + cooldownMs : 0;
@@ -339,6 +339,20 @@ export function buildBumpMessage(opts: {
           return `${rank} **${name}** — total ${r.total_for_user}${streak} • <t:${ts}:R>`;
         });
 
+  const monthName = new Date().toLocaleString('en-US', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+  const monthlyLines =
+    monthly.length === 0
+      ? ['_No bumps this month yet._']
+      : monthly.map((m, i) => {
+          const rank = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
+          const name = m.discord_username || m.member_ign || `<@${m.discord_id}>`;
+          return `${rank} **${name}** — ${m.count}`;
+        });
+
   const content = [
     '# 🚀 Guild Bumping',
     '',
@@ -353,6 +367,9 @@ export function buildBumpMessage(opts: {
     '',
     '## 🔄 Recent bumps',
     ...activityLines,
+    '',
+    `## 🏆 ${monthName} Leaderboard`,
+    ...monthlyLines,
     '',
     '_Run `/bumps` for full leaderboard._',
   ].join('\n');
