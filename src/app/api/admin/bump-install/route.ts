@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, createAdminClient } from '@/lib/supabase-server';
 import { SUPER_ADMIN_EMAIL } from '@/lib/auth-helpers';
-import { postBumpButton, registerBumpsCommand } from '@/lib/discord-api';
-import { readBumpConfig, writeBumpConfig } from '@/lib/bump-stats';
+import { postToChannelRich, registerBumpsCommand } from '@/lib/discord-api';
+import {
+  COOLDOWN_MS,
+  buildBumpMessage,
+  getLastBumpMs,
+  getRecentBumps,
+  readBumpConfig,
+  writeBumpConfig,
+} from '@/lib/bump-stats';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,7 +72,17 @@ export async function POST(req: NextRequest) {
     if (!channel) {
       return NextResponse.json({ error: 'bump_channel_id required to install' }, { status: 400 });
     }
-    const result = await postBumpButton(channel, url || undefined);
+    const [recent, last] = await Promise.all([
+      getRecentBumps(supabase, 3),
+      getLastBumpMs(supabase),
+    ]);
+    const payload = buildBumpMessage({
+      sourceUrl: url || undefined,
+      recent,
+      lastBumpMs: last?.ms ?? null,
+      cooldownMs: COOLDOWN_MS,
+    });
+    const result = await postToChannelRich(channel, payload as unknown as Record<string, unknown>);
     if (!result.ok) {
       return NextResponse.json({ error: result.error ?? 'Failed to post button' }, { status: 500 });
     }

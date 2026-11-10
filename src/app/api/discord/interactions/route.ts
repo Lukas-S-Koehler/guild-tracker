@@ -1,22 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
-import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, sendInteractionFollowup } from '@/lib/discord-api';
+import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, sendInteractionFollowup, editChannelMessageRich } from '@/lib/discord-api';
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
 import { formatLeaderboard } from '@/lib/utils';
 import {
   COOLDOWN_MS,
   MILESTONES,
   STREAK_MILESTONES,
+  buildBumpMessage,
   countBumpsForUser,
   displayName,
   formatCooldown,
   getAllTimeLeaderboard,
   getLastBumpMs,
   getMonthlyLeaderboard,
+  getRecentBumps,
   getStreakLeaderboard,
   getUserStreak,
   insertBump,
   medal,
+  readBumpConfig,
 } from '@/lib/bump-stats';
 
 export const dynamic = 'force-dynamic';
@@ -549,6 +552,26 @@ async function handleBumpClick(interaction: BumpInteraction) {
 
   const total = await countBumpsForUser(supabase, user.id);
   const streak = await getUserStreak(supabase, user.id);
+
+  // Refresh the pinned bump message with new "recent bumps" + next-bump time.
+  const cfg = await readBumpConfig(supabase);
+  if (cfg.bump_channel_id && cfg.bump_button_message_id) {
+    const [recent, last] = await Promise.all([
+      getRecentBumps(supabase, 3),
+      getLastBumpMs(supabase),
+    ]);
+    const payload = buildBumpMessage({
+      sourceUrl: cfg.bump_source_url || undefined,
+      recent,
+      lastBumpMs: last?.ms ?? null,
+      cooldownMs: COOLDOWN_MS,
+    });
+    editChannelMessageRich(
+      cfg.bump_channel_id,
+      cfg.bump_button_message_id,
+      payload as unknown as Record<string, unknown>
+    ).catch(() => {});
+  }
 
   // Fire milestone / streak follow-ups (public) asynchronously; don't block response.
   const appId = interaction.application_id;

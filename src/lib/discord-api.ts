@@ -106,6 +106,39 @@ export async function editChannelMessage(
   }
 }
 
+/** Edit an existing message in a channel with arbitrary payload (content + components, etc). */
+export async function editChannelMessageRich(
+  channelId: string,
+  messageId: string,
+  payload: Record<string, unknown>
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await discordFetch(`/channels/${channelId}/messages/${messageId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+/** Post arbitrary payload to a channel. */
+export async function postToChannelRich(
+  channelId: string,
+  payload: Record<string, unknown>
+): Promise<{ ok: boolean; messageId?: string; error?: string }> {
+  try {
+    const msg = await discordFetch<{ id: string }>(`/channels/${channelId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return { ok: true, messageId: msg.id };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 /** Verify Discord Interactions request signature (ed25519). */
 export async function verifyDiscordSignature(
   rawBody: string,
@@ -280,67 +313,6 @@ export async function registerLeaderboardCommand(): Promise<{ ok: boolean; error
   }
 }
 
-/** Post persistent "I Bumped!" button message in channel. Returns new message id. */
-export async function postBumpButton(
-  channelId: string,
-  sourceUrl?: string
-): Promise<{ ok: boolean; messageId?: string; error?: string }> {
-  try {
-    const buttons: Array<Record<string, unknown>> = [];
-    if (sourceUrl) {
-      buttons.push({
-        type: 2,
-        style: 5, // LINK
-        label: '🔗 Go Bump!',
-        url: sourceUrl,
-      });
-    }
-    buttons.push({
-      type: 2,
-      style: 1,
-      label: '🚀 I Bumped!',
-      custom_id: 'bump_click',
-    });
-    buttons.push({
-      type: 2,
-      style: 2,
-      label: '📊 Leaderboard',
-      custom_id: 'bump_leaderboard',
-    });
-
-    const steps = sourceUrl
-      ? [
-          '**How it works:**',
-          '1. Click 🔗 **Go Bump!** → opens main IdleMMO bump channel',
-          '2. Post "bump" there, delete your message',
-          '3. Come back and click 🚀 **I Bumped!** to log it',
-        ].join('\n')
-      : 'Bumped our guild ad in the main IdleMMO Discord? Click 🚀 **I Bumped!** below to log it.';
-
-    const payload = {
-      content: [
-        '# 🚀 Guild Bumping',
-        '',
-        steps,
-        '',
-        '**Rules (read carefully!):**',
-        '⚠️ **1 bump per guild per hour** — NOT per person. If someone else just bumped, wait the hour. Bumping early = breaking main server rules.',
-        '• Top bumper each month earns 👑 **Bump King** role',
-        '• Streaks, milestones, bragging rights 🔥',
-        '',
-        'Run `/bumps` to see the leaderboard.',
-      ].join('\n'),
-      components: [{ type: 1, components: buttons }],
-    };
-    const msg = await discordFetch<{ id: string }>(`/channels/${channelId}/messages`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-    return { ok: true, messageId: msg.id };
-  } catch (err) {
-    return { ok: false, error: String(err) };
-  }
-}
 
 /** Add role to a guild member. */
 export async function addGuildMemberRole(

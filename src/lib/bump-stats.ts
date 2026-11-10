@@ -89,6 +89,45 @@ export async function insertBump(
   await supabase.from('bumps').insert(row);
 }
 
+export type RecentBump = {
+  discord_id: string;
+  discord_username: string | null;
+  member_ign: string | null;
+  bumped_at: string;
+  total_for_user: number;
+  streak_for_user: number;
+};
+
+export async function getRecentBumps(
+  supabase: SupabaseClient,
+  limit: number
+): Promise<RecentBump[]> {
+  const { data } = await supabase
+    .from('bumps')
+    .select('discord_id, discord_username, bumped_at, members:member_id(ign)')
+    .order('bumped_at', { ascending: false })
+    .limit(limit);
+
+  const rows = (data ?? []) as unknown as BumpRowWithMember[];
+  const result: RecentBump[] = [];
+  for (const r of rows) {
+    const ign = Array.isArray(r.members) ? r.members[0]?.ign ?? null : r.members?.ign ?? null;
+    const [total, streak] = await Promise.all([
+      countBumpsForUser(supabase, r.discord_id),
+      getUserStreak(supabase, r.discord_id),
+    ]);
+    result.push({
+      discord_id: r.discord_id,
+      discord_username: r.discord_username,
+      member_ign: ign,
+      bumped_at: r.bumped_at ?? '',
+      total_for_user: total,
+      streak_for_user: streak,
+    });
+  }
+  return result;
+}
+
 export async function countBumpsForUser(
   supabase: SupabaseClient,
   discordId: string
@@ -255,6 +294,69 @@ export function displayName(e: {
   if (e.member_ign) return e.member_ign;
   if (e.discord_username) return e.discord_username;
   return `<@${e.discord_id}>`;
+}
+
+export function buildBumpMessage(opts: {
+  sourceUrl?: string;
+  recent: RecentBump[];
+  lastBumpMs: number | null;
+  cooldownMs: number;
+}): { content: string; components: unknown[] } {
+  const { sourceUrl, recent, lastBumpMs, cooldownMs } = opts;
+
+  const buttons: Array<Record<string, unknown>> = [];
+  if (sourceUrl) {
+    buttons.push({ type: 2, style: 5, label: '🔗 Go Bump!', url: sourceUrl });
+  }
+  buttons.push({ type: 2, style: 1, label: '🚀 I Bumped!', custom_id: 'bump_click' });
+  buttons.push({ type: 2, style: 2, label: '📊 Leaderboard', custom_id: 'bump_leaderboard' });
+
+  const now = Date.now();
+  const nextMs = lastBumpMs !== null ? lastBumpMs + cooldownMs : 0;
+  const nextLine =
+    nextMs > now
+      ? `⏰ **Next bump:** <t:${Math.floor(nextMs / 1000)}:R> (<t:${Math.floor(nextMs / 1000)}:t>)`
+      : '✅ **Ready to bump!**';
+
+  const steps = sourceUrl
+    ? [
+        '**How it works:**',
+        '1. Click 🔗 **Go Bump!** → opens main IdleMMO bump channel',
+        '2. Post "bump" there, delete your message',
+        '3. Come back and click 🚀 **I Bumped!** to log it',
+      ].join('\n')
+    : 'Bumped our guild ad in the main IdleMMO Discord? Click 🚀 **I Bumped!** below to log it.';
+
+  const activityLines =
+    recent.length === 0
+      ? ['_No bumps yet — be the first!_']
+      : recent.map((r, i) => {
+          const rank = i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉';
+          const name = displayName(r);
+          const ts = Math.floor(new Date(r.bumped_at).getTime() / 1000);
+          const streak = r.streak_for_user > 1 ? ` • 🔥${r.streak_for_user}d` : '';
+          return `${rank} **${name}** — total ${r.total_for_user}${streak} • <t:${ts}:R>`;
+        });
+
+  const content = [
+    '# 🚀 Guild Bumping',
+    '',
+    steps,
+    '',
+    '**Rules (read carefully!):**',
+    '⚠️ **1 bump per guild per hour** — NOT per person. If someone else just bumped, wait the hour. Bumping early = breaking main server rules.',
+    '• Top bumper each month earns 👑 **Bump King** role',
+    '• Streaks, milestones, bragging rights 🔥',
+    '',
+    nextLine,
+    '',
+    '## 🔄 Recent bumps',
+    ...activityLines,
+    '',
+    '_Run `/bumps` for full leaderboard._',
+  ].join('\n');
+
+  return { content, components: [{ type: 1, components: buttons }] };
 }
 
 export function medal(rank: number): string {
