@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { waitUntil } from '@vercel/functions';
 import { createAdminClient } from '@/lib/supabase-server';
-import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerAltCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, sendInteractionFollowup, editOriginalInteractionResponse, editChannelMessageRich, postToChannel } from '@/lib/discord-api';
+import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerAltCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, sendInteractionFollowup, editOriginalInteractionResponse, editChannelMessageRich, postToChannel, listGlobalCommands, listGuildCommands, deleteGlobalCommand, deleteGuildCommand } from '@/lib/discord-api';
 import { switchAccountMain } from '@/lib/alt-switch';
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
 import { formatLeaderboard } from '@/lib/utils';
@@ -58,6 +58,41 @@ export async function GET(req: NextRequest) {
   if (searchParams.get('action') === 'register-alt') {
     const result = await registerAltCommand();
     return NextResponse.json(result);
+  }
+  if (searchParams.get('action') === 'list-commands') {
+    const guildId = searchParams.get('guild_id');
+    const result = guildId ? await listGuildCommands(guildId) : await listGlobalCommands();
+    return NextResponse.json(result);
+  }
+  if (searchParams.get('action') === 'delete-command') {
+    const id = searchParams.get('id');
+    const guildId = searchParams.get('guild_id');
+    if (!id) return NextResponse.json({ error: 'id query param required' }, { status: 400 });
+    const result = guildId ? await deleteGuildCommand(guildId, id) : await deleteGlobalCommand(id);
+    return NextResponse.json(result);
+  }
+  if (searchParams.get('action') === 'reset-alt') {
+    // Wipe every command named 'alt' (both global + optional guild scope), then register fresh.
+    const guildId = searchParams.get('guild_id');
+    const globalList = await listGlobalCommands();
+    const deleted: Array<{ scope: string; id: string }> = [];
+    for (const c of globalList.commands ?? []) {
+      if (c.name === 'alt') {
+        const r = await deleteGlobalCommand(c.id);
+        if (r.ok) deleted.push({ scope: 'global', id: c.id });
+      }
+    }
+    if (guildId) {
+      const guildList = await listGuildCommands(guildId);
+      for (const c of guildList.commands ?? []) {
+        if (c.name === 'alt') {
+          const r = await deleteGuildCommand(guildId, c.id);
+          if (r.ok) deleted.push({ scope: `guild:${guildId}`, id: c.id });
+        }
+      }
+    }
+    const reg = await registerAltCommand();
+    return NextResponse.json({ deleted, register: reg });
   }
   if (searchParams.get('action') === 'register-bumps') {
     const result = await registerBumpsCommand();

@@ -437,6 +437,54 @@ export async function registerBumpsCommand(): Promise<{ ok: boolean; error?: str
 }
 
 /** Register the /map slash command on the Discord application. Call once via admin. */
+/** List all global application commands. */
+export async function listGlobalCommands(): Promise<{ ok: boolean; commands?: Array<{ id: string; name: string; description?: string; options?: unknown }>; error?: string }> {
+  const appId = process.env.DISCORD_APPLICATION_ID;
+  if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };
+  try {
+    const commands = await discordFetch<Array<{ id: string; name: string; description?: string; options?: unknown }>>(`/applications/${appId}/commands`);
+    return { ok: true, commands };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+/** List commands scoped to a specific guild. */
+export async function listGuildCommands(guildId: string): Promise<{ ok: boolean; commands?: Array<{ id: string; name: string; description?: string; options?: unknown }>; error?: string }> {
+  const appId = process.env.DISCORD_APPLICATION_ID;
+  if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };
+  try {
+    const commands = await discordFetch<Array<{ id: string; name: string; description?: string; options?: unknown }>>(`/applications/${appId}/guilds/${guildId}/commands`);
+    return { ok: true, commands };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+/** Delete a global application command by id. */
+export async function deleteGlobalCommand(commandId: string): Promise<{ ok: boolean; error?: string }> {
+  const appId = process.env.DISCORD_APPLICATION_ID;
+  if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };
+  try {
+    await discordFetch(`/applications/${appId}/commands/${commandId}`, { method: 'DELETE' });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+/** Delete a guild-scoped application command by id. */
+export async function deleteGuildCommand(guildId: string, commandId: string): Promise<{ ok: boolean; error?: string }> {
+  const appId = process.env.DISCORD_APPLICATION_ID;
+  if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };
+  try {
+    await discordFetch(`/applications/${appId}/guilds/${guildId}/commands/${commandId}`, { method: 'DELETE' });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 /** Register the /alt command — single action: promote an IGN to main of its account. */
 export async function registerAltCommand(): Promise<{ ok: boolean; error?: string }> {
   const appId = process.env.DISCORD_APPLICATION_ID;
