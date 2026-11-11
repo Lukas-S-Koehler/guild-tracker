@@ -4,7 +4,7 @@ import { postToChannel } from '@/lib/discord-api';
 
 export const dynamic = 'force-dynamic';
 
-const UNMAPPED_CHANNEL_ID = '1444748653435682949';
+const UNMAPPED_CHANNEL_ID = '1444751853500760146';
 
 // POST /api/cron/unmapped-report — post unmapped members per guild to Discord
 export async function POST(req: NextRequest) {
@@ -14,6 +14,13 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = createAdminClient();
+
+  // Exempt guilds (e.g. Cursed Dreamers) — resolved by name match
+  const { data: exemptConfigs } = await supabase
+    .from('guild_config')
+    .select('guild_id, guild_name')
+    .ilike('guild_name', '%cursed dreamers%');
+  const exemptIds = new Set((exemptConfigs ?? []).map((c) => c.guild_id));
 
   // Fetch all active unmapped members with guild config info
   const { data: members, error } = await supabase
@@ -28,12 +35,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  if (!members || members.length === 0) {
+  const filtered = (members ?? []).filter(
+    (m) => m.current_guild_id && !exemptIds.has(m.current_guild_id)
+  );
+
+  if (filtered.length === 0) {
     return NextResponse.json({ ok: true, total: 0, message: 'All members mapped' });
   }
 
   // Get guild names
-  const guildIds = Array.from(new Set(members.map((m) => m.current_guild_id).filter(Boolean))) as string[];
+  const guildIds = Array.from(new Set(filtered.map((m) => m.current_guild_id).filter(Boolean))) as string[];
   const { data: configs } = await supabase
     .from('guild_config')
     .select('guild_id, guild_name')
@@ -57,7 +68,7 @@ export async function POST(req: NextRequest) {
 
   // Group unmapped by guild
   const byGuild = new Map<string, string[]>();
-  for (const m of members) {
+  for (const m of filtered) {
     if (!m.current_guild_id) continue;
     const arr = byGuild.get(m.current_guild_id) ?? [];
     arr.push(m.ign);
@@ -65,7 +76,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Header message with total
-  const totalUnmapped = members.length;
+  const totalUnmapped = filtered.length;
   const totalMembers = Array.from(totalMap.values()).reduce((a, b) => a + b, 0);
   await postToChannel(
     UNMAPPED_CHANNEL_ID,
@@ -85,5 +96,5 @@ export async function POST(req: NextRequest) {
     results.push({ guild: guildName, unmapped: unmappedIgNs.length, ok: result.ok });
   }
 
-  return NextResponse.json({ ok: true, total: members.length, results });
+  return NextResponse.json({ ok: true, total: filtered.length, results });
 }
