@@ -57,18 +57,6 @@ jobs:
           echo "Response: $body"
           echo "HTTP status: $http_code"
 
-      - name: Link alts via shared discord_id
-        if: ${{ github.event.inputs.run_backfill != 'true' }}
-        run: |
-          echo "Linking alts by shared Discord ID..."
-          response=$(curl -s -L -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/link-alts-by-discord" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            -H "Content-Type: application/json")
-          http_code=$(echo "$response" | tail -1)
-          body=$(echo "$response" | head -n -1)
-          echo "Response: $body"
-          echo "HTTP status: $http_code"
-
       - name: Auto-warn inactive members
         if: ${{ github.event.inputs.run_backfill != 'true' }}
         run: |

@@ -437,6 +437,36 @@ export async function registerBumpsCommand(): Promise<{ ok: boolean; error?: str
 }
 
 /** Register the /map slash command on the Discord application. Call once via admin. */
+/** Register the /alt command — single action: promote an IGN to main of its account. */
+export async function registerAltCommand(): Promise<{ ok: boolean; error?: string }> {
+  const appId = process.env.DISCORD_APPLICATION_ID;
+  if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };
+
+  const command = {
+    name: 'alt',
+    description: 'Set a character as the main of its alt account',
+    options: [
+      {
+        name: 'ign',
+        type: 3,
+        description: 'IGN to make main',
+        required: true,
+        autocomplete: true,
+      },
+    ],
+  };
+
+  try {
+    await discordFetch(`/applications/${appId}/commands`, {
+      method: 'POST',
+      body: JSON.stringify(command),
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 export async function registerMapCommand(): Promise<{ ok: boolean; error?: string }> {
   const appId = process.env.DISCORD_APPLICATION_ID;
   if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };

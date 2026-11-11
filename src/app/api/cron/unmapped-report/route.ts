@@ -96,5 +96,10 @@ export async function POST(req: NextRequest) {
     results.push({ guild: guildName, unmapped: unmappedIgNs.length, ok: result.ok });
   }
 
+  await postToChannel(
+    UNMAPPED_CHANNEL_ID,
+    `Respective guild leaders, please use the \`/map\` command to map these members to their Discord accounts.`
+  );
+
   return NextResponse.json({ ok: true, total: filtered.length, results });
 }

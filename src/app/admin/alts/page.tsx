@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, Crown, Shield, Users, Trash2, Plus, RefreshCw, Link as LinkIcon, Search, X } from 'lucide-react';
+import { Loader2, Crown, Shield, Users, RefreshCw, Link as LinkIcon, Search, X, ArrowUpCircle } from 'lucide-react';
 import Link from 'next/link';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { useAuth } from '@/contexts/AuthContext';
@@ -59,26 +59,14 @@ function AltsOverviewContent() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [linkingDiscord, setLinkingDiscord] = useState(false);
+  const [promoting, setPromoting] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  // Filters
   const [query, setQuery] = useState('');
   const [guildFilter, setGuildFilter] = useState<string>('');
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
   const [exemptFilter, setExemptFilter] = useState<ExemptFilter>('all');
   const [sortBy, setSortBy] = useState<'size' | 'alpha'>('size');
-
-  // Global manual link form
-  const [globalMainQuery, setGlobalMainQuery] = useState('');
-  const [globalAltQuery, setGlobalAltQuery] = useState('');
-  const [globalMainId, setGlobalMainId] = useState<string>('');
-  const [globalAltId, setGlobalAltId] = useState<string>('');
-  const [addingGlobal, setAddingGlobal] = useState(false);
-
-  // Per-account add form
-  const [showAddFor, setShowAddFor] = useState<string | null>(null);
-  const [newMainId, setNewMainId] = useState('');
-  const [newAltId, setNewAltId] = useState('');
 
   const guildHeader = currentGuild?.guild_id ? { 'x-guild-id': currentGuild.guild_id } : undefined;
 
@@ -113,52 +101,34 @@ function AltsOverviewContent() {
     finally { setSyncing(false); }
   };
 
-  const handleDeleteManual = async (link: AltLink) => {
-    if (link.source !== 'manual') return;
-    if (!confirm(`Remove manual link to ${link.alt_ign}?`)) return;
+  const handleLinkByDiscord = async () => {
+    if (!confirm('Create manual alt links for every pair of members sharing a Discord ID?')) return;
+    setLinkingDiscord(true);
     try {
-      const res = await fetch(`/api/members/alts/manual?id=${link.id}`, {
-        method: 'DELETE',
-        headers: guildHeader,
-      });
+      const res = await fetch('/api/admin/link-alts-by-discord', { method: 'POST' });
       const d = await res.json();
-      if (res.ok) { flash('Deleted'); await load(); }
-      else flash(d.error || 'Delete failed');
+      if (res.ok) { flash(`Linked ${d.accounts_processed} accounts · ${d.links_created} manual rows`); await load(); }
+      else flash(d.error || 'Failed');
     } catch { flash('Network error'); }
+    finally { setLinkingDiscord(false); }
   };
 
-  const postManualLink = async (mainId: string, altId: string): Promise<boolean> => {
+  const handleMakeMain = async (c: Char) => {
+    if (!confirm(`Make ${c.ign} the main of its account? Rewrites all alt rows as manual (locked).`)) return;
+    setPromoting(c.id);
     try {
-      const res = await fetch('/api/members/alts/manual', {
+      const res = await fetch('/api/members/alts/set-main', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(guildHeader ?? {}) },
-        body: JSON.stringify({ main_member_id: mainId, alt_member_id: altId }),
+        body: JSON.stringify({ member_id: c.id }),
       });
       const d = await res.json();
-      if (res.ok) { flash('Manual link saved'); await load(); return true; }
-      flash(d.error || 'Add failed');
-      return false;
-    } catch { flash('Network error'); return false; }
+      if (res.ok) { flash(`👑 ${c.ign} promoted — ${d.rows_written} rows rewritten (${d.account_size} chars)`); await load(); }
+      else flash(d.error || 'Failed');
+    } catch { flash('Network error'); }
+    finally { setPromoting(null); }
   };
 
-  const handleAddManualInAccount = async () => {
-    if (!newMainId || !newAltId) return flash('Pick both chars');
-    const ok = await postManualLink(newMainId, newAltId);
-    if (ok) { setNewMainId(''); setNewAltId(''); setShowAddFor(null); }
-  };
-
-  const handleAddGlobal = async () => {
-    if (!globalMainId || !globalAltId) return flash('Pick both chars');
-    setAddingGlobal(true);
-    const ok = await postManualLink(globalMainId, globalAltId);
-    setAddingGlobal(false);
-    if (ok) {
-      setGlobalMainId(''); setGlobalAltId('');
-      setGlobalMainQuery(''); setGlobalAltQuery('');
-    }
-  };
-
-  // Flatten all tracked chars for global search
   const allChars: Char[] = useMemo(() => {
     if (!data) return [];
     const out: Char[] = [];
@@ -177,7 +147,6 @@ function AltsOverviewContent() {
   const filtered = useMemo(() => {
     if (!data) return [];
     const q = query.trim().toLowerCase();
-
     let accounts = data.accounts.filter((acc) => {
       if (guildFilter && !acc.chars.some((c) => c.guild_id === guildFilter)) return false;
       if (q && !acc.chars.some((c) =>
@@ -185,45 +154,38 @@ function AltsOverviewContent() {
         c.guild_nickname?.toLowerCase().includes(q) ||
         c.hashed_id?.toLowerCase().includes(q)
       )) return false;
-
       if (sourceFilter !== 'all') {
         const sources = new Set(acc.links.map((l) => l.source));
         if (sourceFilter === 'manual' && !sources.has('manual')) return false;
         if (sourceFilter === 'sync' && (sources.has('manual') || !sources.has('sync'))) return false;
         if (sourceFilter === 'mixed' && (!sources.has('manual') || !sources.has('sync'))) return false;
       }
-
       if (exemptFilter !== 'all') {
         const hasExempt = acc.chars.some((c) => c.position === 'LEADER' || c.position === 'DEPUTY');
         if (exemptFilter === 'exempt' && !hasExempt) return false;
         if (exemptFilter === 'non-exempt' && hasExempt) return false;
       }
-
       return true;
     });
-
     accounts = [...accounts].sort((a, b) => {
       if (sortBy === 'size') return b.chars.length - a.chars.length;
       return (a.chars[0]?.ign ?? '').localeCompare(b.chars[0]?.ign ?? '');
     });
-
     return accounts;
   }, [data, query, guildFilter, sourceFilter, exemptFilter, sortBy]);
 
-  const globalMainOptions = useMemo(() => {
-    const q = globalMainQuery.trim().toLowerCase();
-    if (!q) return [];
-    return allChars.filter((c) => c.ign.toLowerCase().includes(q)).slice(0, 10);
-  }, [allChars, globalMainQuery]);
-
-  const globalAltOptions = useMemo(() => {
-    const q = globalAltQuery.trim().toLowerCase();
-    if (!q) return [];
-    return allChars.filter((c) => c.ign.toLowerCase().includes(q) && c.id !== globalMainId).slice(0, 10);
-  }, [allChars, globalAltQuery, globalMainId]);
+  // Compute current main per account (member_id appearing as `member_id` on any link; else lowest char_id)
+  const mainOfAccount = (acc: Account): string | null => {
+    const memberIds = new Set(acc.chars.map((c) => c.id));
+    const mainIds = new Set<string>();
+    for (const l of acc.links) if (memberIds.has(l.member_id)) mainIds.add(l.member_id);
+    if (mainIds.size === 1) return Array.from(mainIds)[0];
+    // Fallback: lowest character_id
+    return acc.chars[0]?.id ?? null;
+  };
 
   if (!isSuperAdmin) {
-    return <div className="max-w-xl mx-auto p-6 text-sm text-muted-foreground">Cross-guild overview is super-admin only. Per-guild leaders can manage manual alts from the <Link href="/admin" className="underline">Admin page</Link>.</div>;
+    return <div className="max-w-xl mx-auto p-6 text-sm text-muted-foreground">Cross-guild overview is super-admin only. Per-guild leaders can switch main from the <Link href="/admin" className="underline">Admin page</Link>.</div>;
   }
 
   if (loading) {
@@ -235,22 +197,12 @@ function AltsOverviewContent() {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2"><LinkIcon className="h-5 w-5" /> Alt Characters Overview</h1>
-          <p className="text-sm text-muted-foreground">Cross-guild view. Primary manual method: share discord_id across chars (auto-links). Fallback: form below. Deputy+ char exempts entire account from activity checks.</p>
+          <p className="text-sm text-muted-foreground">Accounts are auto-linked via shared Discord ID + API sync. Use 👑 to set a different main when the auto-pick is wrong. Deputy+ char exempts the whole account from activity checks.</p>
         </div>
         <div className="flex gap-2">
           <Link href="/admin"><Button size="sm" variant="outline">← Admin</Button></Link>
           <Button size="sm" variant="outline" onClick={load} disabled={loading}><RefreshCw className="h-3 w-3 mr-1" />Reload</Button>
-          <Button size="sm" variant="outline" onClick={async () => {
-            if (!confirm('Create manual alt links for every pair of members sharing a Discord ID?')) return;
-            setLinkingDiscord(true);
-            try {
-              const res = await fetch('/api/admin/link-alts-by-discord', { method: 'POST' });
-              const d = await res.json();
-              if (res.ok) { flash(`Linked ${d.accounts_processed} accounts · ${d.links_created} manual rows`); await load(); }
-              else flash(d.error || 'Failed');
-            } catch { flash('Network error'); }
-            finally { setLinkingDiscord(false); }
-          }} disabled={linkingDiscord}>
+          <Button size="sm" variant="outline" onClick={handleLinkByDiscord} disabled={linkingDiscord}>
             {linkingDiscord ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
             Link by Discord
           </Button>
@@ -268,75 +220,10 @@ function AltsOverviewContent() {
           <Card><CardContent className="p-3 text-center"><div className="text-2xl font-bold">{data.totals.accounts}</div><div className="text-xs text-muted-foreground">Multi-char accounts</div></CardContent></Card>
           <Card><CardContent className="p-3 text-center"><div className="text-2xl font-bold">{data.totals.tracked_members}</div><div className="text-xs text-muted-foreground">Tracked chars</div></CardContent></Card>
           <Card><CardContent className="p-3 text-center"><div className="text-2xl font-bold text-blue-400">{data.totals.sync_links}</div><div className="text-xs text-muted-foreground">Sync links</div></CardContent></Card>
-          <Card><CardContent className="p-3 text-center"><div className="text-2xl font-bold text-purple-400">{data.totals.manual_links}</div><div className="text-xs text-muted-foreground">Manual links</div></CardContent></Card>
+          <Card><CardContent className="p-3 text-center"><div className="text-2xl font-bold text-purple-400">{data.totals.manual_links}</div><div className="text-xs text-muted-foreground">Manual (locked)</div></CardContent></Card>
         </div>
       )}
 
-      {/* Global manual link form */}
-      <Card>
-        <CardHeader className="py-3">
-          <CardTitle className="text-sm flex items-center gap-2"><Plus className="h-4 w-4" />Manually link any two tracked chars</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <p className="text-xs text-muted-foreground">Use when sync hides alts from the API. Both chars must already be tracked (any guild). Sync preserves manual links.</p>
-          <div className="grid sm:grid-cols-[1fr_auto_1fr_auto] gap-2 items-start">
-            <div className="relative">
-              <Search className="absolute left-2 top-2 h-3 w-3 text-muted-foreground" />
-              <input
-                className="w-full pl-7 pr-2 py-1.5 rounded border bg-background text-xs"
-                placeholder="Search main IGN…"
-                value={globalMainQuery}
-                onChange={e => { setGlobalMainQuery(e.target.value); setGlobalMainId(''); }}
-              />
-              {globalMainOptions.length > 0 && !globalMainId && (
-                <div className="absolute z-10 left-0 right-0 top-full mt-1 border rounded bg-popover shadow-lg max-h-48 overflow-y-auto">
-                  {globalMainOptions.map(c => (
-                    <button
-                      key={c.id}
-                      onClick={() => { setGlobalMainId(c.id); setGlobalMainQuery(`${c.ign}${c.guild_nickname ? ` · ${c.guild_nickname}` : ''}`); }}
-                      className="w-full text-left px-2 py-1 text-xs hover:bg-muted flex items-center gap-1"
-                    >
-                      {positionBadge(c.position)}
-                      <span className="font-medium">{c.ign}</span>
-                      {c.guild_nickname && <span className="text-muted-foreground">· {c.guild_nickname}</span>}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <span className="text-xs text-muted-foreground self-center">↔</span>
-            <div className="relative">
-              <Search className="absolute left-2 top-2 h-3 w-3 text-muted-foreground" />
-              <input
-                className="w-full pl-7 pr-2 py-1.5 rounded border bg-background text-xs"
-                placeholder="Search alt IGN…"
-                value={globalAltQuery}
-                onChange={e => { setGlobalAltQuery(e.target.value); setGlobalAltId(''); }}
-              />
-              {globalAltOptions.length > 0 && !globalAltId && (
-                <div className="absolute z-10 left-0 right-0 top-full mt-1 border rounded bg-popover shadow-lg max-h-48 overflow-y-auto">
-                  {globalAltOptions.map(c => (
-                    <button
-                      key={c.id}
-                      onClick={() => { setGlobalAltId(c.id); setGlobalAltQuery(`${c.ign}${c.guild_nickname ? ` · ${c.guild_nickname}` : ''}`); }}
-                      className="w-full text-left px-2 py-1 text-xs hover:bg-muted flex items-center gap-1"
-                    >
-                      {positionBadge(c.position)}
-                      <span className="font-medium">{c.ign}</span>
-                      {c.guild_nickname && <span className="text-muted-foreground">· {c.guild_nickname}</span>}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <Button size="sm" onClick={handleAddGlobal} disabled={addingGlobal || !globalMainId || !globalAltId}>
-              {addingGlobal ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Link'}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Filters */}
       <div className="flex flex-wrap gap-2 items-center">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-2 top-2 h-3 w-3 text-muted-foreground" />
@@ -372,13 +259,15 @@ function AltsOverviewContent() {
         <span className="text-xs text-muted-foreground">{filtered.length} of {data?.accounts.length ?? 0}</span>
       </div>
 
-      {/* Account cards */}
       <div className="space-y-2">
         {filtered.map((acc, idx) => {
           const key = acc.chars[0]?.id ?? String(idx);
           const chars = acc.chars;
           const hasExempt = chars.some((c) => c.position === 'LEADER' || c.position === 'DEPUTY');
-          const main = chars[0];
+          const mainId = mainOfAccount(acc);
+          const main = chars.find((c) => c.id === mainId) ?? chars[0];
+          const alts = chars.filter((c) => c.id !== main?.id);
+
           return (
             <Card key={key} className={hasExempt ? 'border-purple-500/30' : ''}>
               <CardHeader className="py-3">
@@ -396,25 +285,30 @@ function AltsOverviewContent() {
                         {main.guild_nickname && <span className="text-muted-foreground">· {main.guild_nickname}</span>}
                       </span>
                     )}
-                    {chars.slice(1).map((c) => (
+                    {alts.map((c) => (
                       <span key={c.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-muted text-xs">
                         {positionBadge(c.position)}
                         <span className="font-medium">{c.ign}</span>
                         {c.guild_nickname && <span className="text-muted-foreground">· {c.guild_nickname}</span>}
+                        <button
+                          onClick={() => handleMakeMain(c)}
+                          disabled={promoting === c.id}
+                          title={`Make ${c.ign} the main of this account`}
+                          className="ml-1 text-yellow-500 hover:text-yellow-400"
+                        >
+                          {promoting === c.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowUpCircle className="h-3 w-3" />}
+                        </button>
                       </span>
                     ))}
                   </div>
-                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setShowAddFor(showAddFor === key ? null : key)}>
-                    <Plus className="h-3 w-3 mr-1" /> Link in account
-                  </Button>
                 </CardTitle>
               </CardHeader>
               <CardContent className="py-2 space-y-2">
                 {acc.links.length > 0 ? (
                   <div className="space-y-1">
                     {acc.links.map((l) => {
-                      const mainChar = chars.find(c => c.id === l.member_id);
-                      const altChar = chars.find(c => c.id === l.alt_member_id);
+                      const mainChar = chars.find((c) => c.id === l.member_id);
+                      const altChar = chars.find((c) => c.id === l.alt_member_id);
                       return (
                         <div key={l.id} className="flex items-center gap-2 text-xs">
                           <span className={`px-1.5 py-0.5 rounded font-medium ${l.source === 'manual' ? 'bg-purple-500/20 text-purple-300' : 'bg-blue-500/20 text-blue-400'}`}>
@@ -424,31 +318,12 @@ function AltsOverviewContent() {
                             {mainChar?.ign ?? l.member_id.slice(0, 8)} → {altChar?.ign ?? l.alt_ign}
                             {!altChar && <span className="text-orange-400 ml-1">(untracked)</span>}
                           </span>
-                          {l.source === 'manual' && (
-                            <button onClick={() => handleDeleteManual(l)} className="text-destructive hover:text-destructive/80 ml-auto">
-                              <Trash2 className="h-3 w-3" />
-                            </button>
-                          )}
                         </div>
                       );
                     })}
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground italic">No link rows (account inferred by shared chars).</p>
-                )}
-                {showAddFor === key && chars.length >= 2 && (
-                  <div className="flex flex-wrap items-center gap-2 pt-2 border-t">
-                    <select value={newMainId} onChange={e => setNewMainId(e.target.value)} className="px-2 py-1 rounded border bg-background text-xs">
-                      <option value="">Main…</option>
-                      {chars.map(c => <option key={c.id} value={c.id}>{c.ign}</option>)}
-                    </select>
-                    <span className="text-xs">↔</span>
-                    <select value={newAltId} onChange={e => setNewAltId(e.target.value)} className="px-2 py-1 rounded border bg-background text-xs">
-                      <option value="">Alt…</option>
-                      {chars.filter(c => c.id !== newMainId).map(c => <option key={c.id} value={c.id}>{c.ign}</option>)}
-                    </select>
-                    <Button size="sm" className="h-7 text-xs" onClick={handleAddManualInAccount}>Add</Button>
-                  </div>
                 )}
               </CardContent>
             </Card>

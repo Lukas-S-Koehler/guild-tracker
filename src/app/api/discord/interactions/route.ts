@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { waitUntil } from '@vercel/functions';
 import { createAdminClient } from '@/lib/supabase-server';
-import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, sendInteractionFollowup, editOriginalInteractionResponse, editChannelMessageRich, postToChannel } from '@/lib/discord-api';
+import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerAltCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, sendInteractionFollowup, editOriginalInteractionResponse, editChannelMessageRich, postToChannel } from '@/lib/discord-api';
+import { switchAccountMain } from '@/lib/alt-switch';
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
 import { formatLeaderboard } from '@/lib/utils';
 import {
@@ -54,6 +55,10 @@ export async function GET(req: NextRequest) {
     const result = await registerLeaderboardCommand();
     return NextResponse.json(result);
   }
+  if (searchParams.get('action') === 'register-alt') {
+    const result = await registerAltCommand();
+    return NextResponse.json(result);
+  }
   if (searchParams.get('action') === 'register-bumps') {
     const result = await registerBumpsCommand();
     return NextResponse.json(result);
@@ -81,6 +86,14 @@ export async function POST(req: NextRequest) {
 
   if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && interaction.data?.name === 'map') {
     return handleMapAutocomplete(interaction);
+  }
+
+  if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && interaction.data?.name === 'alt') {
+    return handleAltAutocomplete(interaction);
+  }
+
+  if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'alt') {
+    return handleAltCommand(interaction);
   }
 
   if (
@@ -672,3 +685,60 @@ async function handleBumpsCommand(interaction: BumpInteraction) {
   });
 }
 
+
+// --- /alt command: promote IGN to account main ---
+
+const ALT_REQUIRED_ROLE_ID = '1444749350285611038';
+
+async function handleAltAutocomplete(interaction: {
+  data: { options?: Array<{ name: string; value: string; focused?: boolean }> };
+}) {
+  const supabase = createAdminClient();
+  const focused = interaction.data?.options?.find((o) => o.focused);
+  if (focused?.name !== 'ign') return NextResponse.json({ type: 8, data: { choices: [] } });
+  const query = (focused.value ?? '').toLowerCase();
+  const { data } = await supabase
+    .from('members')
+    .select('ign')
+    .eq('is_active', true)
+    .not('hashed_id', 'is', null)
+    .limit(100);
+  const filtered = (data ?? []).filter((m) => (query ? m.ign?.toLowerCase().includes(query) : true));
+  const choices = filtered.slice(0, 25).map((m) => ({ name: m.ign, value: m.ign }));
+  return NextResponse.json({ type: 8, data: { choices } });
+}
+
+async function handleAltCommand(interaction: {
+  member?: { user?: { id: string; username: string }; roles?: string[] };
+  data: { options?: Array<{ name: string; value: string }> };
+}) {
+  const roles = interaction.member?.roles ?? [];
+  if (!roles.includes(ALT_REQUIRED_ROLE_ID)) {
+    return NextResponse.json({
+      type: 4,
+      data: { content: `You lack permission. Requires <@&${ALT_REQUIRED_ROLE_ID}>.`, flags: 64 },
+    });
+  }
+
+  const ign = interaction.data?.options?.find((o) => o.name === 'ign')?.value as string | undefined;
+  if (!ign) return NextResponse.json({ type: 4, data: { content: 'Missing ign.', flags: 64 } });
+
+  const supabase = createAdminClient();
+  const { data: target } = await supabase
+    .from('members')
+    .select('id, ign, hashed_id')
+    .ilike('ign', ign)
+    .eq('is_active', true)
+    .maybeSingle();
+  if (!target) return NextResponse.json({ type: 4, data: { content: `No active member **${ign}**.`, flags: 64 } });
+  if (!target.hashed_id) return NextResponse.json({ type: 4, data: { content: `${target.ign} missing hashed_id.`, flags: 64 } });
+
+  const result = await switchAccountMain(supabase, target.id);
+  if (result.account_size < 2) {
+    return NextResponse.json({ type: 4, data: { content: `${target.ign} has no linked alts — nothing to switch.`, flags: 64 } });
+  }
+  return NextResponse.json({
+    type: 4,
+    data: { content: `👑 **${target.ign}** is now main (account: ${result.account_size} chars, ${result.rows_written} rows rewritten, locked as manual).`, flags: 64 },
+  });
+}
