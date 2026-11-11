@@ -95,13 +95,12 @@ export async function POST(req: NextRequest) {
     let noDiscord = 0;
 
     try {
-      // Fetch active members (excluding leaders/deputies)
+      // Fetch all active members — leader/deputy exemption applied after alt-graph propagation
       const { data: members } = await supabase
         .from('members')
         .select('id, ign, position, discord_id, first_seen, hashed_id, character_id')
         .eq('current_guild_id', guildId)
-        .eq('is_active', true)
-        .not('position', 'in', '("LEADER","DEPUTY")');
+        .eq('is_active', true);
 
       if (!members || members.length === 0) continue;
 
@@ -187,6 +186,24 @@ export async function POST(req: NextRequest) {
           mainToAlts.set(effectiveMain, arr);
         }
       }
+
+      // Exemption propagation: leader/deputy chars and their same-guild linked alts
+      const exemptIds = new Set<string>();
+      for (const m of members) {
+        if (m.position === 'LEADER' || m.position === 'DEPUTY') exemptIds.add(m.id);
+      }
+      const propagateExempt = (id: string) => {
+        const queue = [id];
+        while (queue.length > 0) {
+          const cur = queue.shift()!;
+          for (const a of mainToAlts.get(cur) ?? []) {
+            if (memberSet.has(a) && !exemptIds.has(a)) { exemptIds.add(a); queue.push(a); }
+          }
+          const main = altToMain.get(cur);
+          if (main && memberSet.has(main) && !exemptIds.has(main)) { exemptIds.add(main); queue.push(main); }
+        }
+      };
+      for (const id of Array.from(exemptIds)) propagateExempt(id);
 
       // Build last-activity map per member
       const lastActivityMap = new Map<string, string>();
@@ -451,6 +468,7 @@ export async function POST(req: NextRequest) {
       const sharedBankCovered: Array<{ ign: string }> = [];
 
       for (const member of members) {
+        if (exemptIds.has(member.id)) { skipped++; continue; }
         const lastDate = lastActivityMap.get(member.id);
 
         let daysSinceJoin = 999;

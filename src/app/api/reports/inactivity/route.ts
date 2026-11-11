@@ -119,6 +119,25 @@ export async function GET(req: NextRequest) {
     mainToAlts.set(link.member_id, arr);
   }
 
+  // Exemption propagation: if any linked same-guild character is Leader/Deputy,
+  // every linked character in this guild is exempt from activity checks.
+  const exemptIds = new Set<string>();
+  for (const m of members) {
+    if (m.position === 'LEADER' || m.position === 'DEPUTY') exemptIds.add(m.id);
+  }
+  // Propagate via mainToAlts + altToMain (one BFS pass over the account graph)
+  const propagate = (id: string) => {
+    const queue = [id];
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      const alts = mainToAlts.get(cur) ?? [];
+      for (const a of alts) if (memberSet.has(a) && !exemptIds.has(a)) { exemptIds.add(a); queue.push(a); }
+      const main = altToMain.get(cur);
+      if (main && memberSet.has(main) && !exemptIds.has(main)) { exemptIds.add(main); queue.push(main); }
+    }
+  };
+  for (const id of Array.from(exemptIds)) propagate(id);
+
   const inactiveMembers = members
     .map((member) => {
       let lastDate = lastActivityMap.get(member.id);
@@ -182,7 +201,7 @@ export async function GET(req: NextRequest) {
       if (!m.ign || m.ign.toLowerCase().includes('raw activity') || m.ign.toLowerCase().includes('log')) {
         return false;
       }
-      if (m.position === 'LEADER' || m.position === 'DEPUTY') return false;
+      if (exemptIds.has(m.id)) return false;
       return m.category !== 'active';
     })
     .sort((a, b) => b.days_inactive - a.days_inactive);

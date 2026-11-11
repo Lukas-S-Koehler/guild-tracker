@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase-server';
+import { createServerClient, createAdminClient } from '@/lib/supabase-server';
 import { verifyAdminOrLeader, isErrorResponse } from '@/lib/auth-helpers';
 import { getMemberApiKey } from '@/lib/member-api-key';
+import { IdleMMOApi } from '@/lib/idlemmo-api';
+import { runAltSync } from '@/lib/alt-sync';
 
 export const dynamic = 'force-dynamic';
 
@@ -105,6 +107,7 @@ export async function POST(req: NextRequest) {
 
   // Transform members data for database
   // Set first_seen to today if member is NEW to this guild (either brand new or moved from another guild)
+  const newcomerHashedIds: string[] = [];
   const members = data.members.map((m: any) => {
     const idlemmoId = m.name.toLowerCase();
     const existing = existingMap.get(idlemmoId);
@@ -113,6 +116,7 @@ export async function POST(req: NextRequest) {
     // 1. They don't exist in our DB at all, OR
     // 2. They exist but their current_guild_id is different (moved from another guild)
     const isNewToGuild = !existing || existing.current_guild_id !== guildId;
+    if (isNewToGuild && m.hashed_id) newcomerHashedIds.push(m.hashed_id);
 
     if (isNewToGuild) {
       console.log(`[Sync] New member to guild: ${m.name} (was in guild: ${existing?.current_guild_id || 'none'})`);
@@ -175,8 +179,35 @@ export async function POST(req: NextRequest) {
     .update({ settings: { ...(existingConfig?.settings || {}), last_member_synced_at: new Date().toISOString() } })
     .eq('guild_id', guildId);
 
+  // Auto-trigger alt sync for newly-joined members with a hashed_id.
+  // Uses the guild's API key (same key used by manual alt sync).
+  let altSyncResult: { processed: number; alt_links_written: number; errors: string[] } | null = null;
+  if (newcomerHashedIds.length > 0) {
+    try {
+      const adminSb = createAdminClient();
+      const { data: guildCfg } = await adminSb
+        .from('guild_config')
+        .select('api_key')
+        .eq('guild_id', guildId)
+        .single();
+      if (guildCfg?.api_key) {
+        const altApi = new IdleMMOApi(guildCfg.api_key);
+        const r = await runAltSync({
+          supabase: adminSb,
+          api: altApi,
+          seedHashedIds: newcomerHashedIds,
+          scopeGuildId: guildId,
+        });
+        altSyncResult = { processed: r.processed, alt_links_written: r.alt_links_written, errors: r.errors };
+        console.log(`[Sync] auto alt-sync: processed=${r.processed} links=${r.alt_links_written} errors=${r.errors.length}`);
+      }
+    } catch (err) {
+      console.log('[Sync] auto alt-sync failed (non-fatal):', err);
+    }
+  }
+
   console.log(`✅ SYNC COMPLETE — ${members.length} members synced`);
   console.log("=== SYNC MEMBERS END ===");
 
-  return NextResponse.json({ success: true, synced: members.length });
+  return NextResponse.json({ success: true, synced: members.length, new_members: newcomerHashedIds.length, alt_sync: altSyncResult });
 }

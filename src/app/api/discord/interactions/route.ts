@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { waitUntil } from '@vercel/functions';
 import { createAdminClient } from '@/lib/supabase-server';
-import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, sendInteractionFollowup, editOriginalInteractionResponse, editChannelMessageRich } from '@/lib/discord-api';
+import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, sendInteractionFollowup, editOriginalInteractionResponse, editChannelMessageRich, postToChannel } from '@/lib/discord-api';
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
 import { formatLeaderboard } from '@/lib/utils';
 import {
   COOLDOWN_MS,
-  MILESTONES,
-  STREAK_MILESTONES,
   buildBumpMessage,
   countBumpsForUser,
   displayName,
@@ -603,18 +601,23 @@ async function processBump(interaction: BumpInteraction) {
       if (!editRes.ok) console.error('[bump] edit failed:', editRes.error);
     }
 
-    // Public milestone / streak follow-ups.
-    if (MILESTONES.includes(total)) {
-      await sendInteractionFollowup(appId, token, {
-        content: `🎉 <@${user.id}> just hit **${total}** bumps! 🚀`,
-        allowed_mentions: { users: [user.id] },
-      });
+    // Public milestone / streak brags — only big ones, posted to brag channel.
+    const BRAG_CHANNEL_ID = '1444751853500760146';
+    const bigBumpMilestone = total > 0 && total % 100 === 0;
+    const bigStreakMilestone = streak > 0 && streak % 30 === 0;
+    if (bigBumpMilestone) {
+      await postToChannel(
+        BRAG_CHANNEL_ID,
+        `🎉 <@${user.id}> just hit **${total}** bumps! 🚀`
+      );
     }
-    if (STREAK_MILESTONES.includes(streak)) {
-      await sendInteractionFollowup(appId, token, {
-        content: `🔥 <@${user.id}> is on a **${streak}-day** bump streak!`,
-        allowed_mentions: { users: [user.id] },
-      });
+    if (bigStreakMilestone) {
+      const months = streak / 30;
+      const label = months === 1 ? '1 month' : `${months} months`;
+      await postToChannel(
+        BRAG_CHANNEL_ID,
+        `🔥 <@${user.id}> hit a **${label}** bump streak (${streak} days)!`
+      );
     }
   } catch (err) {
     console.error('[bump] processBump error:', err);

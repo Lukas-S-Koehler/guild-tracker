@@ -563,11 +563,13 @@ function DiscordMappingSection({ guildId }: { guildId: string }) {
 }
 
 interface AltInfo {
+  id: string;
   member_id: string;
   alt_ign: string;
   alt_hashed_id: string;
   alt_member_id: string | null;
   fetched_at: string;
+  source?: 'sync' | 'manual';
   alt_member?: { ign: string; current_guild_id: string };
 }
 
@@ -579,6 +581,10 @@ function AltCharactersSection({ guildId }: { guildId: string }) {
   const [syncing, setSyncing] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [manualMainId, setManualMainId] = useState<string>('');
+  const [manualAltId, setManualAltId] = useState<string>('');
+  const [savingManual, setSavingManual] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -612,6 +618,44 @@ function AltCharactersSection({ guildId }: { guildId: string }) {
       }
     } catch { setMessage('Network error'); }
     finally { setSyncing(false); }
+  };
+
+  const handleAddManual = async () => {
+    if (!manualMainId || !manualAltId) { setMessage('Pick a main and an alt'); return; }
+    setSavingManual(true);
+    setMessage(null);
+    try {
+      const res = await api.post('/api/members/alts/manual', {
+        main_member_id: manualMainId,
+        alt_member_id: manualAltId,
+      }, { guildId });
+      const data = await res.json();
+      if (res.ok) {
+        setMessage('Manual alt link saved');
+        setManualMainId('');
+        setManualAltId('');
+        await load();
+      } else {
+        setMessage(data.error || 'Failed to save');
+      }
+    } catch { setMessage('Network error'); }
+    finally { setSavingManual(false); }
+  };
+
+  const handleDeleteManual = async (id: string) => {
+    if (!confirm('Delete this manual alt link?')) return;
+    setDeletingId(id);
+    try {
+      const res = await api.delete(`/api/members/alts/manual?id=${id}`, { guildId });
+      const data = await res.json();
+      if (res.ok) {
+        setMessage('Manual link deleted');
+        await load();
+      } else {
+        setMessage(data.error || 'Delete failed');
+      }
+    } catch { setMessage('Network error'); }
+    finally { setDeletingId(null); }
   };
 
   const handleBackfillHashedIds = async () => {
@@ -672,18 +716,40 @@ function AltCharactersSection({ guildId }: { guildId: string }) {
         <span className="text-xs text-muted-foreground">{membersWithAlts.length} with known alts</span>
       </div>
       {membersWithAlts.length > 0 && (
-        <div className="space-y-2 max-h-48 overflow-y-auto">
+        <div className="space-y-2 max-h-56 overflow-y-auto">
           {membersWithAlts.map(m => {
             const memberAlts = altsByMember.get(m.id) ?? [];
             return (
               <div key={m.id} className="text-xs flex items-start gap-2">
                 <span className="font-medium w-24 shrink-0 truncate">{m.ign}</span>
-                <div className="flex flex-wrap gap-1">
+                <div className="flex flex-wrap gap-1 flex-1">
                   {memberAlts.map(a => {
                     const altMember = a.alt_member_id ? memberMap.get(a.alt_member_id) : null;
+                    const isManual = a.source === 'manual';
                     return (
-                      <span key={a.alt_hashed_id} className={`px-1.5 py-0.5 rounded text-xs ${altMember ? 'bg-blue-500/20 text-blue-400' : 'bg-muted text-muted-foreground'}`}>
-                        {a.alt_ign}{altMember ? ' ✓' : ''}
+                      <span
+                        key={a.id}
+                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${
+                          isManual
+                            ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                            : altMember
+                              ? 'bg-blue-500/20 text-blue-400'
+                              : 'bg-muted text-muted-foreground'
+                        }`}
+                      >
+                        {a.alt_ign}
+                        {altMember ? ' ✓' : ''}
+                        {isManual && <span className="opacity-70">·manual</span>}
+                        {isManual && (
+                          <button
+                            onClick={() => handleDeleteManual(a.id)}
+                            disabled={deletingId === a.id}
+                            className="ml-0.5 hover:text-destructive"
+                            title="Remove manual link"
+                          >
+                            {deletingId === a.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Trash2 className="h-2.5 w-2.5" />}
+                          </button>
+                        )}
                       </span>
                     );
                   })}
@@ -693,6 +759,35 @@ function AltCharactersSection({ guildId }: { guildId: string }) {
           })}
         </div>
       )}
+
+      <div className="border-t pt-3 space-y-2">
+        <p className="text-xs font-medium">Add manual alt link</p>
+        <p className="text-xs text-muted-foreground">
+          Use when the API hides an account&apos;s alt list. Both chars must be tracked members. Manual links are permanent (survive syncs) until you delete them or the member leaves tracking.
+        </p>
+        <div className="flex flex-wrap gap-2 items-center">
+          <select
+            value={manualMainId}
+            onChange={e => setManualMainId(e.target.value)}
+            className="px-2 py-1 rounded border bg-background text-xs"
+          >
+            <option value="">Main…</option>
+            {members.map(m => <option key={m.id} value={m.id}>{m.ign}</option>)}
+          </select>
+          <span className="text-xs text-muted-foreground">↔</span>
+          <select
+            value={manualAltId}
+            onChange={e => setManualAltId(e.target.value)}
+            className="px-2 py-1 rounded border bg-background text-xs"
+          >
+            <option value="">Alt…</option>
+            {members.filter(m => m.id !== manualMainId).map(m => <option key={m.id} value={m.id}>{m.ign}</option>)}
+          </select>
+          <Button size="sm" className="h-7 text-xs" onClick={handleAddManual} disabled={savingManual || !manualMainId || !manualAltId}>
+            {savingManual ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Add link'}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -914,6 +1009,9 @@ function SuperAdminPanel() {
             {loadingOverview ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
             {showOverview ? 'Hide Overview' : 'Show Overview'}
           </Button>
+          <Link href="/admin/alts">
+            <Button size="sm" variant="outline">Alts Overview</Button>
+          </Link>
           <Link href="/admin/raid-reminders">
             <Button size="sm" variant="outline">Raid Reminders</Button>
           </Link>
