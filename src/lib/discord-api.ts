@@ -437,55 +437,6 @@ export async function registerBumpsCommand(): Promise<{ ok: boolean; error?: str
 }
 
 /** Register the /map slash command on the Discord application. Call once via admin. */
-/** Register the /alt slash command (link / unlink / list). */
-export async function registerAltCommand(): Promise<{ ok: boolean; error?: string }> {
-  const appId = process.env.DISCORD_APPLICATION_ID;
-  if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };
-
-  const ignOpt = (name: string, description: string) => ({
-    name,
-    type: 3,
-    description,
-    required: true,
-    autocomplete: true,
-  });
-
-  const command = {
-    name: 'alt',
-    description: 'Manage alt character links for your guild',
-    options: [
-      {
-        type: 1,
-        name: 'link',
-        description: 'Permanently link two tracked chars as the same account',
-        options: [ignOpt('main', 'Main IGN'), ignOpt('alt', 'Alt IGN')],
-      },
-      {
-        type: 1,
-        name: 'unlink',
-        description: 'Remove a manual alt link',
-        options: [ignOpt('main', 'Main IGN'), ignOpt('alt', 'Alt IGN')],
-      },
-      {
-        type: 1,
-        name: 'list',
-        description: 'Show alts of a member',
-        options: [ignOpt('ign', 'Any IGN on the account')],
-      },
-    ],
-  };
-
-  try {
-    await discordFetch(`/applications/${appId}/commands`, {
-      method: 'POST',
-      body: JSON.stringify(command),
-    });
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: String(err) };
-  }
-}
-
 export async function registerMapCommand(): Promise<{ ok: boolean; error?: string }> {
   const appId = process.env.DISCORD_APPLICATION_ID;
   if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { waitUntil } from '@vercel/functions';
 import { createAdminClient } from '@/lib/supabase-server';
-import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerAltCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, sendInteractionFollowup, editOriginalInteractionResponse, editChannelMessageRich, postToChannel } from '@/lib/discord-api';
+import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, sendInteractionFollowup, editOriginalInteractionResponse, editChannelMessageRich, postToChannel } from '@/lib/discord-api';
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
 import { formatLeaderboard } from '@/lib/utils';
 import {
@@ -54,10 +54,6 @@ export async function GET(req: NextRequest) {
     const result = await registerLeaderboardCommand();
     return NextResponse.json(result);
   }
-  if (searchParams.get('action') === 'register-alt') {
-    const result = await registerAltCommand();
-    return NextResponse.json(result);
-  }
   if (searchParams.get('action') === 'register-bumps') {
     const result = await registerBumpsCommand();
     return NextResponse.json(result);
@@ -85,14 +81,6 @@ export async function POST(req: NextRequest) {
 
   if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && interaction.data?.name === 'map') {
     return handleMapAutocomplete(interaction);
-  }
-
-  if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && interaction.data?.name === 'alt') {
-    return handleAltAutocomplete(interaction);
-  }
-
-  if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'alt') {
-    return handleAltCommand(interaction);
   }
 
   if (
@@ -408,9 +396,14 @@ async function handleMapCommand(interaction: {
       .is('discord_id', null);
   }
 
+  // Shared-discord-id → auto manual alt links between all members with this discord_id
+  const { linkAltsBySharedDiscord } = await import('@/lib/discord-alt-link');
+  const linkResult = await linkAltsBySharedDiscord(supabase, targetDiscordId);
+
   const altNote = allLinkedIds.length > 0 ? ` (+ ${allLinkedIds.length} alt${allLinkedIds.length > 1 ? 's' : ''})` : '';
+  const autoLinkNote = linkResult.created > 0 ? ` 🔗 auto-linked ${linkResult.created} alt${linkResult.created > 1 ? 's' : ''} via shared Discord` : '';
   const overwriteNote = member.discord_id && member.discord_id !== targetDiscordId ? ' *(overwrote previous mapping)*' : '';
-  const responseMsg = `✅ Mapped **${member.ign}** → <@${targetDiscordId}>${altNote}${overwriteNote}`;
+  const responseMsg = `✅ Mapped **${member.ign}** → <@${targetDiscordId}>${altNote}${overwriteNote}${autoLinkNote}`;
 
   return NextResponse.json({
     type: 4,
@@ -679,192 +672,3 @@ async function handleBumpsCommand(interaction: BumpInteraction) {
   });
 }
 
-// --- /alt command: manual alt character management ---
-
-const ALT_REQUIRED_ROLE_ID = '1444749350285611038';
-
-type AltSubOption = { name: string; value: string; focused?: boolean };
-type AltInteraction = {
-  guild_id?: string;
-  member?: { user?: { id: string; username: string }; roles?: string[] };
-  data: {
-    options?: Array<{ name: string; type?: number; options?: AltSubOption[] }>;
-  };
-};
-
-/** Resolve the tracked guild for this Discord server via guild_config.settings.discord_server_id. */
-async function resolveTrackedGuildId(supabase: ReturnType<typeof createAdminClient>, discordServerId: string | undefined): Promise<string | null> {
-  if (!discordServerId) return null;
-  const { data } = await supabase
-    .from('guild_config')
-    .select('guild_id, settings')
-    .filter('settings->>discord_server_id', 'eq', discordServerId);
-  const match = (data ?? []).find((r) => r.settings?.discord_server_id === discordServerId);
-  return match?.guild_id ?? null;
-}
-
-async function handleAltAutocomplete(interaction: AltInteraction) {
-  const supabase = createAdminClient();
-  const sub = interaction.data.options?.[0];
-  const focused = sub?.options?.find((o) => o.focused);
-  if (!focused) return NextResponse.json({ type: 8, data: { choices: [] } });
-  const query = (focused.value ?? '').toLowerCase();
-
-  const guildId = await resolveTrackedGuildId(supabase, interaction.guild_id);
-
-  let qb = supabase
-    .from('members')
-    .select('ign, current_guild_id')
-    .eq('is_active', true)
-    .not('hashed_id', 'is', null)
-    .limit(100);
-  if (guildId) qb = qb.eq('current_guild_id', guildId);
-  const { data } = await qb;
-  const filtered = (data ?? []).filter((m) => (query ? m.ign?.toLowerCase().includes(query) : true));
-  const choices = filtered.slice(0, 25).map((m) => ({ name: m.ign, value: m.ign }));
-  return NextResponse.json({ type: 8, data: { choices } });
-}
-
-async function handleAltCommand(interaction: AltInteraction) {
-  const roles = interaction.member?.roles ?? [];
-  if (!roles.includes(ALT_REQUIRED_ROLE_ID)) {
-    return NextResponse.json({
-      type: 4,
-      data: { content: `You lack permission. Requires <@&${ALT_REQUIRED_ROLE_ID}>.`, flags: 64 },
-    });
-  }
-
-  const supabase = createAdminClient();
-  const sub = interaction.data.options?.[0];
-  if (!sub) {
-    return NextResponse.json({ type: 4, data: { content: 'Missing subcommand.', flags: 64 } });
-  }
-
-  const guildId = await resolveTrackedGuildId(supabase, interaction.guild_id);
-  if (!guildId) {
-    return NextResponse.json({
-      type: 4,
-      data: { content: 'This Discord server is not linked to a tracked guild. Set `discord_server_id` in guild settings first.', flags: 64 },
-    });
-  }
-
-  const argOf = (name: string) => sub.options?.find((o) => o.name === name)?.value as string | undefined;
-
-  const lookupMember = async (ign: string | undefined) => {
-    if (!ign) return null;
-    const { data } = await supabase
-      .from('members')
-      .select('id, ign, hashed_id, character_id, current_guild_id')
-      .ilike('ign', ign)
-      .eq('is_active', true)
-      .maybeSingle();
-    return data;
-  };
-
-  if (sub.name === 'link') {
-    const mainIgn = argOf('main');
-    const altIgn = argOf('alt');
-    const [main, alt] = await Promise.all([lookupMember(mainIgn), lookupMember(altIgn)]);
-    if (!main || !alt) {
-      return NextResponse.json({
-        type: 4,
-        data: { content: `Member not found: ${!main ? mainIgn : ''}${!main && !alt ? ', ' : ''}${!alt ? altIgn : ''}`, flags: 64 },
-      });
-    }
-    if (main.id === alt.id) {
-      return NextResponse.json({ type: 4, data: { content: 'Main and alt cannot be the same.', flags: 64 } });
-    }
-    if (main.current_guild_id !== guildId && alt.current_guild_id !== guildId) {
-      return NextResponse.json({
-        type: 4,
-        data: { content: 'At least one of the two characters must be in this Discord server\'s guild.', flags: 64 },
-      });
-    }
-    if (!main.hashed_id || !alt.hashed_id) {
-      return NextResponse.json({ type: 4, data: { content: 'Both members need a hashed_id. Run Backfill Hashed IDs first.', flags: 64 } });
-    }
-
-    await Promise.all([
-      supabase.from('member_alts').delete().eq('source', 'sync')
-        .eq('member_id', main.id).eq('alt_hashed_id', alt.hashed_id),
-      supabase.from('member_alts').delete().eq('source', 'sync')
-        .eq('member_id', alt.id).eq('alt_hashed_id', main.hashed_id),
-    ]);
-
-    const { error } = await supabase.from('member_alts').upsert({
-      member_id: main.id,
-      alt_ign: alt.ign,
-      alt_hashed_id: alt.hashed_id,
-      alt_character_id: alt.character_id ?? null,
-      alt_member_id: alt.id,
-      fetched_at: new Date().toISOString(),
-      source: 'manual',
-    }, { onConflict: 'member_id,alt_hashed_id' });
-
-    if (error) return NextResponse.json({ type: 4, data: { content: `DB error: ${error.message}`, flags: 64 } });
-    return NextResponse.json({
-      type: 4,
-      data: { content: `🔗 Manual alt link saved: **${main.ign}** ↔ **${alt.ign}** (permanent)`, flags: 64 },
-    });
-  }
-
-  if (sub.name === 'unlink') {
-    const mainIgn = argOf('main');
-    const altIgn = argOf('alt');
-    const [main, alt] = await Promise.all([lookupMember(mainIgn), lookupMember(altIgn)]);
-    if (!main || !alt) {
-      return NextResponse.json({ type: 4, data: { content: 'Member not found.', flags: 64 } });
-    }
-    const { data: rows, error: findErr } = await supabase
-      .from('member_alts')
-      .select('id, member_id, alt_hashed_id, source')
-      .in('member_id', [main.id, alt.id])
-      .eq('source', 'manual');
-    if (findErr) return NextResponse.json({ type: 4, data: { content: `DB error: ${findErr.message}`, flags: 64 } });
-    const match = (rows ?? []).find((r) =>
-      (r.member_id === main.id && r.alt_hashed_id === alt.hashed_id) ||
-      (r.member_id === alt.id && r.alt_hashed_id === main.hashed_id)
-    );
-    if (!match) {
-      return NextResponse.json({ type: 4, data: { content: 'No manual link found between those two chars.', flags: 64 } });
-    }
-    const { error } = await supabase.from('member_alts').delete().eq('id', match.id);
-    if (error) return NextResponse.json({ type: 4, data: { content: `DB error: ${error.message}`, flags: 64 } });
-    return NextResponse.json({
-      type: 4,
-      data: { content: `🗑️ Removed manual link: **${main.ign}** ↔ **${alt.ign}**`, flags: 64 },
-    });
-  }
-
-  if (sub.name === 'list') {
-    const ign = argOf('ign');
-    const target = await lookupMember(ign);
-    if (!target) return NextResponse.json({ type: 4, data: { content: `No active member **${ign}**.`, flags: 64 } });
-
-    const [{ data: fwd }, { data: rev }] = await Promise.all([
-      supabase.from('member_alts').select('alt_ign, alt_member_id, source').eq('member_id', target.id),
-      supabase.from('member_alts').select('member_id, source').eq('alt_member_id', target.id),
-    ]);
-
-    const mainIds = Array.from(new Set((rev ?? []).map((r) => r.member_id))).filter(Boolean);
-    const mainMap = new Map<string, { ign: string }>();
-    if (mainIds.length > 0) {
-      const { data } = await supabase.from('members').select('id, ign').in('id', mainIds);
-      for (const m of data ?? []) mainMap.set(m.id, { ign: m.ign });
-    }
-
-    const fwdLines = (fwd ?? []).map((r) => `· ${r.alt_ign} ${r.source === 'manual' ? '*(manual)*' : ''}`);
-    const revLines = (rev ?? []).map((r) => {
-      const name = mainMap.get(r.member_id)?.ign ?? r.member_id.slice(0, 8);
-      return `· ${name} *(main)* ${r.source === 'manual' ? '*(manual)*' : ''}`;
-    });
-    const all = [...fwdLines, ...revLines];
-    const body = all.length === 0 ? '_No alt links._' : all.join('\n');
-    return NextResponse.json({
-      type: 4,
-      data: { content: `**Alts for ${target.ign}:**\n${body}`, flags: 64 },
-    });
-  }
-
-  return NextResponse.json({ type: 4, data: { content: 'Unknown subcommand.', flags: 64 } });
-}

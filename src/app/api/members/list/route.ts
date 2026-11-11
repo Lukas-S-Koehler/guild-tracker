@@ -92,6 +92,12 @@ export async function PATCH(req: NextRequest) {
       if (!force) q = q.is('discord_id', null);
       await q;
     }
+
+    // Shared-discord-id → auto manual alt links between all members with this discord_id
+    if (update.discord_id) {
+      const { linkAltsBySharedDiscord } = await import('@/lib/discord-alt-link');
+      await linkAltsBySharedDiscord(supabase, update.discord_id);
+    }
   }
 
   return NextResponse.json({ ok: true });

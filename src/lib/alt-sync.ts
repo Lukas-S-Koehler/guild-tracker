@@ -85,6 +85,27 @@ export async function runAltSync(args: RunAltSyncArgs): Promise<AltSyncResult> {
     }
   }
 
+  // Shared-discord-id edges: members with same non-null discord_id are alts.
+  const byDiscord = new Map<string, Member[]>();
+  for (const m of allMembers) {
+    if (!m.discord_id || !m.hashed_id) continue;
+    const arr = byDiscord.get(m.discord_id) ?? [];
+    arr.push(m);
+    byDiscord.set(m.discord_id, arr);
+  }
+  for (const group of Array.from(byDiscord.values())) {
+    if (group.length < 2) continue;
+    const anchor = group[0].hashed_id!;
+    for (let i = 1; i < group.length; i++) {
+      addEdge(anchor, group[i].hashed_id!);
+    }
+    for (const m of group) {
+      if (!charInfoMap.has(m.hashed_id!) && m.character_id != null) {
+        charInfoMap.set(m.hashed_id!, { id: m.character_id, name: m.ign, hashed_id: m.hashed_id! });
+      }
+    }
+  }
+
   // Seed self-nodes (so lone tracked members still form a component)
   for (const h of seedHashedIds) {
     if (!altGraph.has(h)) altGraph.set(h, new Set());

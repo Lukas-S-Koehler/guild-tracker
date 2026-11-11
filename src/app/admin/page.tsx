@@ -763,7 +763,9 @@ function AltCharactersSection({ guildId }: { guildId: string }) {
       <div className="border-t pt-3 space-y-2">
         <p className="text-xs font-medium">Add manual alt link</p>
         <p className="text-xs text-muted-foreground">
-          Use when the API hides an account&apos;s alt list. Both chars must be tracked members. Manual links are permanent (survive syncs) until you delete them or the member leaves tracking.
+          <strong>Primary method:</strong> map both characters to the same Discord ID (via Discord Member Mapping above or <code>/map</code> in Discord) — alt links are auto-created from shared discord_id.
+          <br />
+          Use this fallback form only when there is no shared Discord account available. Both chars must be tracked. Manual links are permanent (survive syncs) until deleted or the member leaves tracking.
         </p>
         <div className="flex flex-wrap gap-2 items-center">
           <select
@@ -823,6 +825,7 @@ interface OverviewData {
 function SuperAdminPanel() {
   const [backfilling, setBackfilling] = useState(false);
   const [syncingAlts, setSyncingAlts] = useState(false);
+  const [linkingDiscord, setLinkingDiscord] = useState(false);
   const [loadingOverview, setLoadingOverview] = useState(false);
   const [overview, setOverview] = useState<OverviewData | null>(null);
   const [showOverview, setShowOverview] = useState(false);
@@ -920,6 +923,21 @@ function SuperAdminPanel() {
     finally { setBackfilling(false); }
   };
 
+  const handleLinkByDiscord = async () => {
+    if (!confirm('Scan all discord_id mappings and auto-link members sharing one as manual alts?')) return;
+    setLinkingDiscord(true);
+    try {
+      const res = await fetch('/api/admin/link-alts-by-discord', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        showMsg('success', `Processed ${data.accounts_processed} accounts; created ${data.links_created} manual links from shared Discord IDs.`);
+      } else {
+        showMsg('error', data.error || 'Failed');
+      }
+    } catch { showMsg('error', 'Network error'); }
+    finally { setLinkingDiscord(false); }
+  };
+
   const handleSyncAltsAll = async () => {
     if (!confirm('Sync alt characters for ALL members with a hashed ID? Calls IdleMMO API per member — may take several minutes.')) return;
     setSyncingAlts(true);
@@ -1004,6 +1022,10 @@ function SuperAdminPanel() {
           <Button size="sm" variant="outline" onClick={handleSyncAltsAll} disabled={syncingAlts || backfilling}>
             {syncingAlts ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
             Sync All Alts
+          </Button>
+          <Button size="sm" variant="outline" onClick={handleLinkByDiscord} disabled={linkingDiscord}>
+            {linkingDiscord ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+            Link Alts by Discord ID
           </Button>
           <Button size="sm" variant="outline" onClick={showOverview ? () => setShowOverview(false) : loadOverview} disabled={loadingOverview}>
             {loadingOverview ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}

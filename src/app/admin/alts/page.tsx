@@ -58,6 +58,7 @@ function AltsOverviewContent() {
   const [data, setData] = useState<OverviewPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [linkingDiscord, setLinkingDiscord] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   // Filters
@@ -234,11 +235,25 @@ function AltsOverviewContent() {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2"><LinkIcon className="h-5 w-5" /> Alt Characters Overview</h1>
-          <p className="text-sm text-muted-foreground">Cross-guild view. Manual links are permanent. Deputy+ char exempts entire account from activity checks.</p>
+          <p className="text-sm text-muted-foreground">Cross-guild view. Primary manual method: share discord_id across chars (auto-links). Fallback: form below. Deputy+ char exempts entire account from activity checks.</p>
         </div>
         <div className="flex gap-2">
           <Link href="/admin"><Button size="sm" variant="outline">← Admin</Button></Link>
           <Button size="sm" variant="outline" onClick={load} disabled={loading}><RefreshCw className="h-3 w-3 mr-1" />Reload</Button>
+          <Button size="sm" variant="outline" onClick={async () => {
+            if (!confirm('Create manual alt links for every pair of members sharing a Discord ID?')) return;
+            setLinkingDiscord(true);
+            try {
+              const res = await fetch('/api/admin/link-alts-by-discord', { method: 'POST' });
+              const d = await res.json();
+              if (res.ok) { flash(`Linked ${d.accounts_processed} accounts · ${d.links_created} manual rows`); await load(); }
+              else flash(d.error || 'Failed');
+            } catch { flash('Network error'); }
+            finally { setLinkingDiscord(false); }
+          }} disabled={linkingDiscord}>
+            {linkingDiscord ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+            Link by Discord
+          </Button>
           <Button size="sm" onClick={handleSyncAll} disabled={syncing}>
             {syncing ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
             Sync All Alts
