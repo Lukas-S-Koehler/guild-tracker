@@ -30,6 +30,19 @@ const INTERACTION_TYPE_COMMAND = 2;
 const INTERACTION_TYPE_COMPONENT = 3;
 const INTERACTION_TYPE_AUTOCOMPLETE = 4;
 
+// Role allowed to run staff-only commands (/warn, /whip, /map, /make-main).
+const STAFF_ROLE_ID = '1444749350285611038';
+
+function denyIfMissingStaffRole(roles: string[] | undefined) {
+  if (!roles?.includes(STAFF_ROLE_ID)) {
+    return NextResponse.json({
+      type: 4,
+      data: { content: `You lack permission. Requires <@&${STAFF_ROLE_ID}>.`, flags: 64 },
+    });
+  }
+  return null;
+}
+
 // GET /api/discord/interactions
 // ?action=register → register /warn slash command (one-time setup)
 // no params → health check (Discord pre-validates endpoint with GET)
@@ -72,22 +85,23 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(result);
   }
   if (searchParams.get('action') === 'reset-alt') {
-    // Wipe every command named 'alt' (both global + optional guild scope), then register fresh.
+    // Wipe every command named 'alt' or 'make-main' (global + optional guild), then register fresh.
     const guildId = searchParams.get('guild_id');
+    const targets = new Set(['alt', 'make-main']);
     const globalList = await listGlobalCommands();
-    const deleted: Array<{ scope: string; id: string }> = [];
+    const deleted: Array<{ scope: string; id: string; name: string }> = [];
     for (const c of globalList.commands ?? []) {
-      if (c.name === 'alt') {
+      if (targets.has(c.name)) {
         const r = await deleteGlobalCommand(c.id);
-        if (r.ok) deleted.push({ scope: 'global', id: c.id });
+        if (r.ok) deleted.push({ scope: 'global', id: c.id, name: c.name });
       }
     }
     if (guildId) {
       const guildList = await listGuildCommands(guildId);
       for (const c of guildList.commands ?? []) {
-        if (c.name === 'alt') {
+        if (targets.has(c.name)) {
           const r = await deleteGuildCommand(guildId, c.id);
-          if (r.ok) deleted.push({ scope: `guild:${guildId}`, id: c.id });
+          if (r.ok) deleted.push({ scope: `guild:${guildId}`, id: c.id, name: c.name });
         }
       }
     }
@@ -123,11 +137,11 @@ export async function POST(req: NextRequest) {
     return handleMapAutocomplete(interaction);
   }
 
-  if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && interaction.data?.name === 'alt') {
+  if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && interaction.data?.name === 'make-main') {
     return handleAltAutocomplete(interaction);
   }
 
-  if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'alt') {
+  if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'make-main') {
     return handleAltCommand(interaction);
   }
 
@@ -332,9 +346,12 @@ const WHIP_LINES = [
 ];
 
 async function handleWhipCommand(interaction: {
-  member?: { user?: { id: string; username: string } };
+  member?: { user?: { id: string; username: string }; roles?: string[] };
   data: { options?: Array<{ name: string; value: string }> };
 }) {
+  const deny = denyIfMissingStaffRole(interaction.member?.roles);
+  if (deny) return deny;
+
   const options = interaction.data?.options ?? [];
   const targetId = options.find((o) => o.name === 'target')?.value as string;
   const callerId = interaction.member?.user?.id;
@@ -364,11 +381,15 @@ async function handleWhipCommand(interaction: {
 }
 
 async function handleMapCommand(interaction: {
+  member?: { roles?: string[] };
   data: {
     options?: Array<{ name: string; value: string }>;
     resolved?: { users?: Record<string, { username: string; global_name?: string }> };
   };
 }) {
+  const deny = denyIfMissingStaffRole(interaction.member?.roles);
+  if (deny) return deny;
+
   const supabase = createAdminClient();
 
   const options = interaction.data?.options ?? [];

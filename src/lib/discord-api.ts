@@ -485,13 +485,13 @@ export async function deleteGuildCommand(guildId: string, commandId: string): Pr
   }
 }
 
-/** Register the /alt command — single action: promote an IGN to main of its account. */
+/** Register the /make-main command — promote an IGN to main of its account. */
 export async function registerAltCommand(): Promise<{ ok: boolean; error?: string }> {
   const appId = process.env.DISCORD_APPLICATION_ID;
   if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };
 
   const command = {
-    name: 'alt',
+    name: 'make-main',
     description: 'Set a character as the main of its alt account',
     options: [
       {
