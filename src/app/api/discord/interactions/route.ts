@@ -512,7 +512,7 @@ async function handleLeaderboardAutocomplete(interaction: {
 }
 
 async function handleLeaderboardCommand(interaction: {
-  data: { options?: Array<{ name: string; value: string }> };
+  data: { options?: Array<{ name: string; value: string | boolean }> };
 }) {
   const supabase = createAdminClient();
   const options = interaction.data?.options ?? [];
@@ -522,13 +522,14 @@ async function handleLeaderboardCommand(interaction: {
   const filter: LeaderboardFilter =
     filterRaw === 'locked' || filterRaw === 'non-locked' ? filterRaw : 'all';
   const guildFilter = (options.find((o) => o.name === 'guild')?.value as string) || null;
+  const merged = options.find((o) => o.name === 'merge_alts')?.value === true;
 
   try {
     const entries = await fetchLeaderboard({
       supabase,
       period,
       guildFilter,
-      merged: false,
+      merged,
       filter,
     });
 
@@ -544,7 +545,8 @@ async function handleLeaderboardCommand(interaction: {
 
     const periodLabel = period === 'week' ? 'This Week' : period === 'month' ? 'This Month' : 'All Time';
     const filterLabel = filter === 'locked' ? 'Market-Locked' : filter === 'non-locked' ? 'Non-Locked' : null;
-    const combinedLabel = [filterLabel, guildLabel].filter(Boolean).join(' · ') || null;
+    const mergedLabel = merged ? 'Alts merged' : null;
+    const combinedLabel = [filterLabel, mergedLabel, guildLabel].filter(Boolean).join(' · ') || null;
     const content = entries.length === 0
       ? `_No entries match those filters._${guildLabel ? `\n_Guild: ${guildLabel}_` : ''}`
       : formatLeaderboard(entries, periodLabel, combinedLabel);

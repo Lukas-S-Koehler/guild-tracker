@@ -294,6 +294,12 @@ export async function registerLeaderboardCommand(): Promise<{ ok: boolean; error
       required: false,
       autocomplete: true,
     },
+    {
+      name: 'merge_alts',
+      type: 5,
+      description: 'Merge alt characters into one entry (same as website toggle)',
+      required: false,
+    },
   ];
 
   try {
