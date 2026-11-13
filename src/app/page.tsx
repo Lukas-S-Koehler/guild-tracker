@@ -58,7 +58,7 @@ interface DashboardData {
 }
 
 function DashboardPageContent() {
-  const { hasRole, loading: authLoading, currentGuild } = useAuth();
+  const { hasRole, isSuperAdmin, loading: authLoading, currentGuild } = useAuth();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -330,6 +330,12 @@ function DashboardPageContent() {
             </Link>
           </Button>
           <Button asChild variant="outline" className="h-auto py-3">
+            <Link href="/warnings" className="flex flex-col items-center gap-1.5">
+              <span className="text-xl">⚠️</span>
+              <span className="text-xs">Warnings</span>
+            </Link>
+          </Button>
+          <Button asChild variant="outline" className="h-auto py-3">
             <Link href="/leaderboard" className="flex flex-col items-center gap-1.5">
               <span className="text-xl">🏆</span>
               <span className="text-xs">Leaderboard</span>
@@ -340,6 +346,14 @@ function DashboardPageContent() {
               <Link href="/challenges" className="flex flex-col items-center gap-1.5">
                 <span className="text-xl">📋</span>
                 <span className="text-xs">Challenges</span>
+              </Link>
+            </Button>
+          )}
+          {hasRole('OFFICER') && (
+            <Button asChild variant="outline" className="h-auto py-3">
+              <Link href="/discord-mapping" className="flex flex-col items-center gap-1.5">
+                <span className="text-xl">💬</span>
+                <span className="text-xs">Discord</span>
               </Link>
             </Button>
           )}
@@ -355,6 +369,14 @@ function DashboardPageContent() {
               <span className="text-xs">Inactivity</span>
             </Link>
           </Button>
+          {isSuperAdmin && (
+            <Button asChild variant="outline" className="h-auto py-3">
+              <Link href="/price-cache" className="flex flex-col items-center gap-1.5">
+                <span className="text-xl">💰</span>
+                <span className="text-xs">Price Cache</span>
+              </Link>
+            </Button>
+          )}
           {hasRole('OFFICER') && (
             <Button asChild variant="outline" className="h-auto py-3">
               <Link href="/setup" className="flex flex-col items-center gap-1.5">

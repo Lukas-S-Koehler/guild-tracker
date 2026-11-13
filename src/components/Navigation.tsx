@@ -49,14 +49,9 @@ export default function Navigation() {
   const navLinks: { href: string; label: string; requiresRole?: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER'; requiresSuperAdmin?: boolean }[] = [
     { href: '/', label: 'Dashboard' },
     { href: '/overview', label: 'Overview' },
-    { href: '/warnings', label: 'Warnings' },
-    { href: '/members', label: 'Members' },
     { href: '/leaderboard', label: 'Leaderboard' },
     { href: '/assault', label: 'Assault' },
-    { href: '/challenges', label: 'Challenges', requiresRole: 'OFFICER' },
-    { href: '/discord-mapping', label: 'Discord', requiresRole: 'OFFICER' },
     { href: '/data-management', label: 'Manage Data', requiresSuperAdmin: true },
-    { href: '/price-cache', label: 'Price Cache', requiresSuperAdmin: true },
     { href: '/admin', label: 'Admin', requiresRole: 'LEADER' },
   ];
 
