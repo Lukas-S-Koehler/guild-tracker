@@ -1,0 +1,28 @@
+name: Combat Enemies Sync
+
+on:
+  schedule:
+    # Runs at 11:08 UTC daily — 10 min before price cache sync
+    - cron: '8 11 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync-enemies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Sync combat enemies
+        run: |
+          echo "Syncing combat enemies..."
+          response=$(curl -s -L -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/combat-enemies-sync" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | head -n -1)
+          echo "Response: $body"
+          echo "HTTP status: $http_code"
+          if [ "$http_code" != "200" ]; then
+            echo "ERROR: Combat enemies sync failed with status $http_code"
+            exit 1
+          fi

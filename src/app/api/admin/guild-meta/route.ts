@@ -17,7 +17,7 @@ export async function PATCH(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { guild_id, min_level, is_active } = body;
+    const { guild_id, min_level, is_active, is_assault } = body;
 
     if (!guild_id) {
       return NextResponse.json({ error: 'guild_id is required' }, { status: 400 });
@@ -30,6 +30,7 @@ export async function PATCH(req: NextRequest) {
     const updateData: Record<string, any> = {};
     if (min_level !== undefined) updateData.min_level = Number(min_level);
     if (is_active !== undefined) updateData.is_active = Boolean(is_active);
+    if (is_assault !== undefined) updateData.is_assault = Boolean(is_assault);
 
     if (Object.keys(updateData).length === 0) {
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 });

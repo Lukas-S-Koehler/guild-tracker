@@ -617,6 +617,21 @@ export async function registerAssaultCommand(): Promise<{ ok: boolean; error?: s
         description: 'Show your prep checklist link + progress for this launch',
         options: [guildOpt],
       },
+      {
+        name: 'plan',
+        type: 1,
+        description: 'Show kill priority + gold/hr for a zone',
+        options: [
+          guildOpt,
+          {
+            name: 'zone',
+            type: 3,
+            description: 'Override zone (autocomplete). Defaults to guild config.',
+            required: false,
+            autocomplete: true,
+          },
+        ],
+      },
     ],
   };
 

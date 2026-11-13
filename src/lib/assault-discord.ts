@@ -12,6 +12,7 @@ import {
 import { buildTemplateVars, renderTemplate, todayLaunchUnix, utcDateString } from '@/lib/assault-template';
 import { postToChannelReturnId, editOriginalInteractionResponse } from '@/lib/discord-api';
 import { createAdminClient } from '@/lib/supabase-server';
+import { getZonePlan, listZones, shrineInfoFor } from '@/lib/assault-plan';
 
 interface Option {
   name: string;
@@ -55,6 +56,16 @@ export async function handleAssaultAutocomplete(interaction: Interaction) {
     const filtered = choices
       .filter(c => c.name.toLowerCase().includes(q) || c.value.includes(q))
       .slice(0, 25);
+    return NextResponse.json({ type: 8, data: { choices: filtered } });
+  }
+
+  if (focused.name === 'zone') {
+    const zones = await listZones();
+    const q = String(focused.value ?? '').toLowerCase();
+    const filtered = zones
+      .filter((z) => z.toLowerCase().includes(q))
+      .slice(0, 25)
+      .map((z) => ({ name: z, value: z }));
     return NextResponse.json({ type: 8, data: { choices: filtered } });
   }
 
@@ -109,6 +120,8 @@ export async function handleAssaultCommand(interaction: Interaction) {
       return handleLast(sub);
     case 'checklist':
       return handleChecklist(sub);
+    case 'plan':
+      return handlePlan(sub);
     default:
       return ephemeral(`Unknown subcommand: ${sub.name}`);
   }
@@ -339,4 +352,30 @@ async function firePingNow(interaction: Interaction, guildId: string, stepKey: s
       content: `Error: ${String(err)}`,
     });
   }
+}
+
+async function handlePlan(sub: Option) {
+  const guildId = String(findOption(sub.options, 'guild')?.value ?? '');
+  if (!guildId) return ephemeral('Missing guild.');
+  const zoneOverride = findOption(sub.options, 'zone')?.value as string | undefined;
+  const config = await getAssaultConfig(guildId);
+  const zone = zoneOverride || config?.zone_name;
+  if (!zone) return ephemeral('No zone configured for this guild and no override provided.');
+
+  const plan = await getZonePlan(zone);
+  if (plan.enemies.length === 0) {
+    return ephemeral(`No enemies cached for zone **${zone}**. Run combat-enemies-sync first.`);
+  }
+
+  const shrine = shrineInfoFor(plan.zone) === 'On-site Shrine' ? '🛐 On-site Shrine' : (config?.shrine_info ?? 'No on-site shrine');
+  const levelRange =
+    plan.level_min === plan.level_max ? `Lv ${plan.level_min}` : `Lv ${plan.level_min}–${plan.level_max}`;
+  const header =
+    `🗺️ **Assault Plan — ${plan.zone}**\n` +
+    `${levelRange} · ${shrine} · Best: **${plan.total_gph.toLocaleString()} g/h**`;
+  const lines = plan.enemies.slice(0, 10).map((e, i) =>
+    `**${i + 1}.** ${e.name} (Lv ${e.level}) — ${e.gph.toLocaleString()} g/h · ${e.drop_count} drops`
+  );
+  const content = [header, '', ...lines].join('\n').slice(0, 2000);
+  return NextResponse.json({ type: 4, data: { content, flags: 64 } });
 }

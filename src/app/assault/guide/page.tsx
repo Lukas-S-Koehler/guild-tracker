@@ -1,9 +1,10 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ArrowLeft, ExternalLink } from 'lucide-react';
 
 const HITS_TO_KILL = [
@@ -13,14 +14,55 @@ const HITS_TO_KILL = [
   { hits: 5, time: '7.23s', kills: '4,481' },
 ];
 
-const ISLE_ENEMIES = [
-  { name: 'Basilisk', level: 92, gph: 12113 },
-  { name: 'Werewolf', level: 99, gph: 3349 },
-  { name: 'Earth Elemental', level: 98, gph: 3331 },
-  { name: 'Griffon', level: 94, gph: 1396 },
-];
+const DEFAULT_ZONE = 'Isle of Whispers';
+
+interface PlanEnemy {
+  id: number;
+  name: string;
+  level: number;
+  zone_name: string;
+  gph: number;
+  drop_count: number;
+}
+
+interface ZonePlanResponse {
+  zone: string;
+  enemies: PlanEnemy[];
+  total_gph: number;
+  level_min: number | null;
+  level_max: number | null;
+  shrine_info: string;
+}
 
 export default function AssaultGuidePage() {
+  const [zones, setZones] = useState<string[]>([]);
+  const [selectedZone, setSelectedZone] = useState<string>(DEFAULT_ZONE);
+  const [plan, setPlan] = useState<ZonePlanResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/assault/plan/zones')
+      .then((r) => r.json())
+      .then((d) => setZones(d.zones ?? []))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!selectedZone) return;
+    setLoading(true);
+    fetch(`/api/assault/plan?zone=${encodeURIComponent(selectedZone)}`)
+      .then((r) => r.json())
+      .then((d) => setPlan(d))
+      .finally(() => setLoading(false));
+  }, [selectedZone]);
+
+  const levelRange =
+    plan?.level_min != null && plan?.level_max != null
+      ? plan.level_min === plan.level_max
+        ? `Lv ${plan.level_min}`
+        : `Lv ${plan.level_min}–${plan.level_max}`
+      : '';
+
   return (
     <div className="container mx-auto p-4 max-w-4xl space-y-6">
       <div className="flex items-center gap-2">
@@ -30,24 +72,49 @@ export default function AssaultGuidePage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>🏝️ Isle of Whispers (Lv 92–99)</CardTitle>
-          <CardDescription>On-site shrine. Daily 1h active wave + 8h POTG idle stack.</CardDescription>
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <CardTitle>🗺️ Zone Plan</CardTitle>
+              <CardDescription>Kill priority by live gold/hr. Prices sync daily.</CardDescription>
+            </div>
+            <Select value={selectedZone} onValueChange={setSelectedZone}>
+              <SelectTrigger className="w-[260px]"><SelectValue placeholder="Pick a zone" /></SelectTrigger>
+              <SelectContent>
+                {zones.map((z) => (<SelectItem key={z} value={z}>{z}</SelectItem>))}
+              </SelectContent>
+            </Select>
+          </div>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
-          <p>Stockpile <strong>4,000–10,000+ mobs</strong> (+10–20% flee buffer). Hunting pet Lv 92+ required to auto-hunt here.</p>
-          <div>
-            <div className="font-semibold mb-1">Kill priority (gold/hr)</div>
-            <ol className="list-decimal pl-5 space-y-0.5">
-              {ISLE_ENEMIES.map((e) => (
-                <li key={e.name}>
-                  <strong>{e.name}</strong> (Lv {e.level}) — {e.gph.toLocaleString()} g/h
-                </li>
-              ))}
-            </ol>
-            <p className="text-muted-foreground mt-1">
-              Basilisk is lowest level AND highest gold. Prioritize it. Scale up only if hits-to-kill stays low.
-            </p>
-          </div>
+          {loading && <p className="text-muted-foreground">Loading…</p>}
+          {!loading && plan && plan.enemies.length === 0 && (
+            <p className="text-muted-foreground">No enemies cached for this zone yet. Run <code>combat-enemies-sync</code>.</p>
+          )}
+          {!loading && plan && plan.enemies.length > 0 && (
+            <>
+              <div className="flex gap-3 flex-wrap text-xs text-muted-foreground">
+                <span>{levelRange}</span>
+                <span>· {plan.shrine_info}</span>
+                <span>· Best: <strong className="text-foreground">{plan.total_gph.toLocaleString()} g/h</strong></span>
+              </div>
+              <p className="text-muted-foreground">
+                Stockpile <strong>4,000–10,000+ mobs</strong> (+10–20% flee buffer). Hunting pet Lv {plan.level_min ?? '?'}+ required to auto-hunt here.
+              </p>
+              <div>
+                <div className="font-semibold mb-1">Kill priority (gold/hr)</div>
+                <ol className="list-decimal pl-5 space-y-0.5">
+                  {plan.enemies.map((e) => (
+                    <li key={e.id}>
+                      <strong>{e.name}</strong> (Lv {e.level}) — {e.gph.toLocaleString()} g/h · {e.drop_count} drops
+                    </li>
+                  ))}
+                </ol>
+                <p className="text-muted-foreground mt-1">
+                  Pick the lowest level × highest gold. Scale up only if hits-to-kill stays low.
+                </p>
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
 
@@ -112,23 +179,6 @@ export default function AssaultGuidePage() {
             dungeon-tracker-seven.vercel.app/gear <ExternalLink className="h-3 w-3" />
           </a>
           <p className="text-muted-foreground">Below Lv 70 just buy market gear. From Lv 90+ mythic gear & upgrade stones get expensive.</p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>⚔️ Efficient Combat Start (New / F2P)</CardTitle>
-          <CardDescription>Patience &gt; raw combat level.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          <ul className="list-disc pl-5 space-y-1">
-            <li>First 24–48h: mine coal on main (combat spec) + first alt. Secondary STR/DEF exp + gold for consumables.</li>
-            <li>Gear every ~10 levels up to 70 — market, don&apos;t craft.</li>
-            <li>Hunt + Power Hunt for first mobs. Can drop active play later.</li>
-            <li>Pet mastery: Zephyrix / Wrex premium. PM Lv 100 = 10 battle + 10 hunting pets.</li>
-            <li>Stat priority: <Badge variant="outline">STR 40</Badge> <Badge variant="outline">DEX 30</Badge> <Badge variant="outline">DEF 30</Badge> <Badge variant="outline">SPD 20</Badge></li>
-            <li>2–3 hit rule — lower maps until food cost stays below loot.</li>
-          </ul>
         </CardContent>
       </Card>
     </div>

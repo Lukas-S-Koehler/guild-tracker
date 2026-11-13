@@ -27,6 +27,7 @@ interface Guild {
   nickname: string;
   min_level: number;
   is_active: boolean;
+  is_assault: boolean;
   display_order: number;
   members: GuildMember[];
   leader?: GuildMember;
@@ -57,7 +58,7 @@ interface Building {
 }
 
 
-function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsActive }: { guildId: string; guildName: string; currentMinLevel: number; currentIsActive: boolean }) {
+function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsActive, currentIsAssault }: { guildId: string; guildName: string; currentMinLevel: number; currentIsActive: boolean; currentIsAssault: boolean }) {
   const api = useApiClient();
   const { currentGuild, isSuperAdmin } = useAuth();
   const isLeaderOfThisGuild = isSuperAdmin || currentGuild?.guild_id === guildId;
@@ -78,6 +79,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
   });
   const [minLevel, setMinLevel] = useState<number>(currentMinLevel);
   const [isActive, setIsActive] = useState<boolean>(currentIsActive);
+  const [isAssault, setIsAssault] = useState<boolean>(currentIsAssault);
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -155,7 +157,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             disable_pings: settings.disable_pings,
           },
         }, { guildId }),
-        api.patch('/api/admin/guild-meta', { guild_id: guildId, min_level: minLevel, is_active: isActive }, { guildId }),
+        api.patch('/api/admin/guild-meta', { guild_id: guildId, min_level: minLevel, is_active: isActive, is_assault: isAssault }, { guildId }),
       ]);
 
       if (!configRes.ok) {
@@ -281,6 +283,19 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             <span className="text-sm">Guild is active</span>
           </label>
           <p className="text-xs text-muted-foreground mt-0.5">Inactive guilds are visually marked in the UI</p>
+        </div>
+
+        <div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isAssault}
+              onChange={e => setIsAssault(e.target.checked)}
+              className="rounded"
+            />
+            <span className="text-sm">Assault guild</span>
+          </label>
+          <p className="text-xs text-muted-foreground mt-0.5">Only assault guilds appear on the Assault page</p>
         </div>
 
         <div>
@@ -1395,7 +1410,7 @@ function AdminPageContent() {
               {/* Guild Settings */}
               {showSettings === guild.id && (
                 <div className="mt-4 space-y-4">
-                  <GuildSettingsSection guildId={guild.id} guildName={guild.name} currentMinLevel={guild.min_level} currentIsActive={guild.is_active ?? true} />
+                  <GuildSettingsSection guildId={guild.id} guildName={guild.name} currentMinLevel={guild.min_level} currentIsActive={guild.is_active ?? true} currentIsAssault={guild.is_assault ?? false} />
                   <DiscordMappingSection guildId={guild.id} />
                   <AltCharactersSection guildId={guild.id} />
                 </div>

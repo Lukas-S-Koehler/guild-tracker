@@ -355,6 +355,36 @@ export class IdleMMOApi {
       `${IDLEMMO_BASE_URL}/v1/guild/${guildId}/energizing-pool/information`
     );
   }
+
+  async getEnemiesList(): Promise<EnemiesListResponse> {
+    return this.fetch<EnemiesListResponse>(`${IDLEMMO_BASE_URL}/v1/combat/enemies/list`);
+  }
+}
+
+export interface EnemyLootDrop {
+  hashed_item_id: string;
+  name: string;
+  image_url: string | null;
+  quality: string;
+  quantity: number;
+  chance: number;
+}
+
+export interface CombatEnemyEntry {
+  id: number;
+  name: string;
+  image_url: string | null;
+  level: number;
+  experience: number;
+  health: number;
+  chance_of_loot: number;
+  location: { id: number; name: string };
+  loot: EnemyLootDrop[];
+}
+
+export interface EnemiesListResponse {
+  enemies: CombatEnemyEntry[];
+  endpoint_updates_at: string;
 }
 
 // ============================================================================

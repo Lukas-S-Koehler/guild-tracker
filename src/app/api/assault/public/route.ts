@@ -6,9 +6,20 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   const supabase = createAdminClient();
 
+  const { data: assaultGuilds } = await supabase
+    .from('guilds')
+    .select('id')
+    .eq('is_assault', true);
+  const assaultGuildIds = (assaultGuilds ?? []).map((g: { id: string }) => g.id);
+
+  if (assaultGuildIds.length === 0) {
+    return NextResponse.json({ guilds: [] });
+  }
+
   const { data: configs } = await supabase
     .from('assault_configs')
     .select('guild_id, active, launch_time_utc, zone_name, level_range, shrine_info, tracked_zone_id, tracked_zone_key, external_guild_id, guild_config:guild_config!inner(guild_name)')
+    .in('guild_id', assaultGuildIds)
     .order('guild_id');
 
   const { data: runs } = await supabase
