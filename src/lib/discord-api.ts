@@ -521,6 +521,116 @@ export async function registerAltCommand(): Promise<{ ok: boolean; error?: strin
   }
 }
 
+/** Register the /assault slash command with all subcommands. */
+export async function registerAssaultCommand(): Promise<{ ok: boolean; error?: string }> {
+  const appId = process.env.DISCORD_APPLICATION_ID;
+  if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };
+
+  const guildOpt = {
+    name: 'guild',
+    type: 3, // STRING
+    description: 'Which assaulting guild',
+    required: true,
+    autocomplete: true,
+  };
+  const stepOpt = {
+    name: 'step',
+    type: 3,
+    description: 'Ping step key (e.g. launch_0)',
+    required: true,
+    autocomplete: true,
+  };
+
+  const command = {
+    name: 'assault',
+    description: 'Manage the daily guild assault schedule',
+    options: [
+      { name: 'status', type: 1, description: 'Show active state + countdowns for both guilds' },
+      {
+        name: 'toggle',
+        type: 1,
+        description: 'Enable or pause the daily schedule for a guild',
+        options: [
+          guildOpt,
+          {
+            name: 'state',
+            type: 3,
+            description: 'active or paused',
+            required: true,
+            choices: [
+              { name: 'active', value: 'active' },
+              { name: 'paused', value: 'paused' },
+            ],
+          },
+        ],
+      },
+      {
+        name: 'set-time',
+        type: 1,
+        description: 'Set daily launch time (UTC HH:MM)',
+        options: [
+          guildOpt,
+          { name: 'time', type: 3, description: 'UTC HH:MM e.g. 18:30', required: true },
+        ],
+      },
+      {
+        name: 'set-zone',
+        type: 1,
+        description: 'Quickly update zone / shrine / kill order',
+        options: [
+          guildOpt,
+          { name: 'zone', type: 3, description: 'Zone name', required: false },
+          { name: 'shrine', type: 3, description: 'Shrine info / location', required: false },
+          { name: 'mob_order', type: 3, description: 'Kill order string (overrides enemy_priority formatting)', required: false },
+        ],
+      },
+      {
+        name: 'ping-now',
+        type: 1,
+        description: 'Fire a specific step immediately',
+        options: [guildOpt, stepOpt],
+      },
+      {
+        name: 'skip-today',
+        type: 1,
+        description: "Skip today's scheduled pings (tomorrow unaffected)",
+        options: [guildOpt],
+      },
+      {
+        name: 'lb',
+        type: 1,
+        description: 'Show top contributors leaderboard',
+        options: [
+          { ...guildOpt, required: false },
+          { name: 'season', type: 4, description: 'Season number (optional)', required: false },
+        ],
+      },
+      {
+        name: 'last',
+        type: 1,
+        description: 'Show last finalized assault summary for a guild',
+        options: [guildOpt],
+      },
+      {
+        name: 'checklist',
+        type: 1,
+        description: 'Show your prep checklist link + progress for this launch',
+        options: [guildOpt],
+      },
+    ],
+  };
+
+  try {
+    await discordFetch(`/applications/${appId}/commands`, {
+      method: 'POST',
+      body: JSON.stringify(command),
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 export async function registerMapCommand(): Promise<{ ok: boolean; error?: string }> {
   const appId = process.env.DISCORD_APPLICATION_ID;
   if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };

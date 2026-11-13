@@ -333,11 +333,94 @@ export class IdleMMOApi {
     return this.fetch<GuildHallResponse>(`${IDLEMMO_BASE_URL}/v1/guild/${guildId}/hall`);
   }
 
+  async getConquestView(seasonNumber?: number): Promise<ConquestViewResponse> {
+    const qs = seasonNumber ? `?season_number=${seasonNumber}` : '';
+    return this.fetch<ConquestViewResponse>(
+      `${IDLEMMO_BASE_URL}/v1/guild/conquest/view${qs}`
+    );
+  }
+
+  async inspectConquestZone(
+    zoneId: number,
+    seasonNumber?: number,
+  ): Promise<ConquestZoneInspectResponse> {
+    const qs = seasonNumber ? `?season_number=${seasonNumber}` : '';
+    return this.fetch<ConquestZoneInspectResponse>(
+      `${IDLEMMO_BASE_URL}/v1/guild/conquest/zone/${zoneId}/inspect${qs}`
+    );
+  }
+
   async getEnergizingPool(guildId: string): Promise<EnergizingPoolResponse> {
     return this.fetch<EnergizingPoolResponse>(
       `${IDLEMMO_BASE_URL}/v1/guild/${guildId}/energizing-pool/information`
     );
   }
+}
+
+// ============================================================================
+// Conquest API
+// ============================================================================
+
+export interface ConquestGuildRef {
+  id: number;
+  name: string;
+  tag: string | null;
+  icon_url: string | null;
+  background_url?: string | null;
+}
+
+export interface ConquestActiveAssault {
+  guild: ConquestGuildRef;
+  kills: number;
+  experience: number;
+  starts_at: string;
+  ends_at: string;
+}
+
+export interface ConquestGuildEntry {
+  id: number;
+  position: number;
+  kills: string | number;
+  experience: string | number;
+  contributions: ConquestContribution[] | null;
+  guild: ConquestGuildRef;
+}
+
+export interface ConquestContribution {
+  id: number;
+  guild_conquest_progress_id: number;
+  character: {
+    id: number;
+    hashed_id: string;
+    name: string;
+    total_level: number;
+    image_url: string | null;
+    background_url: string | null;
+  };
+  kills: number | string;
+  experience: number | string;
+}
+
+export interface ConquestZone {
+  location: { id: number; key: string; name: string; image_url: string | null };
+  contributions?: ConquestContribution[] | null;
+  status: string;
+  colour: string | null;
+  kills: number;
+  experience: number;
+  guilds_count: number;
+  active_assaults: ConquestActiveAssault[];
+  guilds: ConquestGuildEntry[];
+}
+
+export interface ConquestViewResponse {
+  zones: Record<string, ConquestZone>;
+  endpoint_updates_at: string;
+}
+
+export interface ConquestZoneInspectResponse {
+  zone: ConquestZone;
+  endpoint_updates_at: string;
 }
 
 export interface EnergizingPoolResponse {

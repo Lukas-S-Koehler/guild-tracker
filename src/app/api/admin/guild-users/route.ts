@@ -19,14 +19,14 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { email, user_id, role = 'MEMBER', target_guild_id } = body;
+    const { email, username, user_id, role = 'MEMBER', target_guild_id } = body;
 
     if (!target_guild_id) {
       return NextResponse.json({ error: 'target_guild_id is required' }, { status: 400 });
     }
 
-    if (!email && !user_id) {
-      return NextResponse.json({ error: 'Email or user_id is required' }, { status: 400 });
+    if (!email && !username && !user_id) {
+      return NextResponse.json({ error: 'Email, username, or user_id is required' }, { status: 400 });
     }
 
     if (!['MEMBER', 'OFFICER', 'DEPUTY', 'LEADER'].includes(role)) {
@@ -48,8 +48,12 @@ export async function POST(req: NextRequest) {
     if (user_id) {
       userId = user_id;
     } else {
-      const { data: foundUsers, error: rpcError } = await supabase
-        .rpc('find_user_by_email', { search_email: email.toLowerCase() });
+      const rpcName = email ? 'find_user_by_email' : 'find_user_by_username';
+      const rpcArgs = email
+        ? { search_email: email.toLowerCase() }
+        : { search_username: username };
+
+      const { data: foundUsers, error: rpcError } = await supabase.rpc(rpcName, rpcArgs);
 
       if (rpcError) {
         console.error('[Admin] Error finding user:', rpcError);
@@ -62,6 +66,12 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({
           error: 'User not found. They need to sign up first at /signup',
         }, { status: 404 });
+      }
+
+      if (foundUsers.length > 1) {
+        return NextResponse.json({
+          error: 'Multiple users match that username. Use email instead.',
+        }, { status: 400 });
       }
 
       userId = foundUsers[0].id;

@@ -52,6 +52,7 @@ export default function Navigation() {
     { href: '/warnings', label: 'Warnings' },
     { href: '/members', label: 'Members' },
     { href: '/leaderboard', label: 'Leaderboard' },
+    { href: '/assault', label: 'Assault' },
     { href: '/challenges', label: 'Challenges', requiresRole: 'OFFICER' },
     { href: '/discord-mapping', label: 'Discord', requiresRole: 'OFFICER' },
     { href: '/data-management', label: 'Manage Data', requiresSuperAdmin: true },

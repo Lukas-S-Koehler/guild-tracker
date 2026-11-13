@@ -15,11 +15,11 @@ export async function POST(req: NextRequest) {
 
   const supabase = createAdminClient();
 
-  // Exempt guilds (e.g. Cursed Dreamers) — resolved by name match
+  // Exempt guilds (e.g. Cursed Dreamers, Dream Angels DA) — resolved by name match
   const { data: exemptConfigs } = await supabase
     .from('guild_config')
     .select('guild_id, guild_name')
-    .ilike('guild_name', '%cursed dreamers%');
+    .or('guild_name.ilike.%cursed dreamers%,guild_name.ilike.%dream angels%');
   const exemptIds = new Set((exemptConfigs ?? []).map((c) => c.guild_id));
 
   // Fetch all active unmapped members with guild config info

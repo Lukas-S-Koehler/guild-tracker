@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { waitUntil } from '@vercel/functions';
 import { createAdminClient } from '@/lib/supabase-server';
-import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerAltCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, sendInteractionFollowup, editOriginalInteractionResponse, editChannelMessageRich, postToChannel, listGlobalCommands, listGuildCommands, deleteGlobalCommand, deleteGuildCommand } from '@/lib/discord-api';
+import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerAltCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, registerAssaultCommand, sendInteractionFollowup, editOriginalInteractionResponse, editChannelMessageRich, postToChannel, listGlobalCommands, listGuildCommands, deleteGlobalCommand, deleteGuildCommand } from '@/lib/discord-api';
+import { handleAssaultCommand, handleAssaultAutocomplete } from '@/lib/assault-discord';
 import { switchAccountMain } from '@/lib/alt-switch';
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
 import { formatLeaderboard } from '@/lib/utils';
@@ -112,6 +113,10 @@ export async function GET(req: NextRequest) {
     const result = await registerBumpsCommand();
     return NextResponse.json(result);
   }
+  if (searchParams.get('action') === 'register-assault') {
+    const result = await registerAssaultCommand();
+    return NextResponse.json(result);
+  }
   return NextResponse.json({ ok: true });
 }
 
@@ -177,6 +182,14 @@ export async function POST(req: NextRequest) {
 
   if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'bumps') {
     return handleBumpsCommand(interaction);
+  }
+
+  if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && interaction.data?.name === 'assault') {
+    return handleAssaultAutocomplete(interaction);
+  }
+
+  if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'assault') {
+    return handleAssaultCommand(interaction);
   }
 
   if (interaction.type === INTERACTION_TYPE_COMPONENT && interaction.data?.custom_id === 'bump_click') {

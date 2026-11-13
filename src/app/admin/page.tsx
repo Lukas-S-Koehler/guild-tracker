@@ -1098,6 +1098,34 @@ function AdminPageContent() {
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserRole, setNewUserRole] = useState<'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER'>('MEMBER');
   const [submitting, setSubmitting] = useState(false);
+  const [userSuggestions, setUserSuggestions] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!addingToGuild) {
+      setUserSuggestions([]);
+      return;
+    }
+    const q = newUserEmail.trim();
+    if (q.includes('@')) {
+      setUserSuggestions([]);
+      return;
+    }
+    const controller = new AbortController();
+    const t = setTimeout(async () => {
+      try {
+        const res = await api.get(`/api/admin/search-users?q=${encodeURIComponent(q)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setUserSuggestions(Array.isArray(data.usernames) ? data.usernames : []);
+      } catch {
+        // ignore
+      }
+    }, 150);
+    return () => {
+      controller.abort();
+      clearTimeout(t);
+    };
+  }, [api, addingToGuild, newUserEmail]);
 
   const fetchGuilds = useCallback(async () => {
     setLoading(true);
@@ -1121,8 +1149,9 @@ function AdminPageContent() {
   }, [fetchGuilds]);
 
   const handleAddUser = async (guildId: string) => {
-    if (!newUserEmail) {
-      setError('Please enter an email address');
+    const identifier = newUserEmail.trim();
+    if (!identifier) {
+      setError('Please enter an email address or username');
       return;
     }
 
@@ -1130,9 +1159,11 @@ function AdminPageContent() {
     setError(null);
     setSuccess(null);
 
+    const isEmail = identifier.includes('@');
+
     try {
       const res = await api.post('/api/admin/guild-users', {
-        email: newUserEmail,
+        ...(isEmail ? { email: identifier } : { username: identifier }),
         role: newUserRole,
         target_guild_id: guildId,
       });
@@ -1140,7 +1171,7 @@ function AdminPageContent() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to add user');
 
-      setSuccess(`Successfully added ${newUserEmail} to guild`);
+      setSuccess(`Successfully added ${identifier} to guild`);
       setNewUserEmail('');
       setNewUserRole('MEMBER');
       setAddingToGuild(null);
@@ -1314,15 +1345,22 @@ function AdminPageContent() {
                 <div className="mt-4 p-4 border rounded-lg bg-muted/50">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div className="md:col-span-2">
-                      <Label htmlFor={`email-${guild.id}`}>Email Address</Label>
+                      <Label htmlFor={`email-${guild.id}`}>Email or Username</Label>
                       <Input
                         id={`email-${guild.id}`}
-                        type="email"
-                        placeholder="user@example.com"
+                        type="text"
+                        placeholder="user@example.com or username"
                         value={newUserEmail}
                         onChange={(e) => setNewUserEmail(e.target.value)}
                         disabled={submitting}
+                        list={`user-suggestions-${guild.id}`}
+                        autoComplete="off"
                       />
+                      <datalist id={`user-suggestions-${guild.id}`}>
+                        {userSuggestions.map((name) => (
+                          <option key={name} value={name} />
+                        ))}
+                      </datalist>
                     </div>
                     <div>
                       <Label htmlFor={`role-${guild.id}`}>Role</Label>
