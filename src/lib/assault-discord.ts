@@ -51,10 +51,17 @@ export async function handleAssaultAutocomplete(interaction: Interaction) {
   }
 
   if (focused.name === 'guild') {
-    const configs = (await listAssaultConfigs()).filter((c) => c.active);
+    const all = await listAssaultConfigs();
+    // Only toggle + set-time need to see paused configs; everything else filters to active.
+    const subName = sub?.name;
+    const showPaused = subName === 'toggle' || subName === 'set-time';
+    const configs = showPaused ? all : all.filter((c) => c.active);
     const q = String(focused.value ?? '').toLowerCase();
     const choices = await Promise.all(
-      configs.map(async c => ({ name: await getGuildName(c.guild_id), value: c.guild_id }))
+      configs.map(async c => ({
+        name: `${await getGuildName(c.guild_id)}${!c.active ? ' (paused)' : ''}`,
+        value: c.guild_id,
+      }))
     );
     const filtered = choices
       .filter(c => c.name.toLowerCase().includes(q) || c.value.includes(q))
