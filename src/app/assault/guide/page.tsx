@@ -6,13 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ArrowLeft, ExternalLink } from 'lucide-react';
-
-const HITS_TO_KILL = [
-  { hits: 2, time: '3.00s', kills: '10,800' },
-  { hits: 3, time: '4.53s', kills: '7,152' },
-  { hits: 4, time: '6.18s', kills: '5,243' },
-  { hits: 5, time: '7.23s', kills: '4,481' },
-];
+import { HITS_TO_KILL, FIVE_PS, GEAR_LINK } from '@/lib/assault-plan-static';
 
 const DEFAULT_ZONE = 'Isle of Whispers';
 
@@ -125,13 +119,9 @@ export default function AssaultGuidePage() {
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
           <ol className="list-decimal pl-5 space-y-1">
-            <li><strong>-120m</strong> — Pool live, hunt final mobs (4k–10k+)</li>
-            <li><strong>-30m</strong> — Wrap hunting, clear inventory, pack food, check stance</li>
-            <li><strong>-10m</strong> — Combat gear, battle pet patted, perks active, shrine active, XP pots staged. Do NOT drink POTG yet.</li>
-            <li><strong>-5m</strong> — Wraithbane / Strike Essence + combat stat pot (Thunderfury / Bladeburst). POTG in hand.</li>
-            <li><strong>0m</strong> — Chug POTG, select up to 6 mobs (lowest hits-to-kill), click Battle.</li>
-            <li><strong>+30m</strong> — Restack stat pots if not already active.</li>
-            <li><strong>+50m</strong> — Final 8h restack while POTG + Pool still up. Don&apos;t lose the snapshot.</li>
+            {FIVE_PS.map((p) => (
+              <li key={p.when}><strong>{p.when}</strong> — {p.text}</li>
+            ))}
           </ol>
         </CardContent>
       </Card>
@@ -171,7 +161,7 @@ export default function AssaultGuidePage() {
         <CardContent className="text-sm space-y-2">
           <p>Reference gear tiers and upgrades on the external tracker:</p>
           <a
-            href="https://dungeon-tracker-seven.vercel.app/gear"
+            href={GEAR_LINK}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1 text-primary hover:underline"

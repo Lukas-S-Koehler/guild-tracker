@@ -13,6 +13,9 @@ import { buildTemplateVars, renderTemplate, todayLaunchUnix, utcDateString } fro
 import { postToChannelReturnId, editOriginalInteractionResponse } from '@/lib/discord-api';
 import { createAdminClient } from '@/lib/supabase-server';
 import { getZonePlan, listZones, shrineInfoFor } from '@/lib/assault-plan';
+import { FIVE_PS, HITS_TO_KILL, GEAR_LINK } from '@/lib/assault-plan-static';
+import { computeLaunchDate, getChecklistItems, type ChecklistItem } from '@/lib/assault-checklist-service';
+import { getDiscordChecked, toggleDiscordItem, resetDiscord } from '@/lib/assault-checklist-discord';
 
 interface Option {
   name: string;
@@ -48,7 +51,7 @@ export async function handleAssaultAutocomplete(interaction: Interaction) {
   }
 
   if (focused.name === 'guild') {
-    const configs = await listAssaultConfigs();
+    const configs = (await listAssaultConfigs()).filter((c) => c.active);
     const q = String(focused.value ?? '').toLowerCase();
     const choices = await Promise.all(
       configs.map(async c => ({ name: await getGuildName(c.guild_id), value: c.guild_id }))
@@ -119,9 +122,9 @@ export async function handleAssaultCommand(interaction: Interaction) {
     case 'last':
       return handleLast(sub);
     case 'checklist':
-      return handleChecklist(sub);
+      return handleChecklist(interaction, sub);
     case 'plan':
-      return handlePlan(sub);
+      return handlePlan(interaction, sub);
     default:
       return ephemeral(`Unknown subcommand: ${sub.name}`);
   }
@@ -211,19 +214,78 @@ async function handleLast(sub: Option) {
   return NextResponse.json({ type: 4, data: { content, flags: 64 } });
 }
 
-async function handleChecklist(sub: Option) {
+async function handleChecklist(interaction: Interaction, sub: Option) {
   const guildId = String(findOption(sub.options, 'guild')?.value ?? '');
   if (!guildId) return ephemeral('Missing guild.');
+  const user = interaction.member?.user;
+  if (!user) return ephemeral('No user context.');
+  const config = await getAssaultConfig(guildId);
+  if (!config) return ephemeral(`No assault config for \`${guildId}\`.`);
+  const items = await getChecklistItems(guildId);
+  if (items.length === 0) return ephemeral('No checklist items configured for this guild.');
+  const launchDate = computeLaunchDate(config.launch_time_utc);
+  const checked = await getDiscordChecked(user.id, guildId, launchDate);
   const name = await getGuildName(guildId);
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || '';
-  const link = appUrl ? `${appUrl.replace(/\/$/, '')}/assault/checklist` : '/assault/checklist';
+  const { content, components } = buildChecklistPayload({
+    guildId,
+    launchDate,
+    guildName: name,
+    items,
+    checked,
+  });
   return NextResponse.json({
     type: 4,
-    data: {
-      content: `✅ **${name} Assault Checklist**\nOpen the checklist in the web app: ${link}\nProgress persists until the next launch. Use the Reset button to clear.`,
-      flags: 64,
-    },
+    data: { content, components, flags: 64 },
   });
+}
+
+/** Build the checklist message payload (content + components). Used by both initial render and UPDATE_MESSAGE. */
+export function buildChecklistPayload(opts: {
+  guildId: string;
+  launchDate: string;
+  guildName: string;
+  items: ChecklistItem[];
+  checked: Set<string>;
+}): { content: string; components: unknown[] } {
+  const { guildId, launchDate, guildName, items, checked } = opts;
+  const total = items.length;
+  const done = items.filter((i) => checked.has(i.item_key)).length;
+  const content = `✅ **${guildName} Assault Checklist** — ${launchDate}\nProgress: **${done}/${total}** · Persists until next launch.`;
+
+  // 5 rows × 5 buttons = 25 max; reserve last row for Reset. 4 rows × 5 = 20 item buttons.
+  const rendered = items.slice(0, 20);
+  const rows: unknown[] = [];
+  let row: unknown[] = [];
+  for (const it of rendered) {
+    const isDone = checked.has(it.item_key);
+    row.push({
+      type: 2, // Button
+      style: isDone ? 3 /* success */ : 2 /* secondary */,
+      label: `${isDone ? '✅' : '⬜'} ${it.label}`.slice(0, 80),
+      custom_id: `assault_check:${guildId}:${launchDate}:${it.item_key}`.slice(0, 100),
+    });
+    if (row.length === 5) {
+      rows.push({ type: 1, components: row });
+      row = [];
+    }
+  }
+  if (row.length > 0 && rows.length < 4) {
+    rows.push({ type: 1, components: row });
+    row = [];
+  }
+  // Reset button on its own row
+  rows.push({
+    type: 1,
+    components: [
+      {
+        type: 2,
+        style: 4, // danger
+        label: '🔄 Reset',
+        custom_id: `assault_check_reset:${guildId}:${launchDate}`.slice(0, 100),
+      },
+    ],
+  });
+  return { content, components: rows };
 }
 
 async function handleStatus() {
@@ -354,9 +416,12 @@ async function firePingNow(interaction: Interaction, guildId: string, stepKey: s
   }
 }
 
-async function handlePlan(sub: Option) {
+async function handlePlan(interaction: Interaction, sub: Option) {
   const guildId = String(findOption(sub.options, 'guild')?.value ?? '');
   if (!guildId) return ephemeral('Missing guild.');
+  const denied = await gateStaffRole(interaction, guildId);
+  if (denied) return denied;
+
   const zoneOverride = findOption(sub.options, 'zone')?.value as string | undefined;
   const config = await getAssaultConfig(guildId);
   const zone = zoneOverride || config?.zone_name;
@@ -367,15 +432,89 @@ async function handlePlan(sub: Option) {
     return ephemeral(`No enemies cached for zone **${zone}**. Run combat-enemies-sync first.`);
   }
 
-  const shrine = shrineInfoFor(plan.zone) === 'On-site Shrine' ? '🛐 On-site Shrine' : (config?.shrine_info ?? 'No on-site shrine');
+  const shrine =
+    shrineInfoFor(plan.zone) === 'On-site Shrine'
+      ? '🛐 On-site Shrine'
+      : (config?.shrine_info ?? 'No on-site shrine');
   const levelRange =
     plan.level_min === plan.level_max ? `Lv ${plan.level_min}` : `Lv ${plan.level_min}–${plan.level_max}`;
-  const header =
-    `🗺️ **Assault Plan — ${plan.zone}**\n` +
-    `${levelRange} · ${shrine} · Best: **${plan.total_gph.toLocaleString()} g/h**`;
-  const lines = plan.enemies.slice(0, 10).map((e, i) =>
+  const guildName = await getGuildName(guildId);
+  const launchUnix = config ? todayLaunchUnix(config.launch_time_utc) : null;
+  const targetMobs = config?.target_mob_count ?? '4,000–10,000+';
+
+  const descLines = [
+    `**${levelRange}** · ${shrine}`,
+    `💰 Best: **${plan.total_gph.toLocaleString()} g/h**`,
+    launchUnix ? `⏰ Launch: <t:${launchUnix}:t> (<t:${launchUnix}:R>)` : null,
+    `🎯 Target mobs: **${targetMobs}**`,
+  ].filter(Boolean);
+
+  const killPriority = plan.enemies.slice(0, 10).map((e, i) =>
     `**${i + 1}.** ${e.name} (Lv ${e.level}) — ${e.gph.toLocaleString()} g/h · ${e.drop_count} drops`
-  );
-  const content = [header, '', ...lines].join('\n').slice(0, 2000);
-  return NextResponse.json({ type: 4, data: { content, flags: 64 } });
+  ).join('\n').slice(0, 1024);
+
+  const fivePs = FIVE_PS.map((p) => `**${p.when}** — ${p.text}`).join('\n').slice(0, 1024);
+
+  const hitsTable =
+    '```\nHits  Time/Kill  Kills/9h\n' +
+    HITS_TO_KILL.map((h) => `${String(h.hits).padEnd(5)} ${h.time.padEnd(10)} ${h.kills}`).join('\n') +
+    '\n```';
+
+  const embed = {
+    title: `🗺️ Assault Plan — ${plan.zone}`,
+    description: `${guildName}\n${descLines.join('\n')}`,
+    color: 0xf59e0b,
+    fields: [
+      { name: '🎯 Kill Priority (gold/hr)', value: killPriority, inline: false },
+      { name: '⚡ The 5 Ps (prep sequence)', value: fivePs, inline: false },
+      { name: '⚔️ Hits-to-Kill (target 2–3)', value: hitsTable.slice(0, 1024), inline: false },
+      { name: '🛡️ Gear', value: `[Gear tiers & upgrades](${GEAR_LINK})`, inline: false },
+    ],
+  };
+
+  return NextResponse.json({ type: 4, data: { embeds: [embed] } });
+}
+
+interface ComponentInteraction {
+  token: string;
+  application_id: string;
+  member?: { user?: { id: string; username: string } };
+  user?: { id: string; username: string };
+  data: { custom_id: string };
+}
+
+/** Handle button clicks for the /assault checklist message. Returns UPDATE_MESSAGE (type 7). */
+export async function handleAssaultChecklistComponent(interaction: ComponentInteraction) {
+  const customId = interaction.data.custom_id;
+  const user = interaction.member?.user ?? interaction.user;
+  if (!user) return ephemeral('No user context.');
+
+  const toggleMatch = customId.match(/^assault_check:([^:]+):([^:]+):(.+)$/);
+  const resetMatch = customId.match(/^assault_check_reset:([^:]+):([^:]+)$/);
+
+  let guildId: string;
+  let launchDate: string;
+  if (toggleMatch) {
+    [, guildId, launchDate] = toggleMatch;
+    const itemKey = toggleMatch[3];
+    await toggleDiscordItem(user.id, guildId, launchDate, itemKey);
+  } else if (resetMatch) {
+    [, guildId, launchDate] = resetMatch;
+    await resetDiscord(user.id, guildId, launchDate);
+  } else {
+    return ephemeral(`Unknown checklist action: ${customId}`);
+  }
+
+  const items = await getChecklistItems(guildId);
+  const checked = await getDiscordChecked(user.id, guildId, launchDate);
+  const guildName = await getGuildName(guildId);
+  const { content, components } = buildChecklistPayload({
+    guildId,
+    launchDate,
+    guildName,
+    items,
+    checked,
+  });
+
+  return NextResponse.json({ type: 7, data: { content, components, flags: 64 } });
 }

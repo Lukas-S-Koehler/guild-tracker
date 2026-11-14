@@ -182,6 +182,7 @@ function GuildPanel({ guildId, guildName, onMsg }: {
 
 function AssaultManagerContent() {
   const { guilds, currentGuild } = useAuth();
+  const [assaultGuilds, setAssaultGuilds] = useState<typeof guilds | null>(null);
   const [activeGuildId, setActiveGuildId] = useState<string>(currentGuild?.guild_id ?? guilds[0]?.guild_id ?? '');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -191,12 +192,42 @@ function AssaultManagerContent() {
   };
 
   useEffect(() => {
-    if (!activeGuildId && guilds.length > 0) setActiveGuildId(guilds[0].guild_id);
-  }, [guilds, activeGuildId]);
+    let cancelled = false;
+    (async () => {
+      const results = await Promise.all(guilds.map(async g => {
+        const c = new ApiClient();
+        c.setGuildId(g.guild_id);
+        try {
+          const res = await c.get('/api/assault/config');
+          if (!res.ok) return null;
+          const j = await res.json();
+          return j.config ? g : null;
+        } catch { return null; }
+      }));
+      if (cancelled) return;
+      const filtered = results.filter((g): g is typeof guilds[number] => g !== null);
+      setAssaultGuilds(filtered);
+      if (filtered.length > 0 && !filtered.some(g => g.guild_id === activeGuildId)) {
+        setActiveGuildId(filtered[0].guild_id);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [guilds]);
 
   if (guilds.length === 0) {
     return <p className="p-6 text-muted-foreground">No guild memberships found.</p>;
   }
+
+  if (assaultGuilds === null) {
+    return <div className="flex items-center justify-center p-8"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  }
+
+  if (assaultGuilds.length === 0) {
+    return <p className="p-6 text-muted-foreground">No guilds with assault configs.</p>;
+  }
+
+  const visibleGuilds = assaultGuilds;
 
   return (
     <div className="container mx-auto p-4 max-w-5xl space-y-4">
@@ -216,11 +247,11 @@ function AssaultManagerContent() {
 
       <Tabs value={activeGuildId} onValueChange={setActiveGuildId}>
         <TabsList>
-          {guilds.map(g => (
+          {visibleGuilds.map(g => (
             <TabsTrigger key={g.guild_id} value={g.guild_id}>{g.guild_name}</TabsTrigger>
           ))}
         </TabsList>
-        {guilds.map(g => (
+        {visibleGuilds.map(g => (
           <TabsContent key={g.guild_id} value={g.guild_id}>
             <GuildPanel guildId={g.guild_id} guildName={g.guild_name} onMsg={showMsg} />
           </TabsContent>

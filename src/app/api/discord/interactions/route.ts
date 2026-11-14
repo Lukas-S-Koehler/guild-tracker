@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { waitUntil } from '@vercel/functions';
 import { createAdminClient } from '@/lib/supabase-server';
 import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerAltCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, registerAssaultCommand, sendInteractionFollowup, editOriginalInteractionResponse, editChannelMessageRich, postToChannel, listGlobalCommands, listGuildCommands, deleteGlobalCommand, deleteGuildCommand } from '@/lib/discord-api';
-import { handleAssaultCommand, handleAssaultAutocomplete } from '@/lib/assault-discord';
+import { handleAssaultCommand, handleAssaultAutocomplete, handleAssaultChecklistComponent } from '@/lib/assault-discord';
 import { switchAccountMain } from '@/lib/alt-switch';
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
 import { formatLeaderboard } from '@/lib/utils';
@@ -194,6 +194,15 @@ export async function POST(req: NextRequest) {
 
   if (interaction.type === INTERACTION_TYPE_COMPONENT && interaction.data?.custom_id === 'bump_click') {
     return handleBumpClick(interaction);
+  }
+
+  if (
+    interaction.type === INTERACTION_TYPE_COMPONENT &&
+    typeof interaction.data?.custom_id === 'string' &&
+    (interaction.data.custom_id.startsWith('assault_check:') ||
+      interaction.data.custom_id.startsWith('assault_check_reset:'))
+  ) {
+    return handleAssaultChecklistComponent(interaction);
   }
 
   return NextResponse.json({ type: 1 });
