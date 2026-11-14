@@ -1,8 +1,12 @@
 const DISCORD_API = 'https://discord.com/api/v10';
 
 function getBotToken(): string {
-  const token = process.env.DISCORD_BOT_TOKEN;
+  let token = process.env.DISCORD_BOT_TOKEN?.trim();
   if (!token) throw new Error('DISCORD_BOT_TOKEN not configured');
+  if (token.toLowerCase().startsWith('bot ')) token = token.slice(4).trim();
+  if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
+    token = token.slice(1, -1);
+  }
   return token;
 }
 
