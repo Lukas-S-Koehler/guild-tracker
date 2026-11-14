@@ -17,16 +17,35 @@ interface GuildSummary {
   level_range: string;
   shrine_info: string;
   tracked_zone_id: number | null;
+  weekdays: number[] | null;
+  season_start: string | null;
+  season_end: string | null;
+  next_launch_unix: number | null;
   active_run: { ends_at: string; starts_at: string; zone_name: string } | null;
   last_run: { ends_at: string; zone_name: string; total_kills: number; total_experience: number } | null;
 }
 
-function nextLaunchUnix(hhmmss: string): number {
-  const [h, m] = hhmmss.split(':').map((n) => parseInt(n, 10));
-  const now = new Date();
-  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), h, m, 0));
-  if (d.getTime() <= now.getTime()) d.setUTCDate(d.getUTCDate() + 1);
-  return Math.floor(d.getTime() / 1000);
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function formatSchedule(g: GuildSummary): string {
+  const days = g.weekdays && g.weekdays.length > 0
+    ? g.weekdays.slice().sort().map((d) => WEEKDAY_LABELS[d]).join('/')
+    : 'no days set';
+  const window = g.season_start && g.season_end
+    ? ` · ${g.season_start}→${g.season_end}`
+    : g.season_start ? ` · from ${g.season_start}`
+    : g.season_end ? ` · until ${g.season_end}` : '';
+  return `${days} @ ${g.launch_time_utc.slice(0, 5)} UTC${window}`;
+}
+
+function formatCountdown(unix: number): string {
+  const diffMs = unix * 1000 - Date.now();
+  if (diffMs <= 0) return 'now';
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60);
+  if (h < 24) return `${h}h ${mins % 60}m`;
+  return `${Math.floor(h / 24)}d ${h % 24}h`;
 }
 
 export default function AssaultLandingPage() {
@@ -104,7 +123,7 @@ export default function AssaultLandingPage() {
         )}
         <div className="grid gap-3 md:grid-cols-2">
           {guilds?.map((g) => {
-            const launchUnix = nextLaunchUnix(g.launch_time_utc);
+            const launchUnix = g.next_launch_unix;
             return (
               <Card key={g.guild_id}>
                 <CardHeader>
@@ -117,10 +136,19 @@ export default function AssaultLandingPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">
+                  <div className="text-muted-foreground">
+                    Schedule: {formatSchedule(g)}
+                  </div>
                   <div>
                     <span className="text-muted-foreground">Next launch: </span>
-                    <span>{g.launch_time_utc} UTC</span>
-                    <span className="text-muted-foreground"> · in {Math.max(0, Math.floor((launchUnix * 1000 - Date.now()) / 60000))}m</span>
+                    {launchUnix ? (
+                      <>
+                        <span>{new Date(launchUnix * 1000).toUTCString().slice(0, 22)} UTC</span>
+                        <span className="text-muted-foreground"> · in {formatCountdown(launchUnix)}</span>
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground">— (no upcoming day in window)</span>
+                    )}
                   </div>
                   {g.active_run && (
                     <div className="text-orange-500">

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
-import { postToChannel } from '@/lib/discord-api';
+import { postToChannelRich } from '@/lib/discord-api';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,7 +31,13 @@ export async function POST(req: NextRequest) {
     const days = r.days_of_week as number[] | null;
     if (days && days.length > 0 && !days.includes(currentDow)) continue;
     const prefix = r.role_ping_id ? `<@&${r.role_ping_id}> ` : '';
-    const res = await postToChannel(r.discord_channel_id, `${prefix}${r.message}`);
+    const payload: Record<string, unknown> = {
+      content: `${prefix}${r.message}`,
+      allowed_mentions: r.role_ping_id
+        ? { parse: [], roles: [r.role_ping_id] }
+        : { parse: [] },
+    };
+    const res = await postToChannelRich(r.discord_channel_id, payload);
     results.push({ id: r.id, name: r.name, ok: res.ok, error: res.error });
   }
 

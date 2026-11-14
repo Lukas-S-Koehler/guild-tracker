@@ -8,6 +8,7 @@ import {
   getGuildName,
   nowHHMM,
   computeFireHHMM,
+  isAssaultDay,
 } from '@/lib/assault-service';
 import { buildTemplateVars, renderTemplate, todayLaunchUnix, utcDateString } from '@/lib/assault-template';
 
@@ -28,10 +29,8 @@ export async function POST(req: NextRequest) {
 
   const configs = await listAssaultConfigs();
   for (const config of configs) {
-    if (!config.active) continue;
-    if (config.paused_until && new Date(config.paused_until) > now) continue;
-    if (config.skip_date === launchDate) continue;
     if (!config.announcement_channel_id) continue;
+    if (!isAssaultDay(config, now)) continue;
 
     const steps = await listSteps(config.guild_id);
     const dueSteps = steps.filter(

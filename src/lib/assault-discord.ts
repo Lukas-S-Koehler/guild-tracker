@@ -10,6 +10,7 @@ import {
   markSent,
   inferGuildFromRoles,
   isAssaultDay,
+  nextAssaultLaunchUnix,
   GUILD_BY_MEMBER_ROLE,
   type AssaultConfig,
 } from '@/lib/assault-service';
@@ -409,12 +410,14 @@ async function handleStatus() {
   for (const c of configs) {
     const name = await getGuildName(c.guild_id);
     const state = c.active ? '🟢 Active' : '⏸️ Paused';
-    const launchUnix = todayLaunchUnix(c.launch_time_utc, now);
-    const effUnix = launchUnix < Math.floor(now.getTime() / 1000) ? launchUnix + 86400 : launchUnix;
     const skip = c.skip_date === utcDateString(now) ? ' (today skipped)' : '';
+    const nextUnix = nextAssaultLaunchUnix(c, now);
+    const launchLine = nextUnix
+      ? `Next launch: <t:${nextUnix}:F> (<t:${nextUnix}:R>)`
+      : `Next launch: — (no assault day scheduled)`;
     lines.push(
       `**${name}** — ${state}${skip}\n` +
-        `Launch: <t:${effUnix}:t> (<t:${effUnix}:R>) • Zone: ${c.zone_name} • Shrine: ${c.shrine_info}`
+        `${launchLine} • Zone: ${c.zone_name} • Shrine: ${c.shrine_info}`
     );
   }
   return NextResponse.json({ type: 4, data: { content: lines.join('\n\n'), flags: 64 } });
@@ -710,7 +713,8 @@ function renderPresetField(preset: Preset, combat: CombatPotion[], xp: XpPotion[
 // message update preserves.
 
 interface WorkingLoadout {
-  combatCombinedId: number | null; // combat potion that fills attack+protection (or single-slot)
+  combatCombinedId: number | null; // primary combat potion (combined or single-slot)
+  combatSecondaryId: number | null; // optional second combat potion (e.g. protection when primary = attack)
   combatXpId: number | null;
   battleXpId: number | null;
 }
@@ -718,69 +722,86 @@ interface WorkingLoadout {
 function encodeState(w: WorkingLoadout): string {
   const bits: string[] = [];
   bits.push(`cc:${w.combatCombinedId ?? ''}`);
+  bits.push(`c2:${w.combatSecondaryId ?? ''}`);
   bits.push(`cx:${w.combatXpId ?? ''}`);
   bits.push(`bx:${w.battleXpId ?? ''}`);
   return bits.join(',');
 }
 
 function decodeState(s: string): WorkingLoadout {
-  const w: WorkingLoadout = { combatCombinedId: null, combatXpId: null, battleXpId: null };
+  const w: WorkingLoadout = { combatCombinedId: null, combatSecondaryId: null, combatXpId: null, battleXpId: null };
   for (const part of s.split(',')) {
     const [k, v] = part.split(':');
     if (!v) continue;
     const id = parseInt(v, 10);
     if (Number.isNaN(id)) continue;
     if (k === 'cc') w.combatCombinedId = id;
+    else if (k === 'c2') w.combatSecondaryId = id;
     else if (k === 'cx') w.combatXpId = id;
     else if (k === 'bx') w.battleXpId = id;
   }
   return w;
 }
 
+function emptyWorking(): WorkingLoadout {
+  return { combatCombinedId: null, combatSecondaryId: null, combatXpId: null, battleXpId: null };
+}
+
 function extractStateFromContent(content: string | undefined): WorkingLoadout {
-  if (!content) return { combatCombinedId: null, combatXpId: null, battleXpId: null };
+  if (!content) return emptyWorking();
   const m = content.match(/state=([^\s`]+)/);
-  if (!m) return { combatCombinedId: null, combatXpId: null, battleXpId: null };
+  if (!m) return emptyWorking();
   return decodeState(m[1]);
 }
 
 function presetToWorking(preset: Preset, combat: CombatPotion[], _xp: XpPotion[]): WorkingLoadout {
-  // Pick a single combat potion to represent combined attack+protection slot.
-  // Priority: potion that fills both (phoenix, cosmic, thunderfury) → first in list.
+  // Prefer combined potion as primary; otherwise first combat → primary, second → secondary.
   const combatIds = preset.combat_potion_ids;
-  let combinedId: number | null = null;
   const cById = new Map(combat.map((p) => [p.id, p]));
+  let primaryId: number | null = null;
+  let secondaryId: number | null = null;
   for (const id of combatIds) {
     const p = cById.get(id);
     if (!p) continue;
-    if (p.attack_power_bonus > 0 && p.protection_bonus > 0) {
-      combinedId = p.id;
-      break;
-    }
+    if (p.attack_power_bonus > 0 && p.protection_bonus > 0) { primaryId = p.id; break; }
   }
-  if (combinedId == null && combatIds.length > 0) combinedId = combatIds[0];
+  if (primaryId == null) {
+    const remaining = combatIds.filter((id) => cById.has(id));
+    primaryId = remaining[0] ?? null;
+    secondaryId = remaining[1] ?? null;
+  } else {
+    secondaryId = combatIds.find((id) => id !== primaryId && cById.has(id)) ?? null;
+  }
   const cxId = preset.xp_potion_ids.find((id) => id >= 100 && id < 200) ?? null;
   const bxId = preset.xp_potion_ids.find((id) => id >= 200) ?? null;
-  return { combatCombinedId: combinedId, combatXpId: cxId, battleXpId: bxId };
+  return { combatCombinedId: primaryId, combatSecondaryId: secondaryId, combatXpId: cxId, battleXpId: bxId };
 }
 
 function loadoutToWorking(l: SavedLoadout, combat: CombatPotion[]): WorkingLoadout {
   const cById = new Map(combat.map((p) => [p.id, p]));
-  let combinedId: number | null = null;
+  let primaryId: number | null = null;
+  let secondaryId: number | null = null;
   for (const id of l.combat_potion_ids) {
     const p = cById.get(id);
     if (!p) continue;
-    if (p.attack_power_bonus > 0 && p.protection_bonus > 0) { combinedId = p.id; break; }
+    if (p.attack_power_bonus > 0 && p.protection_bonus > 0) { primaryId = p.id; break; }
   }
-  if (combinedId == null && l.combat_potion_ids.length > 0) combinedId = l.combat_potion_ids[0];
+  if (primaryId == null) {
+    const remaining = l.combat_potion_ids.filter((id) => cById.has(id));
+    primaryId = remaining[0] ?? null;
+    secondaryId = remaining[1] ?? null;
+  } else {
+    secondaryId = l.combat_potion_ids.find((id) => id !== primaryId && cById.has(id)) ?? null;
+  }
   const cxId = l.xp_potion_ids.find((id) => id >= 100 && id < 200) ?? null;
   const bxId = l.xp_potion_ids.find((id) => id >= 200) ?? null;
-  return { combatCombinedId: combinedId, combatXpId: cxId, battleXpId: bxId };
+  return { combatCombinedId: primaryId, combatSecondaryId: secondaryId, combatXpId: cxId, battleXpId: bxId };
 }
 
 function workingToIds(w: WorkingLoadout): { combat_potion_ids: number[]; xp_potion_ids: number[] } {
   const combat: number[] = [];
   if (w.combatCombinedId != null) combat.push(w.combatCombinedId);
+  if (w.combatSecondaryId != null && w.combatSecondaryId !== w.combatCombinedId) combat.push(w.combatSecondaryId);
   const xp: number[] = [];
   if (w.combatXpId != null) xp.push(w.combatXpId);
   if (w.battleXpId != null) xp.push(w.battleXpId);
@@ -800,6 +821,7 @@ function renderPicker(opts: {
   const xById = new Map(xp.map((p) => [p.id, p]));
 
   const cc = working.combatCombinedId != null ? cById.get(working.combatCombinedId) : null;
+  const c2 = working.combatSecondaryId != null ? cById.get(working.combatSecondaryId) : null;
   const cx = working.combatXpId != null ? xById.get(working.combatXpId) : null;
   const bx = working.battleXpId != null ? xById.get(working.battleXpId) : null;
 
@@ -808,7 +830,8 @@ function renderPicker(opts: {
     p ? `${qualityEmoji(p.quality)} **${p.name}** — ${formatCombatBonus(p)}${formatDuration(p.duration_minutes) ? ` · ${formatDuration(p.duration_minutes)}` : ''}` : '— empty';
   const fmtXp = (p: XpPotion | null | undefined) =>
     p ? `${qualityEmoji(p.quality)} **${p.name}** — ${formatXpBonus(p)}${formatDuration(p.duration_minutes) ? ` · ${formatDuration(p.duration_minutes)}` : ''}` : '— empty';
-  lines.push(`**Combat (Attack+Protection):** ${fmtCombat(cc)}`);
+  lines.push(`**Combat #1:** ${fmtCombat(cc)}`);
+  lines.push(`**Combat #2:** ${fmtCombat(c2)}`);
   lines.push(`**Combat XP:** ${fmtXp(cx)}`);
   lines.push(`**Battle XP:** ${fmtXp(bx)}`);
 
@@ -822,15 +845,7 @@ function renderPicker(opts: {
     ...savedLoadouts.slice(0, 15).map((l) => ({ label: `Mine: ${l.name}${l.is_default ? ' ★' : ''}`.slice(0, 100), value: `saved:${l.id}` })),
   ].slice(0, 25);
 
-  const combatChoices = combat
-    .filter((p) => (p.attack_power_bonus ?? 0) + (p.protection_bonus ?? 0) > 0)
-    .slice(0, 25)
-    .map((p) => ({
-      label: `${qualityEmoji(p.quality)} ${p.name}`.slice(0, 100),
-      value: String(p.id),
-      description: `${formatCombatBonus(p)}${formatDuration(p.duration_minutes) ? ` · ${formatDuration(p.duration_minutes)}` : ''}`.slice(0, 100),
-      default: working.combatCombinedId === p.id,
-    }));
+  const combatPool = combat.filter((p) => (p.attack_power_bonus ?? 0) + (p.protection_bonus ?? 0) > 0).slice(0, 25);
 
   const cxChoices = xp
     .filter((p) => p.category === 'combat_xp')
@@ -866,15 +881,21 @@ function renderPicker(opts: {
       }],
     });
   }
+  const combatMulti = combatPool.map((p) => ({
+    label: `${qualityEmoji(p.quality)} ${p.name}`.slice(0, 100),
+    value: String(p.id),
+    description: `${formatCombatBonus(p)}${formatDuration(p.duration_minutes) ? ` · ${formatDuration(p.duration_minutes)}` : ''}`.slice(0, 100),
+    default: working.combatCombinedId === p.id || working.combatSecondaryId === p.id,
+  }));
   components.push({
     type: 1,
     components: [{
       type: 3,
       custom_id: 'pots_combat',
-      placeholder: 'Combat potion (Attack / Protection)…',
+      placeholder: 'Combat potions (pick up to 2)…',
       min_values: 0,
-      max_values: 1,
-      options: combatChoices,
+      max_values: 2,
+      options: combatMulti,
     }],
   });
   components.push({
@@ -916,7 +937,7 @@ async function handlePotions(_sub: Option) {
   // Caller will supply user via interaction router; we build initial picker with default preset = free.
   const { combat, xp, presets } = await listPotions();
   const base = presets.find((p) => p.id === 'free') ?? presets[0];
-  const working = base ? presetToWorking(base, combat, xp) : { combatCombinedId: null, combatXpId: null, battleXpId: null };
+  const working = base ? presetToWorking(base, combat, xp) : emptyWorking();
   const { content, components } = renderPicker({
     working, combat, xp, presets, savedLoadouts: [], title: 'Assault Potions — pick & save',
   });
@@ -973,8 +994,9 @@ export async function handleAssaultPotionsComponent(interaction: {
       if (l) working = loadoutToWorking(l, combat);
     }
   } else if (customId === 'pots_combat') {
-    const v = interaction.data.values?.[0];
-    working.combatCombinedId = v ? parseInt(v, 10) : null;
+    const vs = interaction.data.values ?? [];
+    working.combatCombinedId = vs[0] ? parseInt(vs[0], 10) : null;
+    working.combatSecondaryId = vs[1] ? parseInt(vs[1], 10) : null;
   } else if (customId === 'pots_combat_xp') {
     const v = interaction.data.values?.[0];
     working.combatXpId = v ? parseInt(v, 10) : null;
@@ -982,7 +1004,7 @@ export async function handleAssaultPotionsComponent(interaction: {
     const v = interaction.data.values?.[0];
     working.battleXpId = v ? parseInt(v, 10) : null;
   } else if (customId === 'pots_clear') {
-    working = { combatCombinedId: null, combatXpId: null, battleXpId: null };
+    working = emptyWorking();
   } else if (customId === 'pots_default') {
     // Promote user's most recent saved loadout matching current state. If no match, hint to save first.
     const ids = workingToIds(working);

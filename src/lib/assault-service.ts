@@ -247,6 +247,24 @@ export async function getGuildName(guildId: string): Promise<string> {
   return (data?.guild_name as string | undefined) ?? guildId;
 }
 
+/** Next scheduled launch (unix seconds) obeying weekdays, season, skip, pause.
+ *  Returns null if no launch day falls within the lookahead window. */
+export function nextAssaultLaunchUnix(
+  config: Pick<AssaultConfig, 'weekdays' | 'season_start' | 'season_end' | 'skip_date' | 'paused_until' | 'active' | 'launch_time_utc'>,
+  now: Date = new Date(),
+  lookaheadDays = 60,
+): number | null {
+  if (!config.launch_time_utc) return null;
+  const [hh, mm] = config.launch_time_utc.split(':').map((n) => parseInt(n, 10));
+  for (let i = 0; i < lookaheadDays; i++) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + i, hh, mm, 0));
+    if (d.getTime() <= now.getTime()) continue;
+    if (!isAssaultDay(config, d)) continue;
+    return Math.floor(d.getTime() / 1000);
+  }
+  return null;
+}
+
 /** Return current UTC HH:MM (no seconds). */
 export function nowHHMM(d: Date = new Date()): string {
   const hh = String(d.getUTCHours()).padStart(2, '0');

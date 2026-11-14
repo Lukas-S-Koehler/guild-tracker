@@ -3,6 +3,9 @@ import { createAdminClient } from '@/lib/supabase-server';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
+
+const CONCURRENCY = 8;
 
 const SUPER_ADMIN_USER_ID = '5f33bb41-86ab-4024-a1da-6a2fea5fb36b';
 
@@ -47,11 +50,13 @@ export async function POST(req: NextRequest) {
     ...(combatPotions ?? []).filter((p) => p.is_tradeable && p.hashed_item_id).map((p) => p.name),
     ...(xpPotions ?? []).filter((p) => p.hashed_item_id).map((p) => p.name),
   ];
-  for (const name of potionNames) {
-    await supabase
-      .from('market_cache')
-      .upsert({ item_name: name, price: 0, cached_at: new Date(0).toISOString() }, { onConflict: 'item_name', ignoreDuplicates: true });
-  }
+  await Promise.all(
+    potionNames.map((name) =>
+      supabase
+        .from('market_cache')
+        .upsert({ item_name: name, price: 0, cached_at: new Date(0).toISOString() }, { onConflict: 'item_name', ignoreDuplicates: true })
+    )
+  );
 
   // Refresh full list after seed
   const { data: allItemsAfterSeed } = await supabase.from('market_cache').select('item_name');
@@ -60,7 +65,7 @@ export async function POST(req: NextRequest) {
   const failed: string[] = [];
   const now = new Date().toISOString();
 
-  for (const { item_name } of items) {
+  async function processOne(item_name: string) {
     try {
       const { price, itemId } = await api.getItemPrice(item_name);
       if (price > 0) {
@@ -70,15 +75,16 @@ export async function POST(req: NextRequest) {
           price,
           cached_at: now,
         }, { onConflict: 'item_name' });
-        // Mirror into potion tables
-        await supabase
-          .from('combat_potions')
-          .update({ market_price: price, avg_recent_sales: String(price), last_price_sync: now })
-          .eq('name', item_name);
-        await supabase
-          .from('xp_potions')
-          .update({ market_price: price, avg_recent_sales: String(price), last_price_sync: now })
-          .eq('name', item_name);
+        await Promise.all([
+          supabase
+            .from('combat_potions')
+            .update({ market_price: price, avg_recent_sales: String(price), last_price_sync: now })
+            .eq('name', item_name),
+          supabase
+            .from('xp_potions')
+            .update({ market_price: price, avg_recent_sales: String(price), last_price_sync: now })
+            .eq('name', item_name),
+        ]);
         updated++;
       } else {
         failed.push(item_name);
@@ -86,6 +92,11 @@ export async function POST(req: NextRequest) {
     } catch {
       failed.push(item_name);
     }
+  }
+
+  for (let i = 0; i < items.length; i += CONCURRENCY) {
+    const batch = items.slice(i, i + CONCURRENCY);
+    await Promise.all(batch.map((it) => processOne(it.item_name)));
   }
 
   return NextResponse.json({ success: true, total: items.length, updated, failed });

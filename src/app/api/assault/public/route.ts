@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
+import { nextAssaultLaunchUnix } from '@/lib/assault-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,7 +19,7 @@ export async function GET() {
 
   const { data: configs } = await supabase
     .from('assault_configs')
-    .select('guild_id, active, launch_time_utc, zone_name, level_range, shrine_info, tracked_zone_id, tracked_zone_key, external_guild_id, guild_config:guild_config!inner(guild_name)')
+    .select('guild_id, active, launch_time_utc, zone_name, level_range, shrine_info, tracked_zone_id, tracked_zone_key, external_guild_id, weekdays, season_start, season_end, skip_date, paused_until, guild_config:guild_config!inner(guild_name)')
     .in('guild_id', assaultGuildIds)
     .order('guild_id');
 
@@ -38,6 +39,11 @@ export async function GET() {
     tracked_zone_id: number | null;
     tracked_zone_key: string | null;
     external_guild_id: number | null;
+    weekdays: number[] | null;
+    season_start: string | null;
+    season_end: string | null;
+    skip_date: string | null;
+    paused_until: string | null;
     guild_config: { guild_name: string } | { guild_name: string }[] | null;
   };
 
@@ -57,6 +63,12 @@ export async function GET() {
       tracked_zone_id: c.tracked_zone_id,
       tracked_zone_key: c.tracked_zone_key,
       external_guild_id: c.external_guild_id,
+      weekdays: c.weekdays,
+      season_start: c.season_start,
+      season_end: c.season_end,
+      skip_date: c.skip_date,
+      paused_until: c.paused_until,
+      next_launch_unix: nextAssaultLaunchUnix(c) ?? null,
       active_run: active ?? null,
       last_run: lastFinalized ?? null,
     };
