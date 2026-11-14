@@ -194,21 +194,18 @@ function AssaultManagerContent() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const results = await Promise.all(guilds.map(async g => {
-        const c = new ApiClient();
-        c.setGuildId(g.guild_id);
-        try {
-          const res = await c.get('/api/assault/config');
-          if (!res.ok) return null;
-          const j = await res.json();
-          return j.config ? g : null;
-        } catch { return null; }
-      }));
-      if (cancelled) return;
-      const filtered = results.filter((g): g is typeof guilds[number] => g !== null);
-      setAssaultGuilds(filtered);
-      if (filtered.length > 0 && !filtered.some(g => g.guild_id === activeGuildId)) {
-        setActiveGuildId(filtered[0].guild_id);
+      try {
+        const res = await fetch('/api/assault/public');
+        const j = await res.json();
+        const ids = new Set<string>(((j.guilds ?? []) as { guild_id: string }[]).map(g => g.guild_id));
+        if (cancelled) return;
+        const filtered = guilds.filter(g => ids.has(g.guild_id));
+        setAssaultGuilds(filtered);
+        if (filtered.length > 0 && !filtered.some(g => g.guild_id === activeGuildId)) {
+          setActiveGuildId(filtered[0].guild_id);
+        }
+      } catch {
+        if (!cancelled) setAssaultGuilds([]);
       }
     })();
     return () => { cancelled = true; };

@@ -48,9 +48,17 @@ export async function getAssaultConfig(guildId: string): Promise<AssaultConfig |
 
 export async function listAssaultConfigs(): Promise<AssaultConfig[]> {
   const supabase = createAdminClient();
+  const { data: assaultGuilds, error: gErr } = await supabase
+    .from('guilds')
+    .select('id')
+    .eq('is_assault', true);
+  if (gErr) throw new Error(gErr.message);
+  const ids = (assaultGuilds ?? []).map((g: { id: string }) => g.id);
+  if (ids.length === 0) return [];
   const { data, error } = await supabase
     .from('assault_configs')
     .select('*')
+    .in('guild_id', ids)
     .order('guild_id');
   if (error) throw new Error(error.message);
   return (data as AssaultConfig[]) ?? [];
