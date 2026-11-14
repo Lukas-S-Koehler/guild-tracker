@@ -8,6 +8,7 @@ import { ArrowLeft, Loader2, RotateCcw, Check } from 'lucide-react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { useAuth } from '@/contexts/AuthContext';
 import { ApiClient } from '@/lib/api-client';
+import { LoadoutChecklistBlock } from '@/components/assault/LoadoutChecklistBlock';
 
 interface ChecklistItem {
   item_key: string;
@@ -112,6 +113,8 @@ function ChecklistInner() {
           <CardDescription>Persists until next launch. Reset wipes current.</CardDescription>
         </CardHeader>
       </Card>
+
+      <LoadoutChecklistBlock />
 
       {loading && <Loader2 className="h-5 w-5 animate-spin" />}
 

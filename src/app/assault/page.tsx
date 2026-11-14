@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, BookOpen, CheckSquare, BarChart3, Settings, Swords } from 'lucide-react';
+import { Loader2, BookOpen, CheckSquare, BarChart3, Settings, Swords, FlaskConical } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface GuildSummary {
@@ -51,7 +51,7 @@ export default function AssaultLandingPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
         <Link href="/assault/guide">
           <Card className="h-full hover:border-orange-500/60 transition">
             <CardHeader>
@@ -65,6 +65,14 @@ export default function AssaultLandingPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base"><CheckSquare className="h-4 w-4" />Checklist</CardTitle>
               <CardDescription>Track your prep each launch.</CardDescription>
+            </CardHeader>
+          </Card>
+        </Link>
+        <Link href="/assault/potions">
+          <Card className="h-full hover:border-orange-500/60 transition">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base"><FlaskConical className="h-4 w-4" />Potions</CardTitle>
+              <CardDescription>Plan stacks, costs, restacks.</CardDescription>
             </CardHeader>
           </Card>
         </Link>

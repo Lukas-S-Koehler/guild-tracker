@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, ExternalLink } from 'lucide-react';
+import { ArrowLeft, ExternalLink, FlaskConical } from 'lucide-react';
 import { HITS_TO_KILL, FIVE_PS, GEAR_LINK } from '@/lib/assault-plan-static';
 
 const DEFAULT_ZONE = 'Isle of Whispers';
@@ -123,6 +123,26 @@ export default function AssaultGuidePage() {
               <li key={p.when}><strong>{p.when}</strong> — {p.text}</li>
             ))}
           </ol>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><FlaskConical className="h-5 w-5" />Potions</CardTitle>
+          <CardDescription>4 slots: Battle XP · Combat XP · Attack · Protection. One potion per slot.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          <ul className="list-disc pl-5 space-y-1">
+            <li><strong>Battle XP</strong>: POTG (often free from campaign/dailies), Dragonblood Tonic, Vortex Brew, Battle Potion, Strike Essence.</li>
+            <li><strong>Combat XP</strong>: Wraithbane Essence, Dungeon Master&apos;s Tonic, Dungeon Potion. Sun&apos;s Light if you&apos;re burning gold.</li>
+            <li><strong>Attack</strong>: Frenzy, Bladeburst, Dragon&apos;s Essence. Pair with Bulwark Brew for protection.</li>
+            <li><strong>Protection</strong>: Shieldbearer&apos;s Infusion, Bulwark Brew, Guardian&apos;s Soul.</li>
+            <li><strong>Combo</strong> (fills attack + protection): Thunderfury Brew, Cosmic Tear, Phoenix Ashes.</li>
+          </ul>
+          <p className="text-muted-foreground">Can&apos;t stack two potions of the same type — Strike Essence + POTG both give Battle XP so only one applies. Pair accordingly.</p>
+          <Link href="/assault/potions" className="inline-flex items-center gap-1 text-primary hover:underline">
+            Open Potion Planner <ExternalLink className="h-3 w-3" />
+          </Link>
         </CardContent>
       </Card>
 
