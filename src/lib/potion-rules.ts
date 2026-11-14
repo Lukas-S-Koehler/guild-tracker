@@ -187,6 +187,16 @@ export function loadoutCost(
   return { tradeable: total, hasUnpriced };
 }
 
+/** Activation minute offset from launch for a potion of given duration.
+ *  Anchor: final full-buff refresh at launch + 60. Potion must last through +60, so
+ *  activate at `60 - duration`. Negative = pre-launch; positive = post-launch.
+ *  Returns null if duration unknown.
+ */
+export function computeActivationMinutes(durationMinutes: number | null | undefined): number | null {
+  if (durationMinutes == null || durationMinutes <= 0) return null;
+  return 60 - durationMinutes;
+}
+
 export const SLOT_LABELS: Record<SlotKey, string> = {
   battle_xp: 'Battle XP',
   combat_xp: 'Combat XP',

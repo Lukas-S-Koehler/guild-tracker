@@ -30,6 +30,82 @@ interface AssaultConfig {
   staff_role_id: string | null;
   skip_date: string | null;
   paused_until: string | null;
+  weekdays: number[] | null;
+  season_start: string | null;
+  season_end: string | null;
+}
+
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function ScheduleEditor({
+  value,
+  onSave,
+}: {
+  value: { weekdays: number[] | null; season_start: string | null; season_end: string | null };
+  onSave: (patch: Partial<AssaultConfig>) => void;
+}) {
+  const [weekdays, setWeekdays] = useState<number[]>(value.weekdays ?? []);
+  const [seasonStart, setSeasonStart] = useState(value.season_start ?? '');
+  const [seasonEnd, setSeasonEnd] = useState(value.season_end ?? '');
+
+  const toggle = (d: number) =>
+    setWeekdays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort()));
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <div className="text-sm font-medium mb-1">Assault weekdays (UTC)</div>
+        <div className="flex gap-1 flex-wrap">
+          {WEEKDAY_LABELS.map((lbl, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => toggle(i)}
+              className={`px-3 py-1 rounded border text-sm ${
+                weekdays.includes(i) ? 'bg-primary text-primary-foreground' : 'bg-background'
+              }`}
+            >
+              {lbl}
+            </button>
+          ))}
+        </div>
+        <div className="text-xs text-muted-foreground mt-1">
+          Empty = no assault days configured (schedule disabled).
+        </div>
+      </div>
+      <div className="flex gap-3">
+        <label className="text-sm flex-1">
+          Season start
+          <input
+            type="date"
+            value={seasonStart}
+            onChange={(e) => setSeasonStart(e.target.value)}
+            className="w-full border rounded px-2 py-1 mt-1 bg-background"
+          />
+        </label>
+        <label className="text-sm flex-1">
+          Season end
+          <input
+            type="date"
+            value={seasonEnd}
+            onChange={(e) => setSeasonEnd(e.target.value)}
+            className="w-full border rounded px-2 py-1 mt-1 bg-background"
+          />
+        </label>
+      </div>
+      <Button
+        onClick={() =>
+          onSave({
+            weekdays: weekdays.length ? weekdays : null,
+            season_start: seasonStart || null,
+            season_end: seasonEnd || null,
+          })
+        }
+      >
+        Save schedule
+      </Button>
+    </div>
+  );
 }
 
 function GuildPanel({ guildId, guildName, onMsg }: {
@@ -150,6 +226,16 @@ function GuildPanel({ guildId, guildName, onMsg }: {
       <Card>
         <CardHeader><CardTitle>{guildName}</CardTitle><CardDescription>Guild ID: <code>{guildId}</code></CardDescription></CardHeader>
         <CardContent><GuildStatusCard value={status} onSave={patchConfig} /></CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Schedule</CardTitle><CardDescription>Assaults run on selected weekdays within the season window. Off-days skip pings.</CardDescription></CardHeader>
+        <CardContent>
+          <ScheduleEditor
+            value={{ weekdays: config.weekdays, season_start: config.season_start, season_end: config.season_end }}
+            onSave={patchConfig}
+          />
+        </CardContent>
       </Card>
 
       <Card>

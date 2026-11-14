@@ -614,8 +614,7 @@ export async function registerAssaultCommand(): Promise<{ ok: boolean; error?: s
       {
         name: 'checklist',
         type: 1,
-        description: 'Show your prep checklist link + progress for this launch',
-        options: [guildOpt],
+        description: 'Personal prep checklist (guild inferred from your roles; timings from your loadout)',
       },
       {
         name: 'plan',
@@ -640,21 +639,12 @@ export async function registerAssaultCommand(): Promise<{ ok: boolean; error?: s
       {
         name: 'potions',
         type: 1,
-        description: 'Show potion preset tiers (free / budget / mid / whale)',
-        options: [
-          {
-            name: 'preset',
-            type: 3,
-            description: 'Specific preset to show (optional)',
-            required: false,
-            autocomplete: true,
-          },
-        ],
+        description: 'Pick + save your potion loadout (preset → tweak → save)',
       },
       {
         name: 'loadout',
         type: 1,
-        description: 'Show your saved potion loadout (link it first with /assault link-loadout)',
+        description: 'Show your saved potion loadout',
         options: [
           {
             name: 'name',
@@ -662,19 +652,6 @@ export async function registerAssaultCommand(): Promise<{ ok: boolean; error?: s
             description: 'Loadout name (defaults to your default)',
             required: false,
             autocomplete: true,
-          },
-        ],
-      },
-      {
-        name: 'link-loadout',
-        type: 1,
-        description: 'Link a web-app loadout to your Discord account',
-        options: [
-          {
-            name: 'loadout_id',
-            type: 3,
-            description: 'Loadout UUID copied from the web app',
-            required: true,
           },
         ],
       },

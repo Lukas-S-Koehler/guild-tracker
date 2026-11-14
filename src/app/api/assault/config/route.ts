@@ -18,6 +18,9 @@ const EDITABLE_KEYS = [
   'staff_role_id',
   'skip_date',
   'paused_until',
+  'weekdays',
+  'season_start',
+  'season_end',
 ] as const;
 
 export async function GET(req: NextRequest) {

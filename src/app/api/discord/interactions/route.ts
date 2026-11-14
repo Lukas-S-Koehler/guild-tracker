@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { waitUntil } from '@vercel/functions';
 import { createAdminClient } from '@/lib/supabase-server';
 import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerAltCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, registerAssaultCommand, sendInteractionFollowup, editOriginalInteractionResponse, editChannelMessageRich, postToChannel, listGlobalCommands, listGuildCommands, deleteGlobalCommand, deleteGuildCommand } from '@/lib/discord-api';
-import { handleAssaultCommand, handleAssaultAutocomplete, handleAssaultChecklistComponent } from '@/lib/assault-discord';
+import { handleAssaultCommand, handleAssaultAutocomplete, handleAssaultChecklistComponent, handleAssaultPotionsComponent } from '@/lib/assault-discord';
 import { switchAccountMain } from '@/lib/alt-switch';
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
 import { formatLeaderboard } from '@/lib/utils';
@@ -30,6 +30,7 @@ const INTERACTION_TYPE_PING = 1;
 const INTERACTION_TYPE_COMMAND = 2;
 const INTERACTION_TYPE_COMPONENT = 3;
 const INTERACTION_TYPE_AUTOCOMPLETE = 4;
+const INTERACTION_TYPE_MODAL_SUBMIT = 5;
 
 // Role allowed to run staff-only commands (/warn, /whip, /map, /make-main).
 const STAFF_ROLE_ID = '1444749350285611038';
@@ -203,6 +204,14 @@ export async function POST(req: NextRequest) {
       interaction.data.custom_id.startsWith('assault_check_reset:'))
   ) {
     return handleAssaultChecklistComponent(interaction);
+  }
+
+  if (
+    (interaction.type === INTERACTION_TYPE_COMPONENT || interaction.type === INTERACTION_TYPE_MODAL_SUBMIT) &&
+    typeof interaction.data?.custom_id === 'string' &&
+    interaction.data.custom_id.startsWith('pots_')
+  ) {
+    return handleAssaultPotionsComponent(interaction);
   }
 
   return NextResponse.json({ type: 1 });

@@ -84,6 +84,77 @@ export async function getLoadoutForDiscordUser(
   return (data as SavedLoadout | null) ?? null;
 }
 
+export async function saveDiscordLoadout(
+  discordUserId: string,
+  input: { name: string; combat_potion_ids: number[]; xp_potion_ids: number[] },
+): Promise<SavedLoadout> {
+  const supabase = createAdminClient();
+  const { data: existing } = await supabase
+    .from('assault_potion_loadouts')
+    .select('*')
+    .eq('discord_user_id', discordUserId)
+    .ilike('name', input.name)
+    .maybeSingle();
+  if (existing) {
+    const { data, error } = await supabase
+      .from('assault_potion_loadouts')
+      .update({
+        combat_potion_ids: input.combat_potion_ids,
+        xp_potion_ids: input.xp_potion_ids,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', existing.id)
+      .select('*')
+      .single();
+    if (error) throw new Error(error.message);
+    return data as SavedLoadout;
+  }
+  const { data, error } = await supabase
+    .from('assault_potion_loadouts')
+    .insert({
+      discord_user_id: discordUserId,
+      user_id: null,
+      name: input.name,
+      is_default: false,
+      combat_potion_ids: input.combat_potion_ids,
+      xp_potion_ids: input.xp_potion_ids,
+    })
+    .select('*')
+    .single();
+  if (error) throw new Error(error.message);
+  return data as SavedLoadout;
+}
+
+export async function setDiscordLoadoutDefault(
+  discordUserId: string,
+  loadoutId: string,
+): Promise<void> {
+  const supabase = createAdminClient();
+  await supabase
+    .from('assault_potion_loadouts')
+    .update({ is_default: false, updated_at: new Date().toISOString() })
+    .eq('discord_user_id', discordUserId);
+  const { error } = await supabase
+    .from('assault_potion_loadouts')
+    .update({ is_default: true, updated_at: new Date().toISOString() })
+    .eq('id', loadoutId)
+    .eq('discord_user_id', discordUserId);
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteDiscordLoadout(
+  discordUserId: string,
+  loadoutId: string,
+): Promise<void> {
+  const supabase = createAdminClient();
+  const { error } = await supabase
+    .from('assault_potion_loadouts')
+    .delete()
+    .eq('id', loadoutId)
+    .eq('discord_user_id', discordUserId);
+  if (error) throw new Error(error.message);
+}
+
 export async function linkLoadoutToDiscord(
   loadoutId: string,
   discordUserId: string,

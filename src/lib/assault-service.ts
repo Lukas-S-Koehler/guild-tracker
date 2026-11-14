@@ -17,8 +17,62 @@ export interface AssaultConfig {
   staff_role_id: string | null;
   skip_date: string | null;
   paused_until: string | null;
+  weekdays: number[] | null;
+  season_start: string | null;
+  season_end: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export const DISCORD_ROLES = {
+  engineersMember: '1457858167726805154',
+  invadersMember: '1444772879483797714',
+  engineersStaff: '1457858504156250366',
+  invadersStaff: '1450584362264563855',
+} as const;
+
+export const GUILD_BY_MEMBER_ROLE: Record<string, { label: string; staffRoleId: string }> = {
+  [DISCORD_ROLES.engineersMember]: { label: 'dream engineers', staffRoleId: DISCORD_ROLES.engineersStaff },
+  [DISCORD_ROLES.invadersMember]: { label: 'invaders', staffRoleId: DISCORD_ROLES.invadersStaff },
+};
+
+export type InferGuildResult =
+  | { ok: true; guildLabel: string; memberRoleId: string; staffRoleId: string }
+  | { ok: false; reason: 'none' | 'ambiguous'; matchedLabels: string[] };
+
+/** Infer the user's assault guild from Discord member roles.
+ *  - Exactly one member role → infer.
+ *  - Both member roles → caller must require explicit guild option.
+ *  - Neither → reject.
+ */
+export function inferGuildFromRoles(roles: string[] | undefined): InferGuildResult {
+  const roleSet = new Set(roles ?? []);
+  const matches = Object.entries(GUILD_BY_MEMBER_ROLE).filter(([rid]) => roleSet.has(rid));
+  if (matches.length === 1) {
+    const [rid, info] = matches[0];
+    return { ok: true, guildLabel: info.label, memberRoleId: rid, staffRoleId: info.staffRoleId };
+  }
+  return {
+    ok: false,
+    reason: matches.length === 0 ? 'none' : 'ambiguous',
+    matchedLabels: matches.map(([, info]) => info.label),
+  };
+}
+
+/** Does the given guild's schedule mark `date` as an assault day? */
+export function isAssaultDay(
+  config: Pick<AssaultConfig, 'weekdays' | 'season_start' | 'season_end' | 'skip_date' | 'paused_until' | 'active'>,
+  date: Date = new Date(),
+): boolean {
+  if (!config.active) return false;
+  if (!config.weekdays || config.weekdays.length === 0) return false;
+  const dateStr = date.toISOString().slice(0, 10);
+  if (config.skip_date === dateStr) return false;
+  if (config.paused_until && new Date(config.paused_until).getTime() > date.getTime()) return false;
+  if (config.season_start && dateStr < config.season_start) return false;
+  if (config.season_end && dateStr > config.season_end) return false;
+  const dow = date.getUTCDay();
+  return config.weekdays.includes(dow);
 }
 
 export interface AssaultPingStep {

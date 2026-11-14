@@ -8,13 +8,19 @@ import {
   getGuildName,
   isAlreadySent,
   markSent,
+  inferGuildFromRoles,
+  isAssaultDay,
+  GUILD_BY_MEMBER_ROLE,
+  type AssaultConfig,
 } from '@/lib/assault-service';
 import {
   listPotions,
   getLoadoutForDiscordUser,
   listLoadoutsForDiscordUser,
-  linkLoadoutToDiscord,
+  saveDiscordLoadout,
+  setDiscordLoadoutDefault,
   type Preset,
+  type SavedLoadout,
 } from '@/lib/potions-service';
 import { getSlotState, loadoutCost, type CombatPotion, type XpPotion } from '@/lib/potion-rules';
 import { buildTemplateVars, renderTemplate, todayLaunchUnix, utcDateString } from '@/lib/assault-template';
@@ -22,7 +28,7 @@ import { postToChannelReturnId, editOriginalInteractionResponse } from '@/lib/di
 import { createAdminClient } from '@/lib/supabase-server';
 import { getZonePlan, listZones, shrineInfoFor } from '@/lib/assault-plan';
 import { FIVE_PS, HITS_TO_KILL, GEAR_LINK, POTION_SLOTS, TERRITORY_BOOSTS, EXP_REWARDS, KILL_REWARDS, EXP_SPLIT } from '@/lib/assault-plan-static';
-import { computeLaunchDate, getChecklistItems, type ChecklistItem } from '@/lib/assault-checklist-service';
+import { computeLaunchDate, getChecklistTemplate, buildTimedChecklist, type ChecklistItem } from '@/lib/assault-checklist-service';
 import { getDiscordChecked, toggleDiscordItem, resetDiscord } from '@/lib/assault-checklist-discord';
 
 interface Option {
@@ -165,8 +171,6 @@ export async function handleAssaultCommand(interaction: Interaction) {
       return handlePotions(sub);
     case 'loadout':
       return handleLoadout(interaction, sub);
-    case 'link-loadout':
-      return handleLinkLoadout(interaction, sub);
     default:
       return ephemeral(`Unknown subcommand: ${sub.name}`);
   }
@@ -256,22 +260,83 @@ async function handleLast(sub: Option) {
   return NextResponse.json({ type: 4, data: { content, flags: 64 } });
 }
 
-async function handleChecklist(interaction: Interaction, sub: Option) {
-  const guildId = String(findOption(sub.options, 'guild')?.value ?? '');
-  if (!guildId) return ephemeral('Missing guild.');
+/** Resolve a launch context for the personal checklist.
+ *  - If user has exactly one guild member role AND today is an assault day → use that guild's launch time.
+ *  - Otherwise → personal mode: launch_date = today, no absolute timestamps.
+ */
+async function resolveLaunchContext(interaction: Interaction): Promise<{
+  launchDate: string;
+  launchTimeUtc: string | null;
+  guildLabel: string | null;
+  config: AssaultConfig | null;
+  mode: 'guild' | 'personal' | 'ambiguous';
+  matchedLabels: string[];
+}> {
+  const roles = interaction.member?.roles;
+  const inferred = inferGuildFromRoles(roles);
+  const today = new Date().toISOString().slice(0, 10);
+  if (!inferred.ok) {
+    return {
+      launchDate: today,
+      launchTimeUtc: null,
+      guildLabel: null,
+      config: null,
+      mode: inferred.reason === 'ambiguous' ? 'ambiguous' : 'personal',
+      matchedLabels: inferred.reason === 'ambiguous' ? inferred.matchedLabels : [],
+    };
+  }
+  // Infer guild_id from guild name (label). We assume guild_config.guild_name matches.
+  const supabase = createAdminClient();
+  const { data: gc } = await supabase
+    .from('guild_config')
+    .select('guild_id')
+    .ilike('guild_name', inferred.guildLabel)
+    .maybeSingle();
+  const guildId = gc?.guild_id as string | undefined;
+  if (!guildId) {
+    return { launchDate: today, launchTimeUtc: null, guildLabel: inferred.guildLabel, config: null, mode: 'personal', matchedLabels: [] };
+  }
+  const config = await getAssaultConfig(guildId);
+  if (!config || !isAssaultDay(config)) {
+    return { launchDate: today, launchTimeUtc: null, guildLabel: inferred.guildLabel, config, mode: 'personal', matchedLabels: [] };
+  }
+  const launchDate = computeLaunchDate(config.launch_time_utc);
+  return {
+    launchDate,
+    launchTimeUtc: config.launch_time_utc,
+    guildLabel: inferred.guildLabel,
+    config,
+    mode: 'guild',
+    matchedLabels: [],
+  };
+}
+
+async function handleChecklist(interaction: Interaction, _sub: Option) {
   const user = interaction.member?.user;
   if (!user) return ephemeral('No user context.');
-  const config = await getAssaultConfig(guildId);
-  if (!config) return ephemeral(`No assault config for \`${guildId}\`.`);
-  const items = await getChecklistItems(guildId);
-  if (items.length === 0) return ephemeral('No checklist items configured for this guild.');
-  const launchDate = computeLaunchDate(config.launch_time_utc);
-  const checked = await getDiscordChecked(user.id, guildId, launchDate);
-  const name = await getGuildName(guildId);
+
+  const ctx = await resolveLaunchContext(interaction);
+  if (ctx.mode === 'ambiguous') {
+    return ephemeral(
+      `You have both guild member roles (${ctx.matchedLabels.join(', ')}). Can't infer a single guild. Pick a loadout tied to a specific guild config, or remove one role.`,
+    );
+  }
+
+  const [template, { combat, xp }, loadout] = await Promise.all([
+    getChecklistTemplate(),
+    listPotions(),
+    getLoadoutForDiscordUser(user.id),
+  ]);
+  if (template.length === 0) return ephemeral('No checklist template configured.');
+
+  const items = buildTimedChecklist(template, loadout, combat, xp, ctx.launchTimeUtc);
+  const checked = await getDiscordChecked(user.id, ctx.launchDate);
+
   const { content, components } = buildChecklistPayload({
-    guildId,
-    launchDate,
-    guildName: name,
+    launchDate: ctx.launchDate,
+    guildLabel: ctx.guildLabel,
+    mode: ctx.mode,
+    loadoutName: loadout?.name ?? null,
     items,
     checked,
   });
@@ -283,16 +348,21 @@ async function handleChecklist(interaction: Interaction, sub: Option) {
 
 /** Build the checklist message payload (content + components). Used by both initial render and UPDATE_MESSAGE. */
 export function buildChecklistPayload(opts: {
-  guildId: string;
   launchDate: string;
-  guildName: string;
+  guildLabel: string | null;
+  mode: 'guild' | 'personal';
+  loadoutName: string | null;
   items: ChecklistItem[];
   checked: Set<string>;
 }): { content: string; components: unknown[] } {
-  const { guildId, launchDate, guildName, items, checked } = opts;
+  const { launchDate, guildLabel, mode, loadoutName, items, checked } = opts;
   const total = items.length;
   const done = items.filter((i) => checked.has(i.item_key)).length;
-  const content = `✅ **${guildName} Assault Checklist** — ${launchDate}\nProgress: **${done}/${total}** · Persists until next launch.`;
+  const header = mode === 'guild'
+    ? `✅ **Assault Checklist** — ${guildLabel ?? 'personal'} · ${launchDate}`
+    : `✅ **Assault Checklist** — personal${guildLabel ? ` (${guildLabel}, no assault today)` : ''}`;
+  const loadoutLine = loadoutName ? `Loadout: **${loadoutName}**` : 'No loadout linked (run `/assault potions` to pick one — timed rows hidden).';
+  const content = `${header}\nProgress: **${done}/${total}** · ${loadoutLine}`;
 
   // 5 rows × 5 buttons = 25 max; reserve last row for Reset. 4 rows × 5 = 20 item buttons.
   const rendered = items.slice(0, 20);
@@ -300,11 +370,12 @@ export function buildChecklistPayload(opts: {
   let row: unknown[] = [];
   for (const it of rendered) {
     const isDone = checked.has(it.item_key);
+    const timeBit = it.time_label ? `[${it.time_label}] ` : '';
     row.push({
       type: 2, // Button
       style: isDone ? 3 /* success */ : 2 /* secondary */,
-      label: `${isDone ? '✅' : '⬜'} ${it.label}`.slice(0, 80),
-      custom_id: `assault_check:${guildId}:${launchDate}:${it.item_key}`.slice(0, 100),
+      label: `${isDone ? '✅' : '⬜'} ${timeBit}${it.label}`.slice(0, 80),
+      custom_id: `assault_check:${launchDate}:${it.item_key}`.slice(0, 100),
     });
     if (row.length === 5) {
       rows.push({ type: 1, components: row });
@@ -323,7 +394,7 @@ export function buildChecklistPayload(opts: {
         type: 2,
         style: 4, // danger
         label: '🔄 Reset',
-        custom_id: `assault_check_reset:${guildId}:${launchDate}`.slice(0, 100),
+        custom_id: `assault_check_reset:${launchDate}`.slice(0, 100),
       },
     ],
   });
@@ -627,23 +698,333 @@ function renderPresetField(preset: Preset, combat: CombatPotion[], xp: XpPotion[
   return { name: `${preset.label}`, value };
 }
 
-async function handlePotions(sub: Option) {
-  const { combat, xp, presets } = await listPotions();
-  const which = findOption(sub.options, 'preset')?.value as string | undefined;
-  const filtered = which ? presets.filter((p) => p.id === which) : presets;
-  if (filtered.length === 0) {
-    return ephemeral(`No preset \`${which}\`. Try: ${presets.map((p) => `\`${p.id}\``).join(', ')}.`);
+// --------------------------------------------------------------------------
+// Interactive potion picker
+// --------------------------------------------------------------------------
+// State is encoded in a hidden "state code" shown in the embed description that
+// the user never has to see interactively — all mutation happens via custom_ids
+// which carry only the delta. We store the working loadout in memory: we re-parse
+// it back out of the embed content by reading the component values in the last
+// interaction. To avoid that fragility we instead include a compact encoded
+// state in a hidden footer line: `state=cc:<id>,cx:<id>,bx:<id>` which the
+// message update preserves.
+
+interface WorkingLoadout {
+  combatCombinedId: number | null; // combat potion that fills attack+protection (or single-slot)
+  combatXpId: number | null;
+  battleXpId: number | null;
+}
+
+function encodeState(w: WorkingLoadout): string {
+  const bits: string[] = [];
+  bits.push(`cc:${w.combatCombinedId ?? ''}`);
+  bits.push(`cx:${w.combatXpId ?? ''}`);
+  bits.push(`bx:${w.battleXpId ?? ''}`);
+  return bits.join(',');
+}
+
+function decodeState(s: string): WorkingLoadout {
+  const w: WorkingLoadout = { combatCombinedId: null, combatXpId: null, battleXpId: null };
+  for (const part of s.split(',')) {
+    const [k, v] = part.split(':');
+    if (!v) continue;
+    const id = parseInt(v, 10);
+    if (Number.isNaN(id)) continue;
+    if (k === 'cc') w.combatCombinedId = id;
+    else if (k === 'cx') w.combatXpId = id;
+    else if (k === 'bx') w.battleXpId = id;
   }
-  const embed = {
-    title: which ? `🧪 Potion Preset — ${filtered[0].label}` : '🧪 Assault Potion Presets',
-    description: which ? (filtered[0].description ?? '') : 'Four slots: Battle XP · Combat XP · Attack · Protection. Costs are live-market tradeable totals.',
-    color: 0x8b5cf6,
-    fields: filtered.map((p) => {
-      const f = renderPresetField(p, combat, xp);
-      return { ...f, inline: false };
-    }),
+  return w;
+}
+
+function extractStateFromContent(content: string | undefined): WorkingLoadout {
+  if (!content) return { combatCombinedId: null, combatXpId: null, battleXpId: null };
+  const m = content.match(/state=([^\s`]+)/);
+  if (!m) return { combatCombinedId: null, combatXpId: null, battleXpId: null };
+  return decodeState(m[1]);
+}
+
+function presetToWorking(preset: Preset, combat: CombatPotion[], _xp: XpPotion[]): WorkingLoadout {
+  // Pick a single combat potion to represent combined attack+protection slot.
+  // Priority: potion that fills both (phoenix, cosmic, thunderfury) → first in list.
+  const combatIds = preset.combat_potion_ids;
+  let combinedId: number | null = null;
+  const cById = new Map(combat.map((p) => [p.id, p]));
+  for (const id of combatIds) {
+    const p = cById.get(id);
+    if (!p) continue;
+    if (p.attack_power_bonus > 0 && p.protection_bonus > 0) {
+      combinedId = p.id;
+      break;
+    }
+  }
+  if (combinedId == null && combatIds.length > 0) combinedId = combatIds[0];
+  const cxId = preset.xp_potion_ids.find((id) => id >= 100 && id < 200) ?? null;
+  const bxId = preset.xp_potion_ids.find((id) => id >= 200) ?? null;
+  return { combatCombinedId: combinedId, combatXpId: cxId, battleXpId: bxId };
+}
+
+function loadoutToWorking(l: SavedLoadout, combat: CombatPotion[]): WorkingLoadout {
+  const cById = new Map(combat.map((p) => [p.id, p]));
+  let combinedId: number | null = null;
+  for (const id of l.combat_potion_ids) {
+    const p = cById.get(id);
+    if (!p) continue;
+    if (p.attack_power_bonus > 0 && p.protection_bonus > 0) { combinedId = p.id; break; }
+  }
+  if (combinedId == null && l.combat_potion_ids.length > 0) combinedId = l.combat_potion_ids[0];
+  const cxId = l.xp_potion_ids.find((id) => id >= 100 && id < 200) ?? null;
+  const bxId = l.xp_potion_ids.find((id) => id >= 200) ?? null;
+  return { combatCombinedId: combinedId, combatXpId: cxId, battleXpId: bxId };
+}
+
+function workingToIds(w: WorkingLoadout): { combat_potion_ids: number[]; xp_potion_ids: number[] } {
+  const combat: number[] = [];
+  if (w.combatCombinedId != null) combat.push(w.combatCombinedId);
+  const xp: number[] = [];
+  if (w.combatXpId != null) xp.push(w.combatXpId);
+  if (w.battleXpId != null) xp.push(w.battleXpId);
+  return { combat_potion_ids: combat, xp_potion_ids: xp };
+}
+
+function renderPicker(opts: {
+  working: WorkingLoadout;
+  combat: CombatPotion[];
+  xp: XpPotion[];
+  presets: Preset[];
+  savedLoadouts: SavedLoadout[];
+  title: string;
+}): { content: string; components: unknown[] } {
+  const { working, combat, xp, presets, savedLoadouts, title } = opts;
+  const cById = new Map(combat.map((p) => [p.id, p]));
+  const xById = new Map(xp.map((p) => [p.id, p]));
+
+  const cc = working.combatCombinedId != null ? cById.get(working.combatCombinedId) : null;
+  const cx = working.combatXpId != null ? xById.get(working.combatXpId) : null;
+  const bx = working.battleXpId != null ? xById.get(working.battleXpId) : null;
+
+  const lines: string[] = [`🧪 **${title}**`];
+  const fmtCombat = (p: CombatPotion | null | undefined) =>
+    p ? `${qualityEmoji(p.quality)} **${p.name}** — ${formatCombatBonus(p)}${formatDuration(p.duration_minutes) ? ` · ${formatDuration(p.duration_minutes)}` : ''}` : '— empty';
+  const fmtXp = (p: XpPotion | null | undefined) =>
+    p ? `${qualityEmoji(p.quality)} **${p.name}** — ${formatXpBonus(p)}${formatDuration(p.duration_minutes) ? ` · ${formatDuration(p.duration_minutes)}` : ''}` : '— empty';
+  lines.push(`**Combat (Attack+Protection):** ${fmtCombat(cc)}`);
+  lines.push(`**Combat XP:** ${fmtXp(cx)}`);
+  lines.push(`**Battle XP:** ${fmtXp(bx)}`);
+
+  const cost = loadoutCost(workingToIds(working), combat, xp);
+  lines.push(`**Cost:** ≈ **${cost.tradeable.toLocaleString()}g**${cost.hasUnpriced ? ' + free/unpriced' : ''}`);
+  lines.push(`\`state=${encodeState(working)}\``);
+
+  // Presets + saved loadouts select
+  const presetOptions = [
+    ...presets.map((p) => ({ label: `Preset: ${p.label}`.slice(0, 100), value: `preset:${p.id}`, description: (p.description ?? '').slice(0, 100) || undefined })),
+    ...savedLoadouts.slice(0, 15).map((l) => ({ label: `Mine: ${l.name}${l.is_default ? ' ★' : ''}`.slice(0, 100), value: `saved:${l.id}` })),
+  ].slice(0, 25);
+
+  const combatChoices = combat
+    .filter((p) => (p.attack_power_bonus ?? 0) + (p.protection_bonus ?? 0) > 0)
+    .slice(0, 25)
+    .map((p) => ({
+      label: `${qualityEmoji(p.quality)} ${p.name}`.slice(0, 100),
+      value: String(p.id),
+      description: `${formatCombatBonus(p)}${formatDuration(p.duration_minutes) ? ` · ${formatDuration(p.duration_minutes)}` : ''}`.slice(0, 100),
+      default: working.combatCombinedId === p.id,
+    }));
+
+  const cxChoices = xp
+    .filter((p) => p.category === 'combat_xp')
+    .slice(0, 25)
+    .map((p) => ({
+      label: `${qualityEmoji(p.quality)} ${p.name}`.slice(0, 100),
+      value: String(p.id),
+      description: `${formatXpBonus(p)}${formatDuration(p.duration_minutes) ? ` · ${formatDuration(p.duration_minutes)}` : ''}`.slice(0, 100),
+      default: working.combatXpId === p.id,
+    }));
+
+  const bxChoices = xp
+    .filter((p) => p.category === 'battle_xp')
+    .slice(0, 25)
+    .map((p) => ({
+      label: `${qualityEmoji(p.quality)} ${p.name}`.slice(0, 100),
+      value: String(p.id),
+      description: `${formatXpBonus(p)}${formatDuration(p.duration_minutes) ? ` · ${formatDuration(p.duration_minutes)}` : ''}`.slice(0, 100),
+      default: working.battleXpId === p.id,
+    }));
+
+  const components: unknown[] = [];
+  if (presetOptions.length > 0) {
+    components.push({
+      type: 1,
+      components: [{
+        type: 3, // string select
+        custom_id: 'pots_preset',
+        placeholder: 'Load preset or saved loadout…',
+        min_values: 1,
+        max_values: 1,
+        options: presetOptions,
+      }],
+    });
+  }
+  components.push({
+    type: 1,
+    components: [{
+      type: 3,
+      custom_id: 'pots_combat',
+      placeholder: 'Combat potion (Attack / Protection)…',
+      min_values: 0,
+      max_values: 1,
+      options: combatChoices,
+    }],
+  });
+  components.push({
+    type: 1,
+    components: [{
+      type: 3,
+      custom_id: 'pots_combat_xp',
+      placeholder: 'Combat XP potion…',
+      min_values: 0,
+      max_values: 1,
+      options: cxChoices,
+    }],
+  });
+  components.push({
+    type: 1,
+    components: [{
+      type: 3,
+      custom_id: 'pots_battle_xp',
+      placeholder: 'Battle XP potion…',
+      min_values: 0,
+      max_values: 1,
+      options: bxChoices,
+    }],
+  });
+  components.push({
+    type: 1,
+    components: [
+      { type: 2, style: 3, label: '💾 Save as…', custom_id: 'pots_save' },
+      { type: 2, style: 1, label: '⭐ Set as default', custom_id: 'pots_default' },
+      { type: 2, style: 2, label: '🗑️ Clear', custom_id: 'pots_clear' },
+    ],
+  });
+
+  return { content: lines.join('\n'), components };
+}
+
+async function handlePotions(_sub: Option) {
+  // Can't get member.user here — handled at top level; use anonymous initial state.
+  // Caller will supply user via interaction router; we build initial picker with default preset = free.
+  const { combat, xp, presets } = await listPotions();
+  const base = presets.find((p) => p.id === 'free') ?? presets[0];
+  const working = base ? presetToWorking(base, combat, xp) : { combatCombinedId: null, combatXpId: null, battleXpId: null };
+  const { content, components } = renderPicker({
+    working, combat, xp, presets, savedLoadouts: [], title: 'Assault Potions — pick & save',
+  });
+  return NextResponse.json({ type: 4, data: { content, components, flags: 64 } });
+}
+
+/** Handle select-menu + button interactions for the potion picker.
+ *  custom_ids: pots_preset | pots_combat | pots_combat_xp | pots_battle_xp | pots_save | pots_default | pots_clear
+ *  Also handles the pots_save_modal_submit.
+ */
+export async function handleAssaultPotionsComponent(interaction: {
+  token: string;
+  application_id: string;
+  member?: { user?: { id: string; username: string }; roles?: string[] };
+  user?: { id: string; username: string };
+  message?: { content?: string };
+  data: {
+    custom_id: string;
+    values?: string[];
+    components?: Array<{ components: Array<{ custom_id: string; value: string }> }>;
   };
-  return NextResponse.json({ type: 4, data: { embeds: [embed], flags: 64 } });
+}) {
+  const user = interaction.member?.user ?? interaction.user;
+  if (!user) return ephemeral('No user context.');
+  const customId = interaction.data.custom_id;
+
+  // Modal submit for Save-as — state is carried in custom_id suffix
+  if (customId.startsWith('pots_save_modal:')) {
+    const encodedState = customId.slice('pots_save_modal:'.length);
+    const name = interaction.data.components?.[0]?.components?.[0]?.value?.trim();
+    if (!name) return ephemeral('Name required.');
+    const working = decodeState(encodedState);
+    const ids = workingToIds(working);
+    if (ids.combat_potion_ids.length === 0 && ids.xp_potion_ids.length === 0) {
+      return ephemeral('Nothing to save — pick at least one potion.');
+    }
+    const saved = await saveDiscordLoadout(user.id, { name, ...ids });
+    return NextResponse.json({ type: 4, data: { content: `💾 Saved loadout **${saved.name}**. Run \`/assault potions\` again or \`/assault loadout name:${saved.name}\` to view.`, flags: 64 } });
+  }
+
+  const { combat, xp, presets } = await listPotions();
+  const savedLoadouts = await listLoadoutsForDiscordUser(user.id);
+  let working = extractStateFromContent(interaction.message?.content);
+
+  if (customId === 'pots_preset') {
+    const v = interaction.data.values?.[0] ?? '';
+    if (v.startsWith('preset:')) {
+      const pid = v.slice('preset:'.length);
+      const p = presets.find((x) => x.id === pid);
+      if (p) working = presetToWorking(p, combat, xp);
+    } else if (v.startsWith('saved:')) {
+      const lid = v.slice('saved:'.length);
+      const l = savedLoadouts.find((x) => x.id === lid);
+      if (l) working = loadoutToWorking(l, combat);
+    }
+  } else if (customId === 'pots_combat') {
+    const v = interaction.data.values?.[0];
+    working.combatCombinedId = v ? parseInt(v, 10) : null;
+  } else if (customId === 'pots_combat_xp') {
+    const v = interaction.data.values?.[0];
+    working.combatXpId = v ? parseInt(v, 10) : null;
+  } else if (customId === 'pots_battle_xp') {
+    const v = interaction.data.values?.[0];
+    working.battleXpId = v ? parseInt(v, 10) : null;
+  } else if (customId === 'pots_clear') {
+    working = { combatCombinedId: null, combatXpId: null, battleXpId: null };
+  } else if (customId === 'pots_default') {
+    // Promote user's most recent saved loadout matching current state. If no match, hint to save first.
+    const ids = workingToIds(working);
+    const match = savedLoadouts.find((l) =>
+      JSON.stringify([...l.combat_potion_ids].sort()) === JSON.stringify([...ids.combat_potion_ids].sort()) &&
+      JSON.stringify([...l.xp_potion_ids].sort()) === JSON.stringify([...ids.xp_potion_ids].sort()),
+    );
+    if (!match) {
+      return ephemeral('Save the current selection first (💾 Save as…), then click ⭐ Set as default.');
+    }
+    await setDiscordLoadoutDefault(user.id, match.id);
+    return ephemeral(`⭐ **${match.name}** is now your default loadout.`);
+  } else if (customId === 'pots_save') {
+    // Open modal — carry working state in custom_id
+    return NextResponse.json({
+      type: 9, // MODAL
+      data: {
+        custom_id: `pots_save_modal:${encodeState(working)}`.slice(0, 100),
+        title: 'Save loadout',
+        components: [{
+          type: 1,
+          components: [{
+            type: 4, // text input
+            custom_id: 'pots_save_name',
+            style: 1,
+            label: 'Name',
+            min_length: 1,
+            max_length: 40,
+            required: true,
+            placeholder: 'e.g. my-mid',
+          }],
+        }],
+      },
+    });
+  } else {
+    return ephemeral(`Unknown action: ${customId}`);
+  }
+
+  const { content, components } = renderPicker({
+    working, combat, xp, presets, savedLoadouts, title: 'Assault Potions — pick & save',
+  });
+  return NextResponse.json({ type: 7, data: { content, components, flags: 64 } });
 }
 
 function renderLoadoutEmbed(opts: {
@@ -677,11 +1058,8 @@ async function handleLoadout(interaction: Interaction, sub: Option) {
   const name = (findOption(sub.options, 'name')?.value as string | undefined)?.trim();
   const loadout = await getLoadoutForDiscordUser(user.id, name);
   if (!loadout) {
-    const hint =
-      'No saved loadout linked to your Discord account yet.\n' +
-      '1. Save a loadout on the web app: </assault/potions>.\n' +
-      '2. Copy its UUID and run `/assault link-loadout loadout_id:<uuid>`.';
-    return ephemeral(name ? `No loadout named \`${name}\` linked to you.\n${hint}` : hint);
+    const hint = 'No saved loadout yet. Run `/assault potions` to pick + save one.';
+    return ephemeral(name ? `No loadout named \`${name}\`.\n${hint}` : hint);
   }
   const { combat, xp } = await listPotions();
   const embed = renderLoadoutEmbed({
@@ -695,17 +1073,6 @@ async function handleLoadout(interaction: Interaction, sub: Option) {
   return NextResponse.json({ type: 4, data: { embeds: [embed], flags: 64 } });
 }
 
-async function handleLinkLoadout(interaction: Interaction, sub: Option) {
-  const user = interaction.member?.user;
-  if (!user) return ephemeral('No user context.');
-  const loadoutId = String(findOption(sub.options, 'loadout_id')?.value ?? '').trim();
-  if (!loadoutId) return ephemeral('Missing `loadout_id`.');
-  if (!/^[0-9a-f-]{36}$/i.test(loadoutId)) return ephemeral('`loadout_id` must be a UUID. Copy it from the web app.');
-  const res = await linkLoadoutToDiscord(loadoutId, user.id);
-  if (!res.ok) return ephemeral(`❌ ${res.error}`);
-  return ephemeral(`✅ Linked loadout **${res.loadout?.name}** to your Discord. Run \`/assault loadout\` to view it.`);
-}
-
 interface ComponentInteraction {
   token: string;
   application_id: string;
@@ -715,34 +1082,41 @@ interface ComponentInteraction {
 }
 
 /** Handle button clicks for the /assault checklist message. Returns UPDATE_MESSAGE (type 7). */
-export async function handleAssaultChecklistComponent(interaction: ComponentInteraction) {
+export async function handleAssaultChecklistComponent(interaction: ComponentInteraction & { member?: { roles?: string[] } }) {
   const customId = interaction.data.custom_id;
   const user = interaction.member?.user ?? interaction.user;
   if (!user) return ephemeral('No user context.');
 
-  const toggleMatch = customId.match(/^assault_check:([^:]+):([^:]+):(.+)$/);
-  const resetMatch = customId.match(/^assault_check_reset:([^:]+):([^:]+)$/);
+  const toggleMatch = customId.match(/^assault_check:([^:]+):(.+)$/);
+  const resetMatch = customId.match(/^assault_check_reset:([^:]+)$/);
 
-  let guildId: string;
   let launchDate: string;
   if (toggleMatch) {
-    [, guildId, launchDate] = toggleMatch;
-    const itemKey = toggleMatch[3];
-    await toggleDiscordItem(user.id, guildId, launchDate, itemKey);
+    launchDate = toggleMatch[1];
+    const itemKey = toggleMatch[2];
+    await toggleDiscordItem(user.id, launchDate, itemKey);
   } else if (resetMatch) {
-    [, guildId, launchDate] = resetMatch;
-    await resetDiscord(user.id, guildId, launchDate);
+    launchDate = resetMatch[1];
+    await resetDiscord(user.id, launchDate);
   } else {
     return ephemeral(`Unknown checklist action: ${customId}`);
   }
 
-  const items = await getChecklistItems(guildId);
-  const checked = await getDiscordChecked(user.id, guildId, launchDate);
-  const guildName = await getGuildName(guildId);
+  // Re-resolve context exactly like the initial render so timed labels stay consistent
+  // (user may now have a loadout linked between clicks).
+  const ctx = await resolveLaunchContext(interaction as unknown as Interaction);
+  const [template, { combat, xp }, loadout] = await Promise.all([
+    getChecklistTemplate(),
+    listPotions(),
+    getLoadoutForDiscordUser(user.id),
+  ]);
+  const items = buildTimedChecklist(template, loadout, combat, xp, ctx.launchTimeUtc);
+  const checked = await getDiscordChecked(user.id, launchDate);
   const { content, components } = buildChecklistPayload({
-    guildId,
     launchDate,
-    guildName,
+    guildLabel: ctx.guildLabel,
+    mode: ctx.mode === 'guild' ? 'guild' : 'personal',
+    loadoutName: loadout?.name ?? null,
     items,
     checked,
   });

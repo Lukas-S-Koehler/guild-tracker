@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAuth } from '@/lib/auth-helpers';
 import {
-  getChecklistItems,
+  getChecklistTemplate,
   getChecklistProgress,
   toggleChecklistItem,
   getLaunchDateForGuild,
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   const { user, guildId } = auth;
   const launchDate = await getLaunchDateForGuild(guildId);
   const [items, progress] = await Promise.all([
-    getChecklistItems(guildId),
+    getChecklistTemplate(),
     getChecklistProgress(user.id, guildId, launchDate),
   ]);
 
