@@ -10,6 +10,7 @@ interface GuildMembership {
   role: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER';
   joined_at: string;
   is_active: boolean;
+  is_assault?: boolean;
 }
 
 const SUPER_ADMIN_EMAIL = 'motivationluki@gmail.com';

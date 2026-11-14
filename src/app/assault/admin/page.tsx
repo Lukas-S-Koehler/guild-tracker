@@ -182,8 +182,10 @@ function GuildPanel({ guildId, guildName, onMsg }: {
 
 function AssaultManagerContent() {
   const { guilds, currentGuild } = useAuth();
-  const [assaultGuilds, setAssaultGuilds] = useState<typeof guilds | null>(null);
-  const [activeGuildId, setActiveGuildId] = useState<string>(currentGuild?.guild_id ?? guilds[0]?.guild_id ?? '');
+  const visibleGuilds = guilds.filter(g => g.is_assault === true);
+  const [activeGuildId, setActiveGuildId] = useState<string>(
+    (currentGuild?.is_assault ? currentGuild.guild_id : visibleGuilds[0]?.guild_id) ?? ''
+  );
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const showMsg = (type: 'success' | 'error', text: string) => {
@@ -192,23 +194,9 @@ function AssaultManagerContent() {
   };
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch('/api/assault/public');
-        const j = await res.json();
-        const ids = new Set<string>(((j.guilds ?? []) as { guild_id: string }[]).map(g => g.guild_id));
-        if (cancelled) return;
-        const filtered = guilds.filter(g => ids.has(g.guild_id));
-        setAssaultGuilds(filtered);
-        if (filtered.length > 0 && !filtered.some(g => g.guild_id === activeGuildId)) {
-          setActiveGuildId(filtered[0].guild_id);
-        }
-      } catch {
-        if (!cancelled) setAssaultGuilds([]);
-      }
-    })();
-    return () => { cancelled = true; };
+    if (visibleGuilds.length > 0 && !visibleGuilds.some(g => g.guild_id === activeGuildId)) {
+      setActiveGuildId(visibleGuilds[0].guild_id);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [guilds]);
 
@@ -216,15 +204,9 @@ function AssaultManagerContent() {
     return <p className="p-6 text-muted-foreground">No guild memberships found.</p>;
   }
 
-  if (assaultGuilds === null) {
-    return <div className="flex items-center justify-center p-8"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  if (visibleGuilds.length === 0) {
+    return <p className="p-6 text-muted-foreground">No assault guilds.</p>;
   }
-
-  if (assaultGuilds.length === 0) {
-    return <p className="p-6 text-muted-foreground">No guilds with assault configs.</p>;
-  }
-
-  const visibleGuilds = assaultGuilds;
 
   return (
     <div className="container mx-auto p-4 max-w-5xl space-y-4">

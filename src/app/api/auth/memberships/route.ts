@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
   const guildIds = memberships.map(m => m.guild_id);
   const { data: guildsData } = await admin
     .from('guilds')
-    .select('id, name, nickname, is_active')
+    .select('id, name, nickname, is_active, is_assault')
     .in('id', guildIds);
 
   const guildMap = new Map((guildsData ?? []).map(g => [g.id, g]));
@@ -38,6 +38,7 @@ export async function GET(req: NextRequest) {
     role: m.role as 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER',
     joined_at: m.joined_at,
     is_active: guildMap.get(m.guild_id)?.is_active ?? true,
+    is_assault: guildMap.get(m.guild_id)?.is_assault ?? false,
   }));
 
   return NextResponse.json(result);
