@@ -555,13 +555,29 @@ async function handlePlan(interaction: Interaction, sub: Option) {
   const levelRange =
     plan.level_min === plan.level_max ? `Lv ${plan.level_min}` : `Lv ${plan.level_min}–${plan.level_max}`;
   const guildName = await getGuildName(guildId);
-  const launchUnix = config ? todayLaunchUnix(config.launch_time_utc) : null;
+  const nextUnix = config ? nextAssaultLaunchUnix(config) : null;
   const targetMobs = config?.target_mob_count ?? '4,000–10,000+';
+
+  const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const daysLine = config?.weekdays && config.weekdays.length > 0
+    ? config.weekdays.slice().sort().map((d) => WEEKDAY_LABELS[d]).join('/')
+    : 'no days set';
+  const windowLine = config?.season_start && config?.season_end
+    ? ` · ${config.season_start} → ${config.season_end}`
+    : config?.season_start ? ` · from ${config.season_start}`
+    : config?.season_end ? ` · until ${config.season_end}` : '';
+  const hhmm = config?.launch_time_utc?.slice(0, 5);
+  const scheduleLine = config
+    ? `🗓️ **${daysLine}** @ **${hhmm} UTC**${windowLine}`
+    : null;
 
   const descLines = [
     `**${guildName}** — ${levelRange} · ${shrine}`,
     `💰 Best: **${plan.total_gph.toLocaleString()} g/h** · 🎯 Target: **${targetMobs}** mobs (+10–20% flee)`,
-    launchUnix ? `⏰ Launch: <t:${launchUnix}:t> (<t:${launchUnix}:R>)` : null,
+    scheduleLine,
+    nextUnix
+      ? `⏰ Next launch: <t:${nextUnix}:F> (<t:${nextUnix}:R>)`
+      : config ? '⏰ Next launch: — (no assault day in window)' : null,
   ].filter(Boolean);
 
   const killPriority = plan.enemies.slice(0, 10).map((e, i) =>
