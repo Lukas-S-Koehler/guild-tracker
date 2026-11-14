@@ -633,6 +633,11 @@ export async function registerAssaultCommand(): Promise<{ ok: boolean; error?: s
         ],
       },
       {
+        name: 'conquest',
+        type: 1,
+        description: 'Show conquest mechanics: EXP split, waves, territory boosts, shard rewards',
+      },
+      {
         name: 'potions',
         type: 1,
         description: 'Show potion preset tiers (free / budget / mid / whale)',

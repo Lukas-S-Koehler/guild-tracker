@@ -21,7 +21,7 @@ import { buildTemplateVars, renderTemplate, todayLaunchUnix, utcDateString } fro
 import { postToChannelReturnId, editOriginalInteractionResponse } from '@/lib/discord-api';
 import { createAdminClient } from '@/lib/supabase-server';
 import { getZonePlan, listZones, shrineInfoFor } from '@/lib/assault-plan';
-import { FIVE_PS, HITS_TO_KILL, GEAR_LINK } from '@/lib/assault-plan-static';
+import { FIVE_PS, HITS_TO_KILL, GEAR_LINK, POTION_SLOTS, TERRITORY_BOOSTS, EXP_REWARDS, KILL_REWARDS, EXP_SPLIT } from '@/lib/assault-plan-static';
 import { computeLaunchDate, getChecklistItems, type ChecklistItem } from '@/lib/assault-checklist-service';
 import { getDiscordChecked, toggleDiscordItem, resetDiscord } from '@/lib/assault-checklist-discord';
 
@@ -159,6 +159,8 @@ export async function handleAssaultCommand(interaction: Interaction) {
       return handleChecklist(interaction, sub);
     case 'plan':
       return handlePlan(interaction, sub);
+    case 'conquest':
+      return handleConquest();
     case 'potions':
       return handlePotions(sub);
     case 'loadout':
@@ -483,17 +485,18 @@ async function handlePlan(interaction: Interaction, sub: Option) {
   const targetMobs = config?.target_mob_count ?? '4,000–10,000+';
 
   const descLines = [
-    `**${levelRange}** · ${shrine}`,
-    `💰 Best: **${plan.total_gph.toLocaleString()} g/h**`,
+    `**${guildName}** — ${levelRange} · ${shrine}`,
+    `💰 Best: **${plan.total_gph.toLocaleString()} g/h** · 🎯 Target: **${targetMobs}** mobs (+10–20% flee)`,
     launchUnix ? `⏰ Launch: <t:${launchUnix}:t> (<t:${launchUnix}:R>)` : null,
-    `🎯 Target mobs: **${targetMobs}**`,
   ].filter(Boolean);
 
   const killPriority = plan.enemies.slice(0, 10).map((e, i) =>
     `**${i + 1}.** ${e.name} (Lv ${e.level}) — ${e.gph.toLocaleString()} g/h · ${e.drop_count} drops`
   ).join('\n').slice(0, 1024);
 
-  const fivePs = FIVE_PS.map((p) => `**${p.when}** — ${p.text}`).join('\n').slice(0, 1024);
+  const prep = FIVE_PS.map((p, i) => `**${i + 1}. ${p.when}** — ${p.text}`).join('\n').slice(0, 1024);
+
+  const potions = POTION_SLOTS.map((s) => `**${s.slot}:** ${s.examples}`).join('\n').slice(0, 1024);
 
   const hitsTable =
     '```\nHits  Time/Kill  Kills/9h\n' +
@@ -502,17 +505,61 @@ async function handlePlan(interaction: Interaction, sub: Option) {
 
   const embed = {
     title: `🗺️ Assault Plan — ${plan.zone}`,
-    description: `${guildName}\n${descLines.join('\n')}`,
+    description: descLines.join('\n'),
     color: 0xf59e0b,
     fields: [
       { name: '🎯 Kill Priority (gold/hr)', value: killPriority, inline: false },
-      { name: '⚡ The 5 Ps (prep sequence)', value: fivePs, inline: false },
+      { name: '⚡ Prep Sequence', value: prep, inline: false },
+      { name: '🧪 Potions (4 slots)', value: potions, inline: false },
       { name: '⚔️ Hits-to-Kill (target 2–3)', value: hitsTable.slice(0, 1024), inline: false },
-      { name: '🛡️ Gear', value: `[Gear tiers & upgrades](${GEAR_LINK})`, inline: false },
+      { name: '🛡️ Gear', value: `[Gear tiers & upgrades](${GEAR_LINK}) — BiS3+ legendary rec. for Isle of Whispers`, inline: false },
     ],
   };
 
   return NextResponse.json({ type: 4, data: { embeds: [embed] } });
+}
+
+async function handleConquest() {
+  const expSplit = EXP_SPLIT.map((x) => `**${x.pct}** ${x.label}`).join(' · ');
+  const notes = [
+    '• Rounded down per enemy. Potions/buffs boost all three.',
+    '• Min guild EXP ignores negative class effects (e.g. Forsaken −50%).',
+    '• Higher-level / scaled enemies yield more EXP.',
+    '• Only battles started *after* assault launch count.',
+  ].join('\n');
+
+  const territory =
+    '```\nRank   EXP/MF   Primary Skill Eff\n' +
+    TERRITORY_BOOSTS.map((b) =>
+      `${b.place.padEnd(6)} +${String(b.expMf).padStart(2)}%     +${b.eff}%`
+    ).join('\n') + '\n```';
+
+  const fmtRewards = (rows: typeof EXP_REWARDS) =>
+    '```\n' +
+    rows.map((r) => `${r.place.padEnd(10)} ${r.shards.toLocaleString().padStart(7)} shards`).join('\n') +
+    '\n```';
+
+  const embed = {
+    title: '⚔️ Conquest Mechanics',
+    description: 'How EXP, territory, and shard rewards work.',
+    color: 0x8b5cf6,
+    fields: [
+      { name: '⚡ EXP split per kill', value: `${expSplit}\n\n${notes}`, inline: false },
+      { name: '⏳ Waves & cost', value: 'Wave length: **1 hour** · Cost: **1 mark / wave**', inline: false },
+      {
+        name: '👑 Territory boosts (next season, top 10)',
+        value:
+          territory +
+          '\nApplies to Primary Skill EXP, Dungeon/World Boss/Combat/Hunting/Slayer EXP, and Dungeon/World Boss MF. Combat EXP bonus applies only during 14-day assault cooldown (seasons from 2026-06-01).',
+        inline: false,
+      },
+      { name: '🏆 EXP leaderboard rewards', value: fmtRewards(EXP_REWARDS), inline: true },
+      { name: '🎯 Kills leaderboard rewards', value: fmtRewards(KILL_REWARDS), inline: true },
+      { name: '💡 Note', value: 'You can place on both leaderboards per zone. Rewards stack across zones.', inline: false },
+    ],
+  };
+
+  return NextResponse.json({ type: 4, data: { embeds: [embed], flags: 64 } });
 }
 
 function qualityEmoji(q: string | null | undefined): string {

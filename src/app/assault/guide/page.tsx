@@ -19,7 +19,7 @@ import {
   Crown,
   Clock,
 } from 'lucide-react';
-import { HITS_TO_KILL, FIVE_PS, GEAR_LINK } from '@/lib/assault-plan-static';
+import { HITS_TO_KILL, FIVE_PS, GEAR_LINK, TERRITORY_BOOSTS as SHARED_TERRITORY, EXP_REWARDS as SHARED_EXP, KILL_REWARDS as SHARED_KILL } from '@/lib/assault-plan-static';
 
 const DEFAULT_ZONE = 'Isle of Whispers';
 const SHARD_ICON = 'https://cdn.idle-mmo.com/cdn-cgi/image/width=20,height=20,format=auto/uploaded/skins/01JVYWCX6QE35GBJQ9TV02G033.png';
@@ -42,46 +42,15 @@ interface ZonePlanResponse {
   shrine_info: string;
 }
 
-const TERRITORY_BOOSTS = [
-  { place: '1st', expMf: 25, eff: 5, tone: 'text-yellow-500' },
-  { place: '2nd', expMf: 17, eff: 5, tone: 'text-slate-400' },
-  { place: '3rd', expMf: 13, eff: 5, tone: 'text-amber-700' },
-  { place: '4th', expMf: 10, eff: 3, tone: 'text-muted-foreground' },
-  { place: '5th', expMf: 7, eff: 3, tone: 'text-muted-foreground' },
-  { place: '6th', expMf: 7, eff: 3, tone: 'text-muted-foreground' },
-  { place: '7th', expMf: 7, eff: 3, tone: 'text-muted-foreground' },
-  { place: '8th', expMf: 3, eff: 2, tone: 'text-muted-foreground' },
-  { place: '9th', expMf: 3, eff: 2, tone: 'text-muted-foreground' },
-  { place: '10th', expMf: 3, eff: 2, tone: 'text-muted-foreground' },
-];
-
-const EXP_REWARDS = [
-  { place: '1st', shards: 20000 },
-  { place: '2nd', shards: 15000 },
-  { place: '3rd', shards: 10000 },
-  { place: '4th', shards: 5000 },
-  { place: '5th', shards: 4800 },
-  { place: '6th', shards: 4500 },
-  { place: '7th', shards: 4000 },
-  { place: '8th', shards: 3500 },
-  { place: '9th', shards: 3000 },
-  { place: '10th', shards: 2000 },
-  { place: '11th–25th', shards: 1000 },
-];
-
-const KILL_REWARDS = [
-  { place: '1st', shards: 5000 },
-  { place: '2nd', shards: 3750 },
-  { place: '3rd', shards: 2500 },
-  { place: '4th', shards: 1250 },
-  { place: '5th', shards: 1200 },
-  { place: '6th', shards: 1125 },
-  { place: '7th', shards: 1000 },
-  { place: '8th', shards: 875 },
-  { place: '9th', shards: 750 },
-  { place: '10th', shards: 500 },
-  { place: '11th–25th', shards: 250 },
-];
+const RANK_TONES: Record<string, string> = {
+  '1st': 'text-yellow-500',
+  '2nd': 'text-slate-400',
+  '3rd': 'text-amber-700',
+};
+const toneFor = (place: string) => RANK_TONES[place] ?? 'text-muted-foreground';
+const TERRITORY_BOOSTS = SHARED_TERRITORY.map((b) => ({ ...b, tone: toneFor(b.place) }));
+const EXP_REWARDS = SHARED_EXP;
+const KILL_REWARDS = SHARED_KILL;
 
 function ShardIcon({ className = 'h-4 w-4 inline-block align-text-bottom' }: { className?: string }) {
   // eslint-disable-next-line @next/next/no-img-element
