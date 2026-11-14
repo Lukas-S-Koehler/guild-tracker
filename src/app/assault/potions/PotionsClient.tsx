@@ -117,7 +117,27 @@ export function PotionsClient({ combat, xp, presets }: Props) {
   const xpSelected = new Set(loadout.xp_potion_ids);
 
   const xpByCategory = (cat: 'battle_xp' | 'combat_xp') => xp.filter((p) => p.category === cat);
-  const combatByFilter = (fn: (p: CombatPotion) => boolean) => combat.filter(fn);
+
+  const combatSorted = useMemo(() => {
+    return [...combat].sort((a, b) => {
+      const totalA = a.attack_power_bonus + a.protection_bonus;
+      const totalB = b.attack_power_bonus + b.protection_bonus;
+      return totalB - totalA;
+    });
+  }, [combat]);
+
+  const bestValueId = useMemo(() => {
+    // Lowest gold-per-stat among tradeable priced
+    let best: { id: number; ratio: number } | null = null;
+    for (const p of combat) {
+      if (!p.is_tradeable || !p.market_price || p.market_price <= 0) continue;
+      const total = p.attack_power_bonus + p.protection_bonus;
+      if (total === 0) continue;
+      const ratio = p.market_price / total;
+      if (!best || ratio < best.ratio) best = { id: p.id, ratio };
+    }
+    return best?.id ?? null;
+  }, [combat]);
 
   return (
     <div className="container mx-auto p-4 max-w-5xl space-y-6">
@@ -196,9 +216,7 @@ export function PotionsClient({ combat, xp, presets }: Props) {
         <TabsList>
           <TabsTrigger value="battle">Battle XP</TabsTrigger>
           <TabsTrigger value="combat">Combat XP</TabsTrigger>
-          <TabsTrigger value="attack">Attack</TabsTrigger>
-          <TabsTrigger value="protection">Protection</TabsTrigger>
-          <TabsTrigger value="combo">Combo</TabsTrigger>
+          <TabsTrigger value="stats">Combat Stats</TabsTrigger>
         </TabsList>
 
         <TabsContent value="battle" className="space-y-2">
@@ -239,59 +257,32 @@ export function PotionsClient({ combat, xp, presets }: Props) {
           })}
         </TabsContent>
 
-        <TabsContent value="attack" className="space-y-2">
-          {combatByFilter((p) => p.attack_power_bonus > 0 && p.protection_bonus === 0).map((p) => {
+        <TabsContent value="stats" className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            All Combat Stat potions share 2 slots (Attack + Protection). Pure attack/protection potions fill one slot each. Combo potions (Thunderfury / Cosmic Tear / Phoenix) fill both. Sorted by total stat bonus. ⭐ = best gold-per-stat.
+          </p>
+          {combatSorted.map((p) => {
             const selected = combatSelected.has(p.id);
             const check = canAddCombatPotion(p, state);
+            const total = p.attack_power_bonus + p.protection_bonus;
+            const perStat = p.is_tradeable && p.market_price && total > 0 ? Math.round(p.market_price / total) : null;
             return (
-              <PotionCard
-                key={p.id}
-                potion={p}
-                kind="combat"
-                selected={selected}
-                disabled={!selected && !check.ok}
-                disabledReason={check.reason}
-                onAdd={() => addCombat(p)}
-                onRemove={() => removeCombat(p.id)}
-              />
-            );
-          })}
-        </TabsContent>
-
-        <TabsContent value="protection" className="space-y-2">
-          {combatByFilter((p) => p.protection_bonus > 0 && p.attack_power_bonus === 0).map((p) => {
-            const selected = combatSelected.has(p.id);
-            const check = canAddCombatPotion(p, state);
-            return (
-              <PotionCard
-                key={p.id}
-                potion={p}
-                kind="combat"
-                selected={selected}
-                disabled={!selected && !check.ok}
-                disabledReason={check.reason}
-                onAdd={() => addCombat(p)}
-                onRemove={() => removeCombat(p.id)}
-              />
-            );
-          })}
-        </TabsContent>
-
-        <TabsContent value="combo" className="space-y-2">
-          {combatByFilter((p) => p.attack_power_bonus > 0 && p.protection_bonus > 0).map((p) => {
-            const selected = combatSelected.has(p.id);
-            const check = canAddCombatPotion(p, state);
-            return (
-              <PotionCard
-                key={p.id}
-                potion={p}
-                kind="combat"
-                selected={selected}
-                disabled={!selected && !check.ok}
-                disabledReason={check.reason}
-                onAdd={() => addCombat(p)}
-                onRemove={() => removeCombat(p.id)}
-              />
+              <div key={p.id} className="space-y-1">
+                <PotionCard
+                  potion={p}
+                  kind="combat"
+                  selected={selected}
+                  disabled={!selected && !check.ok}
+                  disabledReason={check.reason}
+                  onAdd={() => addCombat(p)}
+                  onRemove={() => removeCombat(p.id)}
+                />
+                <div className="text-[11px] text-muted-foreground pl-14 flex gap-3">
+                  <span>Total: +{total} stat</span>
+                  {perStat != null && <span>{perStat.toLocaleString()}g / stat</span>}
+                  {bestValueId === p.id && <span className="text-amber-400">⭐ best gold / stat</span>}
+                </div>
+              </div>
             );
           })}
         </TabsContent>

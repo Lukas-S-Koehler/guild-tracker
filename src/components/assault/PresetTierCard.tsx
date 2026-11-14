@@ -46,6 +46,11 @@ export function PresetTierCard({ preset, combat, xp, onLoad }: Props) {
         <div className="text-xs text-muted-foreground">
           ≈ {tradeable.toLocaleString()}g{hasUnpriced ? ' + free/unpriced' : ''}
         </div>
+        {preset.id === 'free' && (
+          <div className="text-[11px] text-emerald-500/70 italic">
+            Got a Potion of the Gods? Drop it in the Battle XP slot.
+          </div>
+        )}
         <Button size="sm" variant="outline" className="w-full" onClick={onLoad}>Load into sandbox</Button>
       </CardContent>
     </Card>

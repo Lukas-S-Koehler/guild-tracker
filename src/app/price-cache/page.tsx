@@ -44,6 +44,7 @@ function PriceCacheContent() {
   const [entries, setEntries] = useState<CacheEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncingAll, setSyncingAll] = useState(false);
+  const [seedingPotions, setSeedingPotions] = useState(false);
   const [syncing, setSyncing] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -102,6 +103,21 @@ function PriceCacheContent() {
     }
   }
 
+  async function seedPotions() {
+    setSeedingPotions(true);
+    setMessage(null);
+    try {
+      const res = await api.post('/api/price-cache', { seed_potions: true });
+      const data = await res.json();
+      setMessage({ type: 'success', text: `Seeded ${data.seeded} new potion rows (${data.total} total).` });
+      await loadEntries();
+    } catch {
+      setMessage({ type: 'error', text: 'Seed potions failed.' });
+    } finally {
+      setSeedingPotions(false);
+    }
+  }
+
   async function syncAll() {
     setSyncingAll(true);
     setMessage(null);
@@ -150,6 +166,10 @@ function PriceCacheContent() {
           <Button variant="outline" size="sm" onClick={loadEntries} disabled={loading}>
             <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
             Reload
+          </Button>
+          <Button variant="outline" size="sm" onClick={seedPotions} disabled={seedingPotions || loading}>
+            {seedingPotions ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Package className="h-4 w-4 mr-2" />}
+            Seed Potions
           </Button>
           <Button onClick={syncAll} disabled={syncingAll || loading}>
             {syncingAll ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}

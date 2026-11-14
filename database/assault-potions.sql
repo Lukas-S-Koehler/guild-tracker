@@ -111,11 +111,8 @@ CREATE POLICY "assault_loadouts_user_delete" ON assault_potion_loadouts
 -- ============================================================================
 INSERT INTO combat_potions (id, name, quality, is_tradeable, attack_power_bonus, protection_bonus, vendor_price, market_price, avg_recent_sales, hashed_item_id, image_url, last_price_sync) VALUES
 (1, 'Attack Power Potion', 'PREMIUM', TRUE, 5, 0, 250, 395, '395', 'oZwey82VNAA6ND0dXM3g', 'https://cdn.idle-mmo.com/uploaded/skins/HWSyxMdMRcNhTDLzN4FljAv79YxxDE-metac3Ryb25nLWV4cDEucG5n-.png', '2026-05-15 15:07:33.557+00'),
-(2, 'Attack Power Potion (Untradable)', 'PREMIUM', FALSE, 5, 0, 0, NULL, NULL, NULL, NULL, NULL),
 (3, 'Protection Potion', 'PREMIUM', TRUE, 0, 5, 250, 384, '384', 'oaJydnOmQWW2QbgRe5ME', 'https://cdn.idle-mmo.com/uploaded/skins/HWSyxMdMRcNhTDLzN4FljAv79YxxDE-metac3Ryb25nLWV4cDEucG5n-.png', '2026-05-15 15:07:33.923+00'),
-(4, 'Protection Potion (Untradable)', 'PREMIUM', FALSE, 0, 5, 0, NULL, NULL, NULL, NULL, NULL),
 (5, 'Bladeburst Elixir', 'EPIC', TRUE, 10, 0, 500, 1750, '1750', 'XjEaOeBkLa7MNlGwxVPq', 'https://cdn.idle-mmo.com/uploaded/skins/gASZ22DnKwtl982ruPHBZCHP3sovHF-metac3Ryb25nLWx1Y2syLnBuZw==-.png', '2026-05-15 15:07:29.928+00'),
-(6, 'Bladeburst Elixir (Untradable)', 'EPIC', FALSE, 10, 0, 0, NULL, NULL, NULL, NULL, NULL),
 (7, 'Bulwark Brew', 'EPIC', TRUE, 0, 10, 500, 837, '837', 'BPjze3x2Q3ygYR85vgZV', 'https://cdn.idle-mmo.com/uploaded/skins/gASZ22DnKwtl982ruPHBZCHP3sovHF-metac3Ryb25nLWx1Y2syLnBuZw==-.png', '2026-05-15 15:07:30.419+00'),
 (8, 'Cosmic Tear', 'LEGENDARY', TRUE, 10, 20, 2500, 3774, '3774', '27gw0k38L4ZxNWevJxyK', 'https://cdn.idle-mmo.com/uploaded/skins/gASZ22DnKwtl982ruPHBZCHP3sovHF-metac3Ryb25nLWx1Y2syLnBuZw==-.png', '2026-05-15 15:07:30.821+00'),
 (9, 'Frenzy Potion', 'LEGENDARY', TRUE, 15, 0, 2500, 3220, '3220', 'brz9RZnWN7VaQKAp0Mdl', 'https://cdn.idle-mmo.com/uploaded/skins/gASZ22DnKwtl982ruPHBZCHP3sovHF-metac3Ryb25nLWx1Y2syLnBuZw==-.png', '2026-05-15 15:07:31.355+00'),
@@ -169,10 +166,10 @@ ON CONFLICT (id) DO UPDATE SET
 -- ============================================================================
 INSERT INTO assault_potion_presets (id, label, description, sort_order, combat_potion_ids, xp_potion_ids) VALUES
 ('free', 'Free / F2P',
-  'Zero gold. Use untradable freebies from campaign/dailies. POTG given out commonly.',
+  'Zero gold path. Dungeon Potion + tradeable combat freebies. Swap in POTG when you have one.',
   1,
-  ARRAY[6, 7]::INT[],
-  ARRAY[200, 105]::INT[]),
+  ARRAY[5, 7]::INT[],
+  ARRAY[204, 105]::INT[]),
 ('budget', 'Budget',
   'Mid-market stack. Skip Battle XP mythic; use Strike Essence + Wraithbane.',
   2,

@@ -9,6 +9,14 @@ import {
   isAlreadySent,
   markSent,
 } from '@/lib/assault-service';
+import {
+  listPotions,
+  getLoadoutForDiscordUser,
+  listLoadoutsForDiscordUser,
+  linkLoadoutToDiscord,
+  type Preset,
+} from '@/lib/potions-service';
+import { getSlotState, loadoutCost, type CombatPotion, type XpPotion } from '@/lib/potion-rules';
 import { buildTemplateVars, renderTemplate, todayLaunchUnix, utcDateString } from '@/lib/assault-template';
 import { postToChannelReturnId, editOriginalInteractionResponse } from '@/lib/discord-api';
 import { createAdminClient } from '@/lib/supabase-server';
@@ -51,11 +59,8 @@ export async function handleAssaultAutocomplete(interaction: Interaction) {
   }
 
   if (focused.name === 'guild') {
-    const all = await listAssaultConfigs();
-    // Only toggle + set-time need to see paused configs; everything else filters to active.
-    const subName = sub?.name;
-    const showPaused = subName === 'toggle' || subName === 'set-time';
-    const configs = showPaused ? all : all.filter((c) => c.active);
+    // Show all configs (active + paused) for every subcommand; paused ones are labelled.
+    const configs = await listAssaultConfigs();
     const q = String(focused.value ?? '').toLowerCase();
     const choices = await Promise.all(
       configs.map(async c => ({
@@ -76,6 +81,28 @@ export async function handleAssaultAutocomplete(interaction: Interaction) {
       .filter((z) => z.toLowerCase().includes(q))
       .slice(0, 25)
       .map((z) => ({ name: z, value: z }));
+    return NextResponse.json({ type: 8, data: { choices: filtered } });
+  }
+
+  if (focused.name === 'preset') {
+    const { presets } = await listPotions();
+    const q = String(focused.value ?? '').toLowerCase();
+    const filtered = presets
+      .filter((p) => p.id.toLowerCase().includes(q) || p.label.toLowerCase().includes(q))
+      .slice(0, 25)
+      .map((p) => ({ name: p.label, value: p.id }));
+    return NextResponse.json({ type: 8, data: { choices: filtered } });
+  }
+
+  if (focused.name === 'name') {
+    const user = interaction.member?.user;
+    if (!user) return NextResponse.json({ type: 8, data: { choices: [] } });
+    const loadouts = await listLoadoutsForDiscordUser(user.id);
+    const q = String(focused.value ?? '').toLowerCase();
+    const filtered = loadouts
+      .filter((l) => l.name.toLowerCase().includes(q))
+      .slice(0, 25)
+      .map((l) => ({ name: `${l.name}${l.is_default ? ' ★' : ''}`, value: l.name }));
     return NextResponse.json({ type: 8, data: { choices: filtered } });
   }
 
@@ -132,6 +159,12 @@ export async function handleAssaultCommand(interaction: Interaction) {
       return handleChecklist(interaction, sub);
     case 'plan':
       return handlePlan(interaction, sub);
+    case 'potions':
+      return handlePotions(sub);
+    case 'loadout':
+      return handleLoadout(interaction, sub);
+    case 'link-loadout':
+      return handleLinkLoadout(interaction, sub);
     default:
       return ephemeral(`Unknown subcommand: ${sub.name}`);
   }
@@ -480,6 +513,150 @@ async function handlePlan(interaction: Interaction, sub: Option) {
   };
 
   return NextResponse.json({ type: 4, data: { embeds: [embed] } });
+}
+
+function qualityEmoji(q: string | null | undefined): string {
+  switch ((q ?? '').toUpperCase()) {
+    case 'MYTHIC': return '🔴';
+    case 'LEGENDARY': return '🟡';
+    case 'EPIC': return '🟣';
+    case 'PREMIUM': return '⚪';
+    case 'STANDARD': return '⚫';
+    default: return '·';
+  }
+}
+
+function formatCombatBonus(p: CombatPotion): string {
+  const parts: string[] = [];
+  if (p.attack_power_bonus > 0) {
+    parts.push(`+${p.attack_power_bonus}${p.attack_power_is_percentage ? '%' : ''} ATK`);
+  }
+  if (p.protection_bonus > 0) {
+    parts.push(`+${p.protection_bonus}${p.protection_is_percentage ? '%' : ''} PROT`);
+  }
+  return parts.join(' · ');
+}
+
+function formatXpBonus(p: XpPotion): string {
+  const parts: string[] = [];
+  if (p.xp_value > 0) parts.push(`+${p.xp_value}% XP`);
+  if (p.efficiency_value > 0) parts.push(`+${p.efficiency_value}% eff`);
+  return parts.join(' · ');
+}
+
+function formatDuration(mins: number | null | undefined): string {
+  if (!mins) return '';
+  if (mins >= 60) {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m ? `${h}h${m}m` : `${h}h`;
+  }
+  return `${mins}m`;
+}
+
+function renderPresetField(preset: Preset, combat: CombatPotion[], xp: XpPotion[]): { name: string; value: string; inline?: boolean } {
+  const cById = new Map(combat.map((p) => [p.id, p]));
+  const xById = new Map(xp.map((p) => [p.id, p]));
+  const lines: string[] = [];
+  for (const id of preset.combat_potion_ids) {
+    const p = cById.get(id);
+    if (!p) continue;
+    const bits = [qualityEmoji(p.quality), `**${p.name}**`, formatCombatBonus(p), formatDuration(p.duration_minutes)].filter(Boolean);
+    lines.push(bits.join(' '));
+  }
+  for (const id of preset.xp_potion_ids) {
+    const p = xById.get(id);
+    if (!p) continue;
+    const bits = [qualityEmoji(p.quality), `**${p.name}**`, formatXpBonus(p), formatDuration(p.duration_minutes)].filter(Boolean);
+    lines.push(bits.join(' '));
+  }
+  const cost = loadoutCost(
+    { combat_potion_ids: preset.combat_potion_ids, xp_potion_ids: preset.xp_potion_ids },
+    combat,
+    xp,
+  );
+  lines.push(`— ≈ **${cost.tradeable.toLocaleString()}g**${cost.hasUnpriced ? ' + free/unpriced' : ''}`);
+  const value = lines.join('\n').slice(0, 1024) || '(empty)';
+  return { name: `${preset.label}`, value };
+}
+
+async function handlePotions(sub: Option) {
+  const { combat, xp, presets } = await listPotions();
+  const which = findOption(sub.options, 'preset')?.value as string | undefined;
+  const filtered = which ? presets.filter((p) => p.id === which) : presets;
+  if (filtered.length === 0) {
+    return ephemeral(`No preset \`${which}\`. Try: ${presets.map((p) => `\`${p.id}\``).join(', ')}.`);
+  }
+  const embed = {
+    title: which ? `🧪 Potion Preset — ${filtered[0].label}` : '🧪 Assault Potion Presets',
+    description: which ? (filtered[0].description ?? '') : 'Four slots: Battle XP · Combat XP · Attack · Protection. Costs are live-market tradeable totals.',
+    color: 0x8b5cf6,
+    fields: filtered.map((p) => {
+      const f = renderPresetField(p, combat, xp);
+      return { ...f, inline: false };
+    }),
+  };
+  return NextResponse.json({ type: 4, data: { embeds: [embed], flags: 64 } });
+}
+
+function renderLoadoutEmbed(opts: {
+  title: string;
+  description: string;
+  combatIds: number[];
+  xpIds: number[];
+  combat: CombatPotion[];
+  xp: XpPotion[];
+}): unknown {
+  const { title, description, combatIds, xpIds, combat, xp } = opts;
+  const state = getSlotState({ combat_potion_ids: combatIds, xp_potion_ids: xpIds }, combat, xp);
+  const cost = loadoutCost({ combat_potion_ids: combatIds, xp_potion_ids: xpIds }, combat, xp);
+  const line = (label: string, p: CombatPotion | XpPotion | null, bonus: string) =>
+    `**${label}:** ${p ? `${qualityEmoji(p.quality)} ${p.name}${bonus ? ` — ${bonus}` : ''}${formatDuration(p.duration_minutes) ? ` · ${formatDuration(p.duration_minutes)}` : ''}` : '— (empty)'}`;
+  const fields = [
+    { name: 'Slots', value: [
+      line('Battle XP', state.battle_xp, state.battle_xp ? formatXpBonus(state.battle_xp) : ''),
+      line('Combat XP', state.combat_xp, state.combat_xp ? formatXpBonus(state.combat_xp) : ''),
+      line('Attack', state.attack, state.attack ? formatCombatBonus(state.attack) : ''),
+      line('Protection', state.protection, state.protection ? formatCombatBonus(state.protection) : ''),
+    ].join('\n').slice(0, 1024), inline: false },
+    { name: 'Cost', value: `≈ **${cost.tradeable.toLocaleString()}g**${cost.hasUnpriced ? ' + free/unpriced' : ''}`, inline: false },
+  ];
+  return { title, description, color: 0x10b981, fields };
+}
+
+async function handleLoadout(interaction: Interaction, sub: Option) {
+  const user = interaction.member?.user;
+  if (!user) return ephemeral('No user context.');
+  const name = (findOption(sub.options, 'name')?.value as string | undefined)?.trim();
+  const loadout = await getLoadoutForDiscordUser(user.id, name);
+  if (!loadout) {
+    const hint =
+      'No saved loadout linked to your Discord account yet.\n' +
+      '1. Save a loadout on the web app: </assault/potions>.\n' +
+      '2. Copy its UUID and run `/assault link-loadout loadout_id:<uuid>`.';
+    return ephemeral(name ? `No loadout named \`${name}\` linked to you.\n${hint}` : hint);
+  }
+  const { combat, xp } = await listPotions();
+  const embed = renderLoadoutEmbed({
+    title: `🎒 ${loadout.name}${loadout.is_default ? ' ★ (default)' : ''}`,
+    description: `Loadout for <@${user.id}>`,
+    combatIds: loadout.combat_potion_ids,
+    xpIds: loadout.xp_potion_ids,
+    combat,
+    xp,
+  });
+  return NextResponse.json({ type: 4, data: { embeds: [embed], flags: 64 } });
+}
+
+async function handleLinkLoadout(interaction: Interaction, sub: Option) {
+  const user = interaction.member?.user;
+  if (!user) return ephemeral('No user context.');
+  const loadoutId = String(findOption(sub.options, 'loadout_id')?.value ?? '').trim();
+  if (!loadoutId) return ephemeral('Missing `loadout_id`.');
+  if (!/^[0-9a-f-]{36}$/i.test(loadoutId)) return ephemeral('`loadout_id` must be a UUID. Copy it from the web app.');
+  const res = await linkLoadoutToDiscord(loadoutId, user.id);
+  if (!res.ok) return ephemeral(`❌ ${res.error}`);
+  return ephemeral(`✅ Linked loadout **${res.loadout?.name}** to your Discord. Run \`/assault loadout\` to view it.`);
 }
 
 interface ComponentInteraction {

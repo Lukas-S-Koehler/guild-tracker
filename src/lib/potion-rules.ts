@@ -7,6 +7,8 @@ export interface CombatPotion {
   is_tradeable: boolean;
   attack_power_bonus: number;
   protection_bonus: number;
+  attack_power_is_percentage: boolean;
+  protection_is_percentage: boolean;
   vendor_price: number;
   market_price: number | null;
   avg_recent_sales: string | null;
@@ -193,6 +195,7 @@ export const SLOT_LABELS: Record<SlotKey, string> = {
 };
 
 export const QUALITY_CLASSES: Record<string, string> = {
+  STANDARD: 'bg-stone-500/20 text-stone-300 border-stone-500/40',
   PREMIUM: 'bg-slate-500/20 text-slate-300 border-slate-500/40',
   EPIC: 'bg-purple-500/20 text-purple-300 border-purple-500/40',
   LEGENDARY: 'bg-amber-500/20 text-amber-300 border-amber-500/40',

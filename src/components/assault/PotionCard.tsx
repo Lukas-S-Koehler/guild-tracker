@@ -32,15 +32,17 @@ export function PotionCard({ potion, kind, selected, disabled, disabledReason, o
   const isFreeCommon = xp?.is_free_common === true;
   const untradable = combat ? !combat.is_tradeable : false;
 
+  const fmtCombat = (val: number, pct: boolean, label: string) =>
+    `+${val}${pct ? '%' : ''} ${label}`;
   const bonusLine = combat
     ? [
-        combat.attack_power_bonus > 0 && `+${combat.attack_power_bonus} ATK`,
-        combat.protection_bonus > 0 && `+${combat.protection_bonus} PROT`,
+        combat.attack_power_bonus > 0 && fmtCombat(combat.attack_power_bonus, combat.attack_power_is_percentage, 'ATK'),
+        combat.protection_bonus > 0 && fmtCombat(combat.protection_bonus, combat.protection_is_percentage, 'PROT'),
       ]
         .filter(Boolean)
         .join(' · ')
     : xp
-      ? `+${xp.xp_value || xp.effect_value} ${xp.category === 'battle_xp' ? 'Battle XP' : 'Combat XP'}${xp.efficiency_value ? ` · +${xp.efficiency_value}% efficiency` : ''}`
+      ? `+${xp.xp_value || xp.effect_value}% ${xp.category === 'battle_xp' ? 'Battle XP' : 'Combat XP'}${xp.efficiency_value ? ` · +${xp.efficiency_value}% hunting efficiency` : ''}`
       : '';
 
   return (

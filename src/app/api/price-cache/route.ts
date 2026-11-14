@@ -48,6 +48,25 @@ export async function POST(req: NextRequest) {
   const supabase = createAdminClient();
   const api = new IdleMMOApi(apiKey);
 
+  if (body.seed_potions) {
+    const [{ data: combatPotions }, { data: xpPotions }] = await Promise.all([
+      supabase.from('combat_potions').select('name, is_tradeable, hashed_item_id'),
+      supabase.from('xp_potions').select('name, hashed_item_id'),
+    ]);
+    const names = [
+      ...(combatPotions ?? []).filter((p) => p.is_tradeable && p.hashed_item_id).map((p) => p.name),
+      ...(xpPotions ?? []).filter((p) => p.hashed_item_id).map((p) => p.name),
+    ];
+    let seeded = 0;
+    for (const name of names) {
+      const { data: existing } = await supabase.from('market_cache').select('item_name').eq('item_name', name).maybeSingle();
+      if (existing) continue;
+      await supabase.from('market_cache').insert({ item_name: name, price: 0, cached_at: new Date(0).toISOString() });
+      seeded++;
+    }
+    return NextResponse.json({ seeded, total: names.length });
+  }
+
   if (body.sync_all) {
     const { data: allItems, error } = await supabase
       .from('market_cache')
@@ -63,12 +82,15 @@ export async function POST(req: NextRequest) {
       try {
         const { price, itemId } = await api.getItemPrice(item_name);
         if (price > 0) {
+          const now = new Date().toISOString();
           await supabase.from('market_cache').upsert({
             item_name,
             item_id: itemId ?? null,
             price,
-            cached_at: new Date().toISOString(),
+            cached_at: now,
           }, { onConflict: 'item_name' });
+          await supabase.from('combat_potions').update({ market_price: price, avg_recent_sales: String(price), last_price_sync: now }).eq('name', item_name);
+          await supabase.from('xp_potions').update({ market_price: price, avg_recent_sales: String(price), last_price_sync: now }).eq('name', item_name);
           updated++;
         } else {
           failed.push(item_name);
@@ -82,17 +104,20 @@ export async function POST(req: NextRequest) {
   }
 
   if (body.item_name) {
-    const item_name = (body.item_name as string).toLowerCase();
+    const item_name = body.item_name as string;
     try {
       const { price, itemId } = await api.getItemPrice(item_name);
       if (price > 0) {
+        const now = new Date().toISOString();
         await supabase.from('market_cache').upsert({
           item_name,
           item_id: itemId ?? null,
           price,
-          cached_at: new Date().toISOString(),
+          cached_at: now,
         }, { onConflict: 'item_name' });
-        return NextResponse.json({ updated: 1, failed: [], item: { item_name, item_id: itemId, price, cached_at: new Date().toISOString() } });
+        await supabase.from('combat_potions').update({ market_price: price, avg_recent_sales: String(price), last_price_sync: now }).eq('name', item_name);
+        await supabase.from('xp_potions').update({ market_price: price, avg_recent_sales: String(price), last_price_sync: now }).eq('name', item_name);
+        return NextResponse.json({ updated: 1, failed: [], item: { item_name, item_id: itemId, price, cached_at: now } });
       } else {
         return NextResponse.json({ updated: 0, failed: [item_name] });
       }
@@ -118,7 +143,7 @@ export async function DELETE(req: NextRequest) {
   const { error } = await supabase
     .from('market_cache')
     .delete()
-    .eq('item_name', (body.item_name as string).toLowerCase());
+    .eq('item_name', body.item_name as string);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
