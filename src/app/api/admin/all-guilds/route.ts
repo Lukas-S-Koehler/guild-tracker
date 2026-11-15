@@ -52,8 +52,8 @@ export async function GET(req: NextRequest) {
     if (!usersError) {
       users?.forEach(user => {
         userMap.set(user.id, {
-          email: user.email,
-          display_name: user.user_metadata?.display_name || user.email?.split('@')[0] || 'Unknown',
+          // Never expose email; if display name looks like an email, show only the part before '@'
+          display_name: (user.user_metadata?.display_name || user.email || 'Unknown').split('@')[0] || 'Unknown',
         });
       });
     }
@@ -65,7 +65,6 @@ export async function GET(req: NextRequest) {
         user_id: member.user_id,
         role: member.role,
         joined_at: member.joined_at,
-        email: userDetails?.email || 'unknown@email.com',
         display_name: userDetails?.display_name || 'Unknown User',
       };
     });
@@ -77,7 +76,6 @@ export async function GET(req: NextRequest) {
       }
       guildMemberMap.get(member.guild_id)!.push({
         user_id: member.user_id,
-        email: member.email,
         display_name: member.display_name,
         role: member.role,
         joined_at: member.joined_at,

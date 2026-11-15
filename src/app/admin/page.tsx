@@ -15,7 +15,6 @@ import Link from 'next/link';
 
 interface GuildMember {
   user_id: string;
-  email: string;
   display_name: string;
   role: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER';
   joined_at: string;
