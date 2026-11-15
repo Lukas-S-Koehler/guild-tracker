@@ -1216,15 +1216,15 @@ function AdminPageContent() {
     }
   };
 
-  const handleRemoveUser = async (guildId: string, userId: string, email: string) => {
-    if (!confirm(`Remove ${email} from this guild?`)) return;
+  const handleRemoveUser = async (guildId: string, userId: string, name: string) => {
+    if (!confirm(`Remove ${name} from this guild?`)) return;
     setError(null);
     setSuccess(null);
     try {
       const res = await api.delete(`/api/admin/guild-users?user_id=${userId}&target_guild_id=${guildId}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to remove user');
-      setSuccess(`Removed ${email} from guild`);
+      setSuccess(`Removed ${name} from guild`);
       await fetchGuilds();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to remove user');
@@ -1465,7 +1465,7 @@ function AdminPageContent() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleRemoveUser(guild.id, member.user_id, member.email)}
+                            onClick={() => handleRemoveUser(guild.id, member.user_id, member.display_name)}
                           >
                             <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
