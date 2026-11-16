@@ -35,6 +35,13 @@ interface AssaultConfig {
   season_end: string | null;
 }
 
+function formatCountdown(unix: number): string {
+  const mins = Math.max(0, Math.round((unix * 1000 - Date.now()) / 60000));
+  const d = Math.floor(mins / 1440);
+  const h = Math.floor((mins % 1440) / 60);
+  return d > 0 ? `in ${d}d ${h}h` : `in ${h}h ${mins % 60}m`;
+}
+
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 function ScheduleEditor({
@@ -116,6 +123,7 @@ function GuildPanel({ guildId, guildName, onMsg }: {
   const [config, setConfig] = useState<AssaultConfig | null>(null);
   const [steps, setSteps] = useState<PingStep[]>([]);
   const [loading, setLoading] = useState(true);
+  const [nextLaunch, setNextLaunch] = useState<number | null>(null);
 
   const api = (() => {
     const c = new ApiClient();
@@ -136,6 +144,12 @@ function GuildPanel({ guildId, guildName, onMsg }: {
       if (!sRes.ok) throw new Error(sJson.error);
       setConfig(cJson.config);
       setSteps(sJson.steps);
+      try {
+        const pRes = await fetch('/api/assault/public');
+        const pJson = await pRes.json();
+        const g = (pJson.guilds ?? []).find((x: { guild_id: string }) => x.guild_id === guildId);
+        setNextLaunch(g?.next_launch_unix ?? null);
+      } catch { setNextLaunch(null); }
     } catch (e) {
       onMsg('error', String(e));
     } finally { setLoading(false); }
@@ -226,6 +240,37 @@ function GuildPanel({ guildId, guildName, onMsg }: {
       <Card>
         <CardHeader><CardTitle>{guildName}</CardTitle><CardDescription>Guild ID: <code>{guildId}</code></CardDescription></CardHeader>
         <CardContent><GuildStatusCard value={status} onSave={patchConfig} /></CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Next Assault</CardTitle><CardDescription>Upcoming launch and the pings that will fire for it (times in your local zone)</CardDescription></CardHeader>
+        <CardContent>
+          {nextLaunch == null ? (
+            <p className="text-sm text-muted-foreground">No upcoming assault scheduled (check weekdays, season, pause).</p>
+          ) : (
+            <div className="space-y-2">
+              <div className="text-lg font-semibold">
+                {new Date(nextLaunch * 1000).toLocaleString([], { weekday: 'long', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                <span className="ml-2 text-sm font-normal text-muted-foreground">({formatCountdown(nextLaunch)})</span>
+              </div>
+              <ul className="text-sm space-y-1">
+                {[...steps]
+                  .sort((a, b) => a.offset_minutes - b.offset_minutes)
+                  .map((s) => {
+                    const fireUnix = nextLaunch + s.offset_minutes * 60;
+                    return (
+                      <li key={s.id} className={`flex gap-3 ${s.enabled ? '' : 'opacity-50 line-through'}`}>
+                        <span className="font-mono w-40 shrink-0">
+                          {new Date(fireUnix * 1000).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                        <span>{s.label}</span>
+                      </li>
+                    );
+                  })}
+              </ul>
+            </div>
+          )}
+        </CardContent>
       </Card>
 
       <Card>

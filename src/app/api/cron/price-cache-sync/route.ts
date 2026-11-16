@@ -6,6 +6,8 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
 const CONCURRENCY = 8;
+// Stop starting new batches before Vercel's maxDuration kills the function (504).
+const TIME_BUDGET_MS = 240_000;
 
 const SUPER_ADMIN_USER_ID = '5f33bb41-86ab-4024-a1da-6a2fea5fb36b';
 
@@ -17,6 +19,7 @@ function verifyCronSecret(req: NextRequest): boolean {
 }
 
 export async function POST(req: NextRequest) {
+  const startedAt = Date.now();
   if (!verifyCronSecret(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -59,7 +62,11 @@ export async function POST(req: NextRequest) {
   );
 
   // Refresh full list after seed
-  const { data: allItemsAfterSeed } = await supabase.from('market_cache').select('item_name');
+  // Stalest first, so a partial run is continued by the next run
+  const { data: allItemsAfterSeed } = await supabase
+    .from('market_cache')
+    .select('item_name')
+    .order('cached_at', { ascending: true });
   const items = allItemsAfterSeed ?? allItems ?? [];
   let updated = 0;
   const failed: string[] = [];
@@ -94,10 +101,20 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  let processed = 0;
   for (let i = 0; i < items.length; i += CONCURRENCY) {
+    if (Date.now() - startedAt > TIME_BUDGET_MS) break;
     const batch = items.slice(i, i + CONCURRENCY);
     await Promise.all(batch.map((it) => processOne(it.item_name)));
+    processed += batch.length;
   }
 
-  return NextResponse.json({ success: true, total: items.length, updated, failed });
+  return NextResponse.json({
+    success: true,
+    total: items.length,
+    processed,
+    partial: processed < items.length,
+    updated,
+    failed,
+  });
 }
