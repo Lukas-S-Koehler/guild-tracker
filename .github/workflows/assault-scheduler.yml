@@ -1,0 +1,21 @@
+name: Assault Scheduler Backup
+
+# Backup for the Supabase pg_cron tick. The endpoint is idempotent and
+# catches up on steps missed within a 30 min window, so overlap is safe.
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Hit assault scheduler
+        run: |
+          response=$(curl -s -L --retry 3 --retry-delay 5 -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/assault-scheduler" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+          http_code=$(echo "$response" | tail -1)
+          echo "$response" | head -n -1
+          [ "$http_code" = "200" ] || { echo "ERROR status $http_code"; exit 1; }

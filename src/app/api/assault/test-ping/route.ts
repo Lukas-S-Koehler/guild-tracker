@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
-import { getAssaultConfig, getStep, getGuildName } from '@/lib/assault-service';
-import { buildTemplateVars, renderTemplate, todayLaunchUnix } from '@/lib/assault-template';
+import { getAssaultConfig, getStep, getGuildName, launchUnixForStep } from '@/lib/assault-service';
+import { buildTemplateVars, renderTemplate } from '@/lib/assault-template';
 import { postToChannel } from '@/lib/discord-api';
 
 export const dynamic = 'force-dynamic';
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No announcement_channel_id configured' }, { status: 400 });
     }
 
-    const launchUnix = todayLaunchUnix(config.launch_time_utc);
+    const launchUnix = launchUnixForStep(config, step.offset_minutes);
     const guildName = await getGuildName(auth.guildId);
     const vars = buildTemplateVars(config, guildName, launchUnix);
     const rolePrefix = step.mention_roles.length

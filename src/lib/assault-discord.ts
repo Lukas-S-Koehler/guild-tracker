@@ -11,6 +11,7 @@ import {
   inferGuildFromRoles,
   isAssaultDay,
   nextAssaultLaunchUnix,
+  launchUnixForStep,
   GUILD_BY_MEMBER_ROLE,
   type AssaultConfig,
 } from '@/lib/assault-service';
@@ -504,7 +505,7 @@ async function firePingNow(interaction: Interaction, guildId: string, stepKey: s
       return;
     }
     const guildName = await getGuildName(guildId);
-    const launchUnix = todayLaunchUnix(config.launch_time_utc);
+    const launchUnix = launchUnixForStep(config, step.offset_minutes);
     const vars = buildTemplateVars(config, guildName, launchUnix);
     const rolePrefix = step.mention_roles.length
       ? step.mention_roles.map(r => `<@&${r}>`).join(' ') + ' '
@@ -518,7 +519,7 @@ async function firePingNow(interaction: Interaction, guildId: string, stepKey: s
       return;
     }
     // Record as sent so scheduler won't double-fire the same step today
-    const launchDate = utcDateString();
+    const launchDate = utcDateString(new Date(launchUnix * 1000));
     if (!(await isAlreadySent(guildId, step.id, launchDate))) {
       await markSent(guildId, step.id, launchDate, res.messageId);
     }

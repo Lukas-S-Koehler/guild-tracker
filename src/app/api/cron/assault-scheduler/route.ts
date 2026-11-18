@@ -5,6 +5,8 @@ import {
   listSteps,
   isAlreadySent,
   markSent,
+  releaseSent,
+  setSentMessageId,
   getGuildName,
   nowHHMM,
   isAssaultDay,
@@ -13,7 +15,10 @@ import { buildTemplateVars, renderTemplate, todayLaunchUnix, utcDateString } fro
 
 export const dynamic = 'force-dynamic';
 
-// pg_cron hits this every minute.
+// Hit by pg_cron every minute AND a GitHub Actions backup every 5 min.
+// A step is "due" once its fire time has passed, within a grace window, so a
+// missed tick never drops a ping. Dedup (assault_sent_pings) prevents repeats.
+const GRACE_SECONDS = 30 * 60;
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get('Authorization');
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -22,7 +27,7 @@ export async function POST(req: NextRequest) {
 
   const now = new Date();
   const currentHHMM = nowHHMM(now);
-  const nowMinute = Math.floor(now.getTime() / 60000);
+  const nowUnix = Math.floor(now.getTime() / 1000);
 
   const results: Array<{ guild_id: string; step_key: string; launch_date: string; ok: boolean; error?: string; skipped?: string }> = [];
 
@@ -46,9 +51,13 @@ export async function POST(req: NextRequest) {
 
       const launchDate = utcDateString(launchDay);
       const launchUnix = todayLaunchUnix(config.launch_time_utc, launchDay);
-      const dueSteps = steps.filter(
-        s => Math.floor((launchUnix + s.offset_minutes * 60) / 60) === nowMinute
-      );
+      const dueSteps = steps.filter(s => {
+        const fireUnix = launchUnix + s.offset_minutes * 60;
+        if (nowUnix < fireUnix || nowUnix - fireUnix > GRACE_SECONDS) return false;
+        // pre-launch notices are pointless once the assault has started
+        if (s.offset_minutes < 0 && nowUnix > launchUnix) return false;
+        return true;
+      });
       if (dueSteps.length === 0) continue;
 
       const vars = buildTemplateVars(config, guildName, launchUnix);
@@ -63,12 +72,20 @@ export async function POST(req: NextRequest) {
             ? step.mention_roles.map(r => `<@&${r}>`).join(' ') + ' '
             : '';
           const content = rolePrefix + renderTemplate(step.message_template, vars);
+          // Claim first (unique constraint) so overlapping runs can't double-post.
+          try {
+            await markSent(config.guild_id, step.id, launchDate);
+          } catch {
+            results.push({ guild_id: config.guild_id, step_key: step.step_key, launch_date: launchDate, ok: true, skipped: 'claimed by another run' });
+            continue;
+          }
           const res = await postToChannelReturnId(config.announcement_channel_id, content);
           if (!res.ok) {
+            await releaseSent(config.guild_id, step.id, launchDate); // allow retry next tick
             results.push({ guild_id: config.guild_id, step_key: step.step_key, launch_date: launchDate, ok: false, error: res.error });
             continue;
           }
-          await markSent(config.guild_id, step.id, launchDate, res.messageId);
+          await setSentMessageId(config.guild_id, step.id, launchDate, res.messageId);
           results.push({ guild_id: config.guild_id, step_key: step.step_key, launch_date: launchDate, ok: true });
         } catch (err) {
           results.push({ guild_id: config.guild_id, step_key: step.step_key, launch_date: launchDate, ok: false, error: String(err) });

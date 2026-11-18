@@ -236,6 +236,19 @@ export async function markSent(
   if (error) throw new Error(error.message);
 }
 
+export async function releaseSent(guildId: string, stepId: string, launchDate: string): Promise<void> {
+  const supabase = createAdminClient();
+  await supabase.from('assault_sent_pings').delete()
+    .eq('guild_id', guildId).eq('step_id', stepId).eq('launch_date', launchDate);
+}
+
+export async function setSentMessageId(guildId: string, stepId: string, launchDate: string, messageId?: string): Promise<void> {
+  if (!messageId) return;
+  const supabase = createAdminClient();
+  await supabase.from('assault_sent_pings').update({ discord_message_id: messageId })
+    .eq('guild_id', guildId).eq('step_id', stepId).eq('launch_date', launchDate);
+}
+
 /** Look up the human-facing guild name from guild_config. */
 export async function getGuildName(guildId: string): Promise<string> {
   const supabase = createAdminClient();
@@ -263,6 +276,22 @@ export function nextAssaultLaunchUnix(
     return Math.floor(d.getTime() / 1000);
   }
   return null;
+}
+
+/** Launch (unix seconds) a manually-fired step belongs to. Pre-launch steps
+ *  (offset < 0, e.g. the 24h notice) target the NEXT launch so the countdown is
+ *  correct; post/at-launch steps target the most recent launch still in their window.
+ *  Falls back to today's launch time if no launch day is found. */
+export function launchUnixForStep(
+  config: Parameters<typeof nextAssaultLaunchUnix>[0],
+  offsetMinutes: number,
+  now: Date = new Date(),
+): number {
+  const lookbackMs = offsetMinutes >= 0 ? (offsetMinutes * 60 + 30 * 60) * 1000 : 0;
+  const next = nextAssaultLaunchUnix(config, new Date(now.getTime() - lookbackMs - 1000));
+  if (next != null) return next;
+  const [hh, mm] = (config.launch_time_utc || '00:00:00').split(':').map((n) => parseInt(n, 10));
+  return Math.floor(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hh, mm, 0) / 1000);
 }
 
 /** Return current UTC HH:MM (no seconds). */
