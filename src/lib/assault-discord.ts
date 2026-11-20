@@ -421,7 +421,8 @@ async function handleStatus() {
         `${launchLine} • Zone: ${c.zone_name} • Shrine: ${c.shrine_info}`
     );
   }
-  return NextResponse.json({ type: 4, data: { content: lines.join('\n\n'), flags: 64 } });
+  // Public reply (no ephemeral flag) so everyone in the channel sees it.
+  return NextResponse.json({ type: 4, data: { content: lines.join('\n\n') } });
 }
 
 async function handleToggle(interaction: Interaction, sub: Option) {
