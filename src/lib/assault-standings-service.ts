@@ -276,28 +276,30 @@ export async function getSeasonOverview(season: number, trackedGuilds: TrackedGu
   return { season, seasons: await listStandingSeasons(), guilds, snapshot_at: latest };
 }
 
-/** Best finish per zone across all seasons for our guilds. */
-export async function getBestFinishes(trackedIds: number[]): Promise<ZoneFinish[]> {
+/** Every stored finish (season x location) for our guilds. */
+export async function getAllFinishes(trackedIds: number[]): Promise<ZoneFinish[]> {
   if (trackedIds.length === 0) return [];
   const supabase = createAdminClient();
   const rows = await fetchAll<StandingRow>((f, t) =>
     supabase.from('assault_zone_standings').select('*').in('external_guild_id', trackedIds).range(f, t));
-  const best = new Map<number, StandingRow>();
-  for (const r of rows) {
-    const cur = best.get(r.zone_id);
-    if (!cur || r.position < cur.position || (r.position === cur.position && Number(r.experience) > Number(cur.experience))) {
-      best.set(r.zone_id, r);
-    }
-  }
   const meta = await getLocationMeta().catch(() => new Map());
-  return Array.from(best.values())
-    .map(r => ({
-      image_url: meta.get(r.zone_id)?.image_url ?? null,
-      zone_id: r.zone_id, zone_name: r.zone_name, season_number: r.season_number,
-      guild_id: r.external_guild_id, guild_name: r.guild_name, position: r.position,
-      of: r.zone_guild_count, kills: Number(r.kills), experience: Number(r.experience),
-    }))
-    .sort((a, b) => a.position - b.position || b.experience - a.experience);
+  return rows.map(r => ({
+    image_url: meta.get(r.zone_id)?.image_url ?? null,
+    zone_id: r.zone_id, zone_name: r.zone_name, season_number: r.season_number,
+    guild_id: r.external_guild_id, guild_name: r.guild_name, position: r.position,
+    of: r.zone_guild_count, kills: Number(r.kills), experience: Number(r.experience),
+  }));
+}
+
+/** Best finish per zone across all seasons for our guilds. */
+export async function getBestFinishes(trackedIds: number[]): Promise<ZoneFinish[]> {
+  const all = await getAllFinishes(trackedIds);
+  const best = new Map<number, ZoneFinish>();
+  for (const r of all) {
+    const cur = best.get(r.zone_id);
+    if (!cur || r.position < cur.position || (r.position === cur.position && r.experience > cur.experience)) best.set(r.zone_id, r);
+  }
+  return Array.from(best.values()).sort((a, b) => a.position - b.position || b.experience - a.experience);
 }
 
 export interface TopAssaulter {
