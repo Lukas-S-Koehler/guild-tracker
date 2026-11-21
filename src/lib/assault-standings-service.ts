@@ -195,6 +195,15 @@ export async function getTrackedExternalIds(): Promise<number[]> {
   return Array.from(new Set((await getTrackedGuilds()).map(g => g.external_id)));
 }
 
+/** External ids of every Dream guild (guilds table) plus our assault guilds. Used for member data + leaderboards. */
+export async function getDreamExternalIds(): Promise<number[]> {
+  const supabase = createAdminClient();
+  const { data } = await supabase.from('guilds').select('id');
+  const ids = new Set<number>(((data ?? []) as { id: string }[]).map(g => parseInt(g.id, 10)).filter(n => !Number.isNaN(n)));
+  for (const t of await getTrackedExternalIds()) ids.add(t);
+  return Array.from(ids);
+}
+
 export async function getSeasonOverview(season: number, trackedGuilds: TrackedGuild[]): Promise<SeasonOverview> {
   const trackedIds = trackedGuilds.map(g => g.external_id);
   const supabase = createAdminClient();
@@ -359,18 +368,25 @@ export async function getAssaultLeaderboard(opts: {
   limit?: number;
 }): Promise<{ rows: LeaderboardRow[]; guilds: Array<{ id: number; name: string }> }> {
   const supabase = createAdminClient();
-  const tracked = await getTrackedExternalIds();
+  const tracked = await getDreamExternalIds();
   if (tracked.length === 0) return { rows: [], guilds: [] };
 
   // guild names from standings (latest row per guild)
-  const { data: nameRows } = await supabase
-    .from('assault_zone_standings')
-    .select('external_guild_id, guild_name')
-    .in('external_guild_id', tracked)
-    .limit(500);
   const names = new Map<number, string>();
-  for (const r of (nameRows ?? []) as { external_guild_id: number; guild_name: string }[]) names.set(r.external_guild_id, r.guild_name);
-  const guilds = tracked.map(id => ({ id, name: names.get(id) ?? `Guild ${id}` }));
+  await Promise.all(tracked.map(async id => {
+    const { data } = await supabase
+      .from('assault_zone_standings')
+      .select('guild_name')
+      .eq('external_guild_id', id)
+      .order('season_number', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (data) names.set(id, (data as { guild_name: string }).guild_name);
+  }));
+  // Only list guilds that actually have member data in the guild filter
+  const { data: withData } = await supabase.from('assault_season_contributions').select('external_guild_id').in('external_guild_id', tracked).limit(5000);
+  const hasData = new Set(((withData ?? []) as { external_guild_id: number }[]).map(r => r.external_guild_id));
+  const guilds = tracked.filter(id => hasData.has(id)).map(id => ({ id, name: names.get(id) ?? `Guild ${id}` }));
 
   type C = { season_number: number; zone_id: number; external_guild_id: number; character_id: number; character_name: string; total_level: number | null; kills: number; experience: number };
   const ids = opts.guildId ? tracked.filter(t => t === opts.guildId) : tracked;

@@ -7,7 +7,7 @@ import {
   getCurrentSeason,
   getSeasonOverview,
   getTopAssaulters,
-  getTrackedExternalIds,
+  getDreamExternalIds,
   getTrackedGuilds,
 } from '@/lib/assault-standings-service';
 
@@ -22,7 +22,7 @@ const ordinal = (n: number) => {
 };
 
 async function buildEmbed(sub: Option): Promise<unknown> {
-  const ids = await getTrackedExternalIds();
+  const ids = await getDreamExternalIds();
   const seasonArg = sub.options?.find(o => o.name === 'season')?.value;
 
   if (sub.name === 'zones') {

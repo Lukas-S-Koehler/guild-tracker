@@ -51,6 +51,7 @@ function FinishCard({ f }: { f: Finish }) {
             <span>Season {f.season_number}</span>
             <span className="tabular-nums">{compact(f.experience)} XP</span>
           </div>
+          <div className="text-[10px] text-muted-foreground/80 truncate">{f.guild_name}</div>
         </div>
       </div>
     </Link>

@@ -7,7 +7,7 @@ import {
   finalizeRun,
   healWaves,
 } from '@/lib/assault-conquest-service';
-import { getCurrentSeason, standingsStale, syncSeason } from '@/lib/assault-standings-service';
+import { getCurrentSeason, getDreamExternalIds, standingsStale, syncSeason } from '@/lib/assault-standings-service';
 import { listAssaultConfigs, isAssaultDay } from '@/lib/assault-service';
 import { todayLaunchUnix } from '@/lib/assault-template';
 
@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
   try {
     const season = await getCurrentSeason();
     if (anyKey && (await standingsStale(season, 55 * 60 * 1000))) {
-      const ids = new Set(tracked.map(t => t.external_guild_id).filter((x): x is number => x != null));
+      const ids = new Set(await getDreamExternalIds());
       const r = await syncSeason(new IdleMMOApi(anyKey), season, season, ids);
       summary.standings = { season, ...r, errors: undefined };
       errors.push(...r.errors);

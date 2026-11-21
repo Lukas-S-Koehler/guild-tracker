@@ -5,6 +5,7 @@ import {
   getBestFinishes,
   getTopAssaulters,
   getTrackedGuilds,
+  getDreamExternalIds,
 } from '@/lib/assault-standings-service';
 
 export const dynamic = 'force-dynamic';
@@ -19,7 +20,7 @@ export async function GET(req: NextRequest) {
     const [overview, best, members] = await Promise.all([
       getSeasonOverview(season, tracked),
       getBestFinishes(ids),
-      getTopAssaulters(ids, { season, limit: 50 }),
+      getTopAssaulters(await getDreamExternalIds(), { season, limit: 50 }),
     ]);
     return NextResponse.json({ current_season: current, ...overview, best_finishes: best, members });
   } catch (e) {

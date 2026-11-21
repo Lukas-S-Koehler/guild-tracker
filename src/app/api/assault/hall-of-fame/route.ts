@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
-import { getAllFinishes, getAssaultLeaderboard, getTrackedExternalIds } from '@/lib/assault-standings-service';
+import { getAllFinishes, getAssaultLeaderboard, getDreamExternalIds } from '@/lib/assault-standings-service';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const ids = await getTrackedExternalIds();
+    const ids = await getDreamExternalIds();
     const supabase = createAdminClient();
     const [finishes, board, { data: bigWave }] = await Promise.all([
       getAllFinishes(ids),
