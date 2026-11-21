@@ -183,7 +183,7 @@ export default function AssaultStatsPage() {
                         {w.members.slice(0, 3).map((m, i) => (
                           <li key={m.character_id} className="flex justify-between gap-2">
                             <span className="truncate">{['🥇', '🥈', '🥉'][i]} {m.name}</span>
-                            <span className="text-muted-foreground tabular-nums">{compact(m.experience)} XP</span>
+                            <span className="text-muted-foreground tabular-nums">{compact(m.experience)} XP · {m.kills.toLocaleString()} kills</span>
                           </li>
                         ))}
                       </ol>

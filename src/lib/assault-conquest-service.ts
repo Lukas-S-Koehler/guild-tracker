@@ -330,9 +330,40 @@ export async function postFinalizeEmbed(
 }
 
 /** Find the run for a scheduled launch (±3h of launch), discovering it via the conquest view if needed. */
+/**
+ * XP the guild has gained in this zone since the end of its previous wave (cumulative now - last snapshot).
+ * > 0 means there is unattributed assault activity.
+ */
+export async function activityDelta(config: AssaultConquestConfig, zoneId: number, launchUnix: number): Promise<number> {
+  if (!config.api_key || !config.external_guild_id) return 0;
+  const zone = (await new IdleMMOApi(config.api_key).inspectConquestZone(zoneId)).zone;
+  const ours = zone.guilds.find(g => g.guild.id === config.external_guild_id);
+  const cumulative = (ours?.contributions ?? []).reduce((a, c) => a + toInt(c.experience), 0);
+
+  const supabase = createAdminClient();
+  const season = await getCurrentSeason();
+  const { data: prev } = await supabase
+    .from('assault_runs')
+    .select('id')
+    .eq('guild_id', config.guild_id)
+    .eq('zone_id', zoneId)
+    .eq('season_number', season)
+    .lt('starts_at', new Date((launchUnix - 3 * 3600) * 1000).toISOString())
+    .order('starts_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  let baseline = 0;
+  if (prev) {
+    const { data: snap } = await supabase.from('assault_run_snapshots').select('experience').eq('run_id', (prev as { id: string }).id);
+    baseline = ((snap ?? []) as { experience: number }[]).reduce((a, r) => a + Number(r.experience), 0);
+  }
+  return cumulative - baseline;
+}
+
 export async function findRunForLaunch(
   config: AssaultConquestConfig,
   launchUnix: number,
+  opts: { requireActivity?: boolean } = {},
 ): Promise<AssaultRunRow | null> {
   const supabase = createAdminClient();
   const lo = new Date((launchUnix - 3 * 3600) * 1000).toISOString();
@@ -343,6 +374,7 @@ export async function findRunForLaunch(
     .eq('guild_id', config.guild_id)
     .gte('starts_at', lo)
     .lte('starts_at', hi)
+    .match(config.tracked_zone_id ? { zone_id: config.tracked_zone_id } : {})
     .order('starts_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -356,6 +388,8 @@ export async function findRunForLaunch(
   const scheduled = async () => {
     // Not listed any more (assault already ended): create the run from the schedule so the wave can still be synced.
     if (!config.tracked_zone_id) return null;
+    // Automatic paths only record a wave if there is actually unattributed XP (avoids empty runs for idle guilds)
+    if (opts.requireActivity && (await activityDelta(config, config.tracked_zone_id, launchUnix)) <= 0) return null;
     return upsertRun({
       guild_id: config.guild_id,
       external_guild_id: config.external_guild_id!,
@@ -393,10 +427,14 @@ export async function syncRunForLaunch(
   config: AssaultConquestConfig,
   launchUnix: number,
   final: boolean,
-  opts: { post?: boolean } = {},
-): Promise<{ ok: boolean; error?: string; run_id?: string; wave?: number; total_experience?: number; participants?: number }> {
-  const run = await findRunForLaunch(config, launchUnix);
-  if (!run) return { ok: false, error: 'no assault run found for launch' };
+  opts: { post?: boolean; requireActivity?: boolean } = {},
+): Promise<{ ok: boolean; skipped?: string; error?: string; run_id?: string; wave?: number; total_experience?: number; participants?: number }> {
+  const run = await findRunForLaunch(config, launchUnix, { requireActivity: opts.requireActivity });
+  if (!run) {
+    return opts.requireActivity
+      ? { ok: true, skipped: 'no assault activity found for this launch' }
+      : { ok: false, error: 'no assault run found for launch' };
+  }
   const { top, wave } = await syncRun(run, config, { final });
   const supabase = createAdminClient();
   const { data: fresh } = await supabase.from('assault_runs').select('*').eq('id', run.id).single();
@@ -408,4 +446,61 @@ export async function syncRunForLaunch(
     });
   }
   return { ok: true, run_id: run.id, wave, total_experience: Number((fresh as AssaultRunRow | null)?.total_experience ?? 0), participants: top.length };
+}
+
+
+/**
+ * Self-healing: for recent scheduled launches whose wave isn't synced yet, record + finalize it.
+ * Runs hourly from the collector. Works for the configured location plus any location this guild
+ * already has runs in this season. Only acts when there is unattributed XP, and never posts
+ * (the scheduler's 25h sync posts). Late-arriving XP simply lands in the next wave's delta.
+ */
+export async function healWaves(
+  configs: Array<AssaultConquestConfig & { launch_time_utc: string; weekdays: number[] | null; season_start: string | null; season_end: string | null }>,
+  now: Date,
+  isScheduledDay: (c: { weekdays: number[] | null; season_start: string | null; season_end: string | null }, day: Date) => boolean,
+  launchUnixFor: (launchTimeUtc: string, day: Date) => number,
+): Promise<string[]> {
+  const out: string[] = [];
+  const supabase = createAdminClient();
+  const season = await getCurrentSeason();
+  const nowUnix = Math.floor(now.getTime() / 1000);
+
+  for (const cfg of configs) {
+    if (!cfg.api_key || !cfg.external_guild_id) continue;
+    const zoneIds = new Set<number>();
+    if (cfg.tracked_zone_id) zoneIds.add(cfg.tracked_zone_id);
+    const { data: zr } = await supabase.from('assault_runs').select('zone_id, zone_name').eq('guild_id', cfg.guild_id).eq('season_number', season);
+    const zoneNames = new Map<number, string>();
+    for (const r of (zr ?? []) as { zone_id: number; zone_name: string }[]) { zoneIds.add(r.zone_id); zoneNames.set(r.zone_id, r.zone_name); }
+
+    for (let d = 0; d >= -3; d--) {
+      const day = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + d, 12));
+      if (!isScheduledDay(cfg, day)) continue;
+      const launchUnix = launchUnixFor(cfg.launch_time_utc, day);
+      const endsUnix = launchUnix + 9 * 3600;
+      if (nowUnix < endsUnix + 2 * 3600 || nowUnix > launchUnix + 72 * 3600) continue;
+
+      for (const zoneId of Array.from(zoneIds)) {
+        try {
+          const { data: ex } = await supabase
+            .from('assault_runs')
+            .select('status, snapshot_taken_at')
+            .eq('guild_id', cfg.guild_id)
+            .eq('zone_id', zoneId)
+            .gte('starts_at', new Date((launchUnix - 3 * 3600) * 1000).toISOString())
+            .lte('starts_at', new Date((launchUnix + 3 * 3600) * 1000).toISOString())
+            .maybeSingle();
+          const e = ex as { status: string; snapshot_taken_at: string | null } | null;
+          if (e && e.status === 'finalized' && e.snapshot_taken_at && new Date(e.snapshot_taken_at).getTime() / 1000 >= endsUnix + 2 * 3600) continue;
+          const zoneCfg = { ...cfg, tracked_zone_id: zoneId, zone_name: zoneNames.get(zoneId) ?? cfg.zone_name };
+          const r = await syncRunForLaunch(zoneCfg, launchUnix, true, { post: false, requireActivity: true });
+          out.push(`${cfg.guild_id}/zone ${zoneId}/${new Date(launchUnix * 1000).toISOString()}: ${r.skipped ?? (r.ok ? `synced wave ${r.wave}` : r.error)}`);
+        } catch (err) {
+          out.push(`${cfg.guild_id}/zone ${zoneId}: ${String(err)}`);
+        }
+      }
+    }
+  }
+  return out;
 }

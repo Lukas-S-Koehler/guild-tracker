@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
 
   // A step fires at launch + offset, which may land on a different UTC day than
   // the launch (e.g. -1440 = 24h notice). Check launches from yesterday..+2 days.
-  const DAY_SPAN = [-1, 0, 1, 2];
+  const DAY_SPAN = [-3, -2, -1, 0, 1, 2];
 
   const configs = await listAssaultConfigs();
   const trackedByGuild = new Map((await listTrackedGuilds()).map(t => [t.guild_id, t]));
@@ -55,7 +55,11 @@ export async function POST(req: NextRequest) {
       const launchUnix = todayLaunchUnix(config.launch_time_utc, launchDay);
       const dueSteps = steps.filter(s => {
         const fireUnix = launchUnix + s.offset_minutes * 60;
-        if (nowUnix < fireUnix || nowUnix - fireUnix > GRACE_SECONDS) return false;
+        // Stat syncs catch up for 48h if a tick was missed (idempotent); everything else only within the grace window.
+        const grace = s.step_key.startsWith('sync_') ? 48 * 3600 : GRACE_SECONDS;
+        if (nowUnix < fireUnix || nowUnix - fireUnix > grace) return false;
+        // An interim 13h update is pointless once the 25h final is due
+        if (s.step_key === 'sync_13h' && nowUnix >= launchUnix + 1500 * 60) return false;
         // pre-launch notices are pointless once the assault has started
         if (s.offset_minutes < 0 && nowUnix > launchUnix) return false;
         return true;
@@ -75,9 +79,12 @@ export async function POST(req: NextRequest) {
             const tracked = trackedByGuild.get(config.guild_id);
             await markSent(config.guild_id, step.id, launchDate);
             const r = tracked
-              ? await syncRunForLaunch(tracked, launchUnix, step.step_key === 'sync_25h').catch(e => ({ ok: false, error: String(e) }))
+              ? await syncRunForLaunch(tracked, launchUnix, step.step_key === 'sync_25h', { requireActivity: true }).catch(e => ({ ok: false, error: String(e) }))
               : { ok: false, error: 'no conquest config / api key' };
-            if (!r.ok) {
+            if (r.ok && 'skipped' in r && r.skipped) {
+              // no assault activity for this launch: keep the claim so we don't re-check every tick
+              results.push({ guild_id: config.guild_id, step_key: step.step_key, launch_date: launchDate, ok: true, skipped: r.skipped });
+            } else if (!r.ok) {
               await releaseSent(config.guild_id, step.id, launchDate); // retry next tick within grace
               results.push({ guild_id: config.guild_id, step_key: step.step_key, launch_date: launchDate, ok: false, error: r.error });
             } else {

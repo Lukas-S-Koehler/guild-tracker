@@ -5,8 +5,11 @@ import {
   upsertRun,
   listUnfinalizedPastRuns,
   finalizeRun,
+  healWaves,
 } from '@/lib/assault-conquest-service';
 import { getCurrentSeason, standingsStale, syncSeason } from '@/lib/assault-standings-service';
+import { listAssaultConfigs, isAssaultDay } from '@/lib/assault-service';
+import { todayLaunchUnix } from '@/lib/assault-template';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,9 +40,7 @@ export async function POST(req: NextRequest) {
         for (const aa of zone.active_assaults ?? []) {
           const cfg = configByExternal.get(aa.guild.id);
           if (!cfg) continue;
-          // Only track assaults on the guild's configured zone (consistency rule)
-          if (cfg.tracked_zone_id && cfg.tracked_zone_id !== zone.location.id) continue;
-
+          // Any location our guild is actively assaulting is recorded (multi-location assaults)
           await upsertRun({
             guild_id: cfg.guild_id,
             external_guild_id: aa.guild.id,
@@ -70,6 +71,27 @@ export async function POST(req: NextRequest) {
       summary.finalized = (summary.finalized as number) + 1;
     } catch (e) {
       errors.push(`finalize ${run.id}: ${String(e)}`);
+    }
+  }
+
+  // 2b. Hourly self-heal: record + finalize recent scheduled waves the other paths missed
+  if (now.getUTCMinutes() < 5) {
+    try {
+      const sched = await listAssaultConfigs();
+      const merged = tracked
+        .map(t => {
+          const c = sched.find(x => x.guild_id === t.guild_id);
+          return c ? { ...t, launch_time_utc: c.launch_time_utc, weekdays: c.weekdays, season_start: c.season_start, season_end: c.season_end } : null;
+        })
+        .filter((x): x is NonNullable<typeof x> => x != null);
+      summary.healed = await healWaves(
+        merged,
+        now,
+        (c, day) => isAssaultDay({ ...c, active: true, skip_date: null, paused_until: null }, day),
+        todayLaunchUnix,
+      );
+    } catch (e) {
+      errors.push(`heal: ${String(e)}`);
     }
   }
 
