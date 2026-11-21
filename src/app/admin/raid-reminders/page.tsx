@@ -253,7 +253,7 @@ function RaidRemindersContent() {
 
   return (
     <div className="container mx-auto p-4 sm:p-6 max-w-4xl space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <Link href="/admin" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 mb-1">
             <ArrowLeft className="h-3 w-3" /> Back to admin

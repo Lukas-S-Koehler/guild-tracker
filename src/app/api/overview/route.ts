@@ -124,11 +124,13 @@ function computeSharedBankCoverage(
       return la < lb ? -1 : la > lb ? 1 : 0;
     });
 
-    for (const { id, amount } of shortfalls) {
-      if (sharedBank >= amount) {
-        sharedBank -= amount;
+    // All-or-nothing: the group is one entity. Bank + surplus must cover the whole
+    // group's shortfall, otherwise nobody is covered (keeps inactivity days identical).
+    const totalShortfall = shortfalls.reduce((s, x) => s + x.amount, 0);
+    if (shortfalls.length > 0 && sharedBank >= totalShortfall) {
+      sharedBank -= totalShortfall;
+      for (const { id, amount } of shortfalls) {
         covered.get(id)!.set(col, amount);
-        // Update so subsequent days reflect this coverage when re-sorting
         const existing = lastActivityMap.get(id);
         if (!existing || col > existing) lastActivityMap.set(id, col);
       }

@@ -138,27 +138,40 @@ export async function GET(req: NextRequest) {
   };
   for (const id of Array.from(exemptIds)) propagate(id);
 
+  // Connected components over same-guild alt links
+  const adj = new Map<string, Set<string>>();
+  for (const [main, alts] of Array.from(mainToAlts.entries())) {
+    for (const a of alts) {
+      if (!memberSet.has(main) || !memberSet.has(a)) continue;
+      if (!adj.has(main)) adj.set(main, new Set());
+      if (!adj.has(a)) adj.set(a, new Set());
+      adj.get(main)!.add(a);
+      adj.get(a)!.add(main);
+    }
+  }
+  const groupOf = (id: string): Set<string> => {
+    const seen = new Set<string>([id]);
+    const q = [id];
+    while (q.length) {
+      const cur = q.shift()!;
+      for (const n of Array.from(adj.get(cur) ?? [])) if (!seen.has(n)) { seen.add(n); q.push(n); }
+    }
+    return seen;
+  };
+
   const inactiveMembers = members
     .map((member) => {
       let lastDate = lastActivityMap.get(member.id);
       let altCovered = false;
 
-      // Check same-guild alts for coverage
+      // Linked same-guild characters are one entity: share the most recent activity
+      // across the whole connected group (siblings included, not just main/alts).
       const altIds = mainToAlts.get(member.id) ?? [];
-      const altInGuild = altIds.filter((aid) => memberSet.has(aid));
-      for (const altId of altInGuild) {
-        const altLast = lastActivityMap.get(altId);
-        if (altLast && (!lastDate || altLast > lastDate)) {
-          lastDate = altLast;
-          altCovered = true;
-        }
-      }
-      // Also check if this member is an alt of someone else in the guild
-      const mainId = altToMain.get(member.id);
-      if (mainId && memberSet.has(mainId)) {
-        const mainLast = lastActivityMap.get(mainId);
-        if (mainLast && (!lastDate || mainLast > lastDate)) {
-          lastDate = mainLast;
+      for (const gid of Array.from(groupOf(member.id))) {
+        if (gid === member.id) continue;
+        const gLast = lastActivityMap.get(gid);
+        if (gLast && (!lastDate || gLast > lastDate)) {
+          lastDate = gLast;
           altCovered = true;
         }
       }

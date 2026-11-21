@@ -530,7 +530,7 @@ function DiscordMappingSection({ guildId }: { guildId: string }) {
 
   return (
     <div className="space-y-3 p-4 border rounded-lg bg-muted/30">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <h3 className="font-semibold text-sm">Discord Member Mapping</h3>
         <span className="text-xs text-muted-foreground">{mapped}/{members.length} mapped</span>
       </div>

@@ -157,7 +157,7 @@ function PriceCacheContent() {
 
   return (
     <div className="container mx-auto px-4 py-8 space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold">Price Cache</h1>
           <p className="text-muted-foreground text-sm">IdleMMO item price cache management</p>

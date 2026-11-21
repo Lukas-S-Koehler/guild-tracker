@@ -41,35 +41,15 @@ export async function getDiscordProfile(discordId: string): Promise<DiscordProfi
   const seedIds = new Set<string>((direct ?? []).map((m: { id: string }) => m.id));
   if (seedIds.size === 0) return { characters: [] };
 
-  // Expand through member_alts (both directions). Dedupe by alt_hashed_id.
-  const idList = Array.from(seedIds);
+  // Expand through member_alts to the full account (transitive closure, no hop cap).
+  const { getAccountMemberIds } = await import('./alt-graph');
+  const allIds = await getAccountMemberIds(supabase, Array.from(seedIds));
   const { data: altRows } = await supabase
     .from('member_alts')
     .select('member_id, alt_ign, alt_hashed_id, alt_member_id')
-    .or(`member_id.in.(${idList.join(',')}),alt_member_id.in.(${idList.join(',')})`);
-
+    .in('member_id', Array.from(allIds));
   type AltRow = { member_id: string; alt_ign: string; alt_hashed_id: string; alt_member_id: string | null };
   const alts = (altRows ?? []) as AltRow[];
-  const allIds = new Set(seedIds);
-  for (const a of alts) {
-    allIds.add(a.member_id);
-    if (a.alt_member_id) allIds.add(a.alt_member_id);
-  }
-  // Second hop: pull in all alts of any main discovered via an alt link
-  const mainIds = new Set(alts.map(a => a.member_id));
-  const missingMains = Array.from(mainIds).filter(id => !seedIds.has(id));
-  if (missingMains.length > 0) {
-    const { data: more } = await supabase
-      .from('member_alts')
-      .select('member_id, alt_ign, alt_hashed_id, alt_member_id')
-      .in('member_id', missingMains);
-    const seen = new Set(alts.map(a => `${a.member_id}:${a.alt_hashed_id}`));
-    for (const a of (more ?? []) as AltRow[]) {
-      if (seen.has(`${a.member_id}:${a.alt_hashed_id}`)) continue;
-      alts.push(a);
-      if (a.alt_member_id) allIds.add(a.alt_member_id);
-    }
-  }
 
   const ids = Array.from(allIds);
   const [membersRes, lbRes, histRes, guildsRes] = await Promise.all([

@@ -498,14 +498,14 @@ function OverviewPageContent() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-6">
-        <div>
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-6">
+        <div className="min-w-0">
           <h1 className="text-2xl font-bold">🗓️ Guild Overview</h1>
-          <div className="flex items-center gap-3">
-            <p className="text-muted-foreground">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
+            <p className="text-muted-foreground text-sm sm:text-base">
             7-{period === 'weekly' ? 'week' : 'day'} activity overview for all members
             {data && (
-              <span className="ml-2 text-xs font-medium text-amber-400/80">
+              <span className="block sm:inline sm:ml-2 text-xs font-medium text-amber-400/80">
                 {period === 'weekly'
                   ? `· Weekly req: ${data.config.weekly_donation_requirement.toLocaleString()}g · Daily req: ${data.config.donation_requirement.toLocaleString()}g`
                   : `· Daily req: ${data.config.donation_requirement.toLocaleString()}g`}
@@ -516,7 +516,7 @@ function OverviewPageContent() {
           </div>
         </div>
         {overflowEnabled && (
-          <div className="text-right text-xs text-muted-foreground leading-snug shrink-0 pt-0.5">
+          <div className="sm:text-right text-xs text-muted-foreground leading-snug sm:shrink-0 sm:pt-0.5">
             <p className="font-semibold text-amber-400/80">🏦 Bank cap: {formatGold(overflowLimit)}/member</p>
             <p>Excess above daily req is banked · drawn on missed days</p>
           </div>

@@ -94,7 +94,7 @@ function ChecklistInner() {
 
   return (
     <div className="container mx-auto p-4 max-w-3xl space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-2">
           <Link href="/assault"><Button variant="ghost" size="sm"><ArrowLeft className="h-4 w-4 mr-1" />Assault</Button></Link>
           <h1 className="text-2xl font-bold">Checklist</h1>

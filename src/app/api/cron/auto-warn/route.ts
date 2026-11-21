@@ -388,9 +388,11 @@ export async function POST(req: NextRequest) {
                 const lb = lastActivityMap.get(b.id) ?? '';
                 return la < lb ? -1 : la > lb ? 1 : 0;
               });
-              for (const { id, amount } of shortfalls) {
-                if (sharedBank >= amount) {
-                  sharedBank -= amount;
+              // All-or-nothing: group is one entity; cover the whole shortfall or none of it.
+              const totalShortfall = shortfalls.reduce((s, x) => s + x.amount, 0);
+              if (shortfalls.length > 0 && sharedBank >= totalShortfall) {
+                sharedBank -= totalShortfall;
+                for (const { id } of shortfalls) {
                   const existing = lastActivityMap.get(id);
                   if (!existing || dateStr > existing) lastActivityMap.set(id, dateStr);
                 }
@@ -434,10 +436,11 @@ export async function POST(req: NextRequest) {
                 const lb = lastActivityMap.get(b.id) ?? '';
                 return la < lb ? -1 : la > lb ? 1 : 0;
               });
-              for (const { id, amount } of shortfalls) {
-                if (sharedBank >= amount) {
-                  sharedBank -= amount;
-                  const sunday = getWeekSunday(wk);
+              const totalShortfall = shortfalls.reduce((s, x) => s + x.amount, 0);
+              if (shortfalls.length > 0 && sharedBank >= totalShortfall) {
+                sharedBank -= totalShortfall;
+                const sunday = getWeekSunday(wk);
+                for (const { id } of shortfalls) {
                   const existing = lastActivityMap.get(id);
                   if (!existing || sunday > existing) lastActivityMap.set(id, sunday);
                 }
