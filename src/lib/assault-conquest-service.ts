@@ -17,6 +17,9 @@ export interface AssaultConquestConfig {
 
 export async function listTrackedGuilds(): Promise<AssaultConquestConfig[]> {
   const supabase = createAdminClient();
+  const { data: ag } = await supabase.from('guilds').select('id').eq('is_assault', true);
+  const assaultIds = ((ag ?? []) as { id: string }[]).map(g => g.id);
+  if (assaultIds.length === 0) return [];
   const { data, error } = await supabase
     .from('assault_configs')
     .select(`
@@ -28,7 +31,8 @@ export async function listTrackedGuilds(): Promise<AssaultConquestConfig[]> {
       announcement_channel_id,
       active,
       guild_config:guild_config!inner(api_key, guild_name)
-    `);
+    `)
+    .in('guild_id', assaultIds);
   if (error) throw new Error(error.message);
   type Row = {
     guild_id: string;

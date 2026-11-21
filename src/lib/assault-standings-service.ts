@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase-server';
 import { IdleMMOApi, type ConquestZone } from '@/lib/idlemmo-api';
+import { getLocationMeta } from '@/lib/world-locations';
 
 const FALLBACK_SEASON = 13;
 
@@ -148,13 +149,15 @@ export interface ZoneFinish {
   guild_id: number; guild_name: string; position: number; of: number; kills: number; experience: number;
 }
 
+export interface FieldEntry { position: number; guild_id: number; name: string; tag: string | null; experience: number; kills: number; ours: boolean }
+
 export interface SeasonOverview {
   season: number;
   seasons: number[];
   guilds: Array<{
-    guild_id: number; guild_name: string; guild_tag: string | null;
+    guild_id: number; guild_name: string; guild_tag: string | null; note: string | null;
     overall_rank: number | null; of: number; experience: number; kills: number;
-    zones: Array<{ zone_id: number; zone_name: string; position: number; of: number; kills: number; experience: number; leader: { name: string; experience: number } | null }>;
+    zones: Array<{ zone_id: number; zone_name: string; image_url: string | null; position: number; of: number; kills: number; experience: number; leader: { name: string; experience: number } | null; field: FieldEntry[] }>;
   }>;
   snapshot_at: string | null;
 }
@@ -166,13 +169,34 @@ export async function listStandingSeasons(): Promise<number[]> {
   return Array.from(new Set(rows.map(r => r.season_number))).sort((a, b) => b - a);
 }
 
-export async function getTrackedExternalIds(): Promise<number[]> {
+export interface TrackedGuild { external_id: number; local_id: string; name: string }
+
+/** Our assault guilds (guilds.is_assault) with their external IdleMMO id + local name. */
+export async function getTrackedGuilds(): Promise<TrackedGuild[]> {
   const supabase = createAdminClient();
-  const { data } = await supabase.from('assault_configs').select('external_guild_id').not('external_guild_id', 'is', null);
-  return Array.from(new Set(((data ?? []) as { external_guild_id: number }[]).map(r => r.external_guild_id)));
+  const { data: ag } = await supabase.from('guilds').select('id, name, nickname').eq('is_assault', true);
+  const guilds = (ag ?? []) as { id: string; name: string; nickname: string | null }[];
+  if (guilds.length === 0) return [];
+  const { data } = await supabase
+    .from('assault_configs')
+    .select('guild_id, external_guild_id')
+    .in('guild_id', guilds.map(g => g.id))
+    .not('external_guild_id', 'is', null);
+  const out: TrackedGuild[] = [];
+  for (const r of (data ?? []) as { guild_id: string; external_guild_id: number }[]) {
+    const g = guilds.find(x => x.id === r.guild_id);
+    if (g) out.push({ external_id: r.external_guild_id, local_id: g.id, name: g.name });
+  }
+  return out;
 }
 
-export async function getSeasonOverview(season: number, trackedIds: number[]): Promise<SeasonOverview> {
+/** External (IdleMMO) ids of our assault guilds only (guilds.is_assault), not every Dream guild. */
+export async function getTrackedExternalIds(): Promise<number[]> {
+  return Array.from(new Set((await getTrackedGuilds()).map(g => g.external_id)));
+}
+
+export async function getSeasonOverview(season: number, trackedGuilds: TrackedGuild[]): Promise<SeasonOverview> {
+  const trackedIds = trackedGuilds.map(g => g.external_id);
   const supabase = createAdminClient();
   const rows = await fetchAll<StandingRow & { snapshot_at: string }>((f, t) =>
     supabase.from('assault_zone_standings').select('*').eq('season_number', season).range(f, t));
@@ -186,14 +210,33 @@ export async function getSeasonOverview(season: number, trackedIds: number[]): P
   }
   const ranked = Array.from(totals.entries()).sort((a, b) => b[1].xp - a[1].xp).map(([id]) => id);
 
-  const guilds = trackedIds.map(gid => {
+  const meta = await getLocationMeta().catch(() => new Map());
+  const fieldFor = (zoneId: number): FieldEntry[] => {
+    const all = rows.filter(r => r.zone_id === zoneId).sort((a, b) => a.position - b.position).map(r => ({
+      position: r.position, guild_id: r.external_guild_id, name: r.guild_name, tag: r.guild_tag,
+      experience: Number(r.experience), kills: Number(r.kills), ours: trackedIds.includes(r.external_guild_id),
+    }));
+    const top = all.slice(0, 5);
+    for (const e of all) if (e.ours && !top.some(t => t.guild_id === e.guild_id)) top.push(e);
+    return top;
+  };
+
+  const guilds = trackedGuilds.map(tg => {
+    const gid = tg.external_id;
     const mine = rows.filter(r => r.external_guild_id === gid);
     const rank = ranked.indexOf(gid);
     const t = totals.get(gid);
     return {
       guild_id: gid,
-      guild_name: mine[0]?.guild_name ?? `Guild ${gid}`,
+      guild_name: mine[0]?.guild_name ?? tg.name,
       guild_tag: mine[0]?.guild_tag ?? null,
+      note: mine.length ? null : (() => {
+        const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const alt = rows.find(r => norm(r.guild_name) === norm(tg.name) && r.external_guild_id !== gid);
+        return alt
+          ? `Standings list "${alt.guild_name}" under id ${alt.external_guild_id}, but assault_configs has ${gid}. Fix assault_configs.external_guild_id.`
+          : `No conquest activity recorded for this guild in season ${season}.`;
+      })(),
       overall_rank: rank >= 0 ? rank + 1 : null,
       of: ranked.length,
       experience: t?.xp ?? 0,
@@ -202,15 +245,17 @@ export async function getSeasonOverview(season: number, trackedIds: number[]): P
         .map(m => {
           const leader = rows.filter(r => r.zone_id === m.zone_id).sort((a, b) => a.position - b.position)[0];
           return {
-            zone_id: m.zone_id, zone_name: m.zone_name, position: m.position, of: m.zone_guild_count,
+            zone_id: m.zone_id, zone_name: m.zone_name, image_url: meta.get(m.zone_id)?.image_url ?? null, position: m.position, of: m.zone_guild_count,
             kills: Number(m.kills), experience: Number(m.experience),
             leader: leader && leader.external_guild_id !== gid ? { name: leader.guild_name, experience: Number(leader.experience) } : null,
+            field: fieldFor(m.zone_id),
           };
         })
         .sort((a, b) => a.position - b.position || b.experience - a.experience),
     };
   });
 
+  guilds.sort((a, b) => (a.overall_rank ?? 1e9) - (b.overall_rank ?? 1e9));
   const latest = rows.map(r => r.snapshot_at).sort().pop() ?? null;
   return { season, seasons: await listStandingSeasons(), guilds, snapshot_at: latest };
 }
@@ -266,4 +311,142 @@ export async function getTopAssaulters(trackedIds: number[], opts: { season?: nu
     }
   }
   return Array.from(byChar.values()).sort((a, b) => b.experience - a.experience).slice(0, opts.limit ?? 25);
+}
+
+
+// ---------------------------------------------------------------------------
+// Member leaderboard (season or all-time), optionally merged by account (main + alts)
+// ---------------------------------------------------------------------------
+
+export interface LeaderboardRow {
+  key: string;
+  name: string;
+  total_level: number | null;
+  guild_id: number;
+  guild_name: string;
+  kills: number;
+  experience: number;
+  zones: number;
+  seasons: number;
+  alt_count: number;
+  alt_names: string[];
+}
+
+export async function getAssaultLeaderboard(opts: {
+  season?: number;
+  guildId?: number;
+  merged?: boolean;
+  limit?: number;
+}): Promise<{ rows: LeaderboardRow[]; guilds: Array<{ id: number; name: string }> }> {
+  const supabase = createAdminClient();
+  const tracked = await getTrackedExternalIds();
+  if (tracked.length === 0) return { rows: [], guilds: [] };
+
+  // guild names from standings (latest row per guild)
+  const { data: nameRows } = await supabase
+    .from('assault_zone_standings')
+    .select('external_guild_id, guild_name')
+    .in('external_guild_id', tracked)
+    .limit(500);
+  const names = new Map<number, string>();
+  for (const r of (nameRows ?? []) as { external_guild_id: number; guild_name: string }[]) names.set(r.external_guild_id, r.guild_name);
+  const guilds = tracked.map(id => ({ id, name: names.get(id) ?? `Guild ${id}` }));
+
+  type C = { season_number: number; zone_id: number; external_guild_id: number; character_id: number; character_name: string; total_level: number | null; kills: number; experience: number };
+  const ids = opts.guildId ? tracked.filter(t => t === opts.guildId) : tracked;
+  const rows = await fetchAll<C>((f, t) => {
+    let q = supabase.from('assault_season_contributions').select('*').in('external_guild_id', ids);
+    if (opts.season) q = q.eq('season_number', opts.season);
+    return q.range(f, t);
+  });
+
+  interface Agg { character_id: number; name: string; level: number | null; kills: number; xp: number; zones: number; seasons: Set<number>; byGuild: Map<number, number> }
+  const byChar = new Map<number, Agg>();
+  for (const r of rows) {
+    const a = byChar.get(r.character_id) ?? { character_id: r.character_id, name: r.character_name, level: r.total_level, kills: 0, xp: 0, zones: 0, seasons: new Set<number>(), byGuild: new Map<number, number>() };
+    a.kills += Number(r.kills); a.xp += Number(r.experience); a.zones += 1; a.seasons.add(r.season_number);
+    if ((r.total_level ?? 0) > (a.level ?? 0)) { a.level = r.total_level; a.name = r.character_name; }
+    a.byGuild.set(r.external_guild_id, (a.byGuild.get(r.external_guild_id) ?? 0) + Number(r.experience));
+    byChar.set(r.character_id, a);
+  }
+  const topGuild = (a: Agg) => Array.from(a.byGuild.entries()).sort((x, y) => y[1] - x[1])[0]?.[0] ?? 0;
+
+  let out: LeaderboardRow[];
+  if (!opts.merged) {
+    out = Array.from(byChar.values()).map(a => ({
+      key: String(a.character_id), name: a.name, total_level: a.level, guild_id: topGuild(a), guild_name: names.get(topGuild(a)) ?? '',
+      kills: a.kills, experience: a.xp, zones: a.zones, seasons: a.seasons.size, alt_count: 0, alt_names: [],
+    }));
+  } else {
+    // character_id -> members.id -> main (via member_alts)
+    const charIds = Array.from(byChar.keys());
+    const memberByChar = new Map<number, { id: string; ign: string }>();
+    for (let i = 0; i < charIds.length; i += 200) {
+      const { data } = await supabase.from('members').select('id, ign, character_id').in('character_id', charIds.slice(i, i + 200));
+      for (const m of (data ?? []) as { id: string; ign: string; character_id: number }[]) memberByChar.set(m.character_id, { id: m.id, ign: m.ign });
+    }
+    const memberIds = Array.from(memberByChar.values()).map(m => m.id);
+    const mainOf = new Map<string, string>(); // alt member id -> main member id
+    for (let i = 0; i < memberIds.length; i += 200) {
+      const { data } = await supabase.from('member_alts').select('member_id, alt_member_id').in('alt_member_id', memberIds.slice(i, i + 200));
+      for (const r of (data ?? []) as { member_id: string; alt_member_id: string | null }[]) if (r.alt_member_id) mainOf.set(r.alt_member_id, r.member_id);
+    }
+    const mainIds = Array.from(new Set(mainOf.values()));
+    const mainIgn = new Map<string, string>();
+    for (let i = 0; i < mainIds.length; i += 200) {
+      const { data } = await supabase.from('members').select('id, ign').in('id', mainIds.slice(i, i + 200));
+      for (const m of (data ?? []) as { id: string; ign: string }[]) mainIgn.set(m.id, m.ign);
+    }
+    const groups = new Map<string, { name: string; level: number | null; kills: number; xp: number; zones: number; seasons: Set<number>; byGuild: Map<number, number>; alts: string[] }>();
+    for (const a of Array.from(byChar.values())) {
+      const mem = memberByChar.get(a.character_id);
+      const groupKey = mem ? (mainOf.get(mem.id) ?? mem.id) : `c${a.character_id}`;
+      const groupName = mem ? (mainIgn.get(mainOf.get(mem.id) ?? '') ?? mem.ign) : a.name;
+      const g = groups.get(groupKey) ?? { name: groupName, level: a.level, kills: 0, xp: 0, zones: 0, seasons: new Set<number>(), byGuild: new Map<number, number>(), alts: [] };
+      g.kills += a.kills; g.xp += a.xp; g.zones += a.zones;
+      a.seasons.forEach(s => g.seasons.add(s));
+      a.byGuild.forEach((v, k) => g.byGuild.set(k, (g.byGuild.get(k) ?? 0) + v));
+      if ((a.level ?? 0) > (g.level ?? 0)) g.level = a.level;
+      if (a.name !== groupName) g.alts.push(a.name);
+      groups.set(groupKey, g);
+    }
+    out = Array.from(groups.entries()).map(([key, g]) => {
+      const tg = Array.from(g.byGuild.entries()).sort((x, y) => y[1] - x[1])[0]?.[0] ?? 0;
+      return { key, name: g.name, total_level: g.level, guild_id: tg, guild_name: names.get(tg) ?? '', kills: g.kills, experience: g.xp, zones: g.zones, seasons: g.seasons.size, alt_count: g.alts.length, alt_names: g.alts };
+    });
+  }
+
+  out.sort((a, b) => b.experience - a.experience);
+  return { rows: out.slice(0, opts.limit ?? 200), guilds };
+}
+
+
+// ---------------------------------------------------------------------------
+// All zones: full guild ranking per location for a season
+// ---------------------------------------------------------------------------
+
+export interface ZoneRanking {
+  zone_id: number; zone_name: string; image_url: string | null; guild_count: number;
+  guilds: FieldEntry[];
+}
+
+export async function getSeasonZones(season: number, trackedIds: number[]): Promise<ZoneRanking[]> {
+  const supabase = createAdminClient();
+  const rows = await fetchAll<StandingRow>((f, t) =>
+    supabase.from('assault_zone_standings').select('*').eq('season_number', season).range(f, t));
+  const meta = await getLocationMeta().catch(() => new Map());
+  const byZone = new Map<number, StandingRow[]>();
+  for (const r of rows) byZone.set(r.zone_id, [...(byZone.get(r.zone_id) ?? []), r]);
+  return Array.from(byZone.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([zone_id, zr]) => ({
+      zone_id,
+      zone_name: zr[0].zone_name,
+      image_url: meta.get(zone_id)?.image_url ?? null,
+      guild_count: zr.length,
+      guilds: zr.sort((a, b) => a.position - b.position).map(r => ({
+        position: r.position, guild_id: r.external_guild_id, name: r.guild_name, tag: r.guild_tag,
+        experience: Number(r.experience), kills: Number(r.kills), ours: trackedIds.includes(r.external_guild_id),
+      })),
+    }));
 }

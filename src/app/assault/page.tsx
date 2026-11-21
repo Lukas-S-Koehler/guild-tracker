@@ -5,8 +5,9 @@ import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, MapPin, BookOpen, CheckSquare, BarChart3, Settings, Swords, FlaskConical, Trophy, Clock, Landmark } from 'lucide-react';
+import { Loader2, MapPin, BookOpen, CheckSquare, BarChart3, Settings, Swords, FlaskConical, Trophy, Clock, Landmark, Medal, Globe } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { DREAM_BADGE_URL } from '@/lib/dream-badge';
 
 interface GuildSummary {
   guild_id: string;
@@ -28,8 +29,8 @@ interface GuildSummary {
 
 interface Standings {
   guilds: Array<{
-    guild_id: number; overall_rank: number | null; of: number; experience: number;
-    zones: Array<{ zone_id: number; zone_name: string; position: number; of: number }>;
+    guild_id: number; guild_name?: string; overall_rank: number | null; of: number; experience: number;
+    zones: Array<{ zone_id: number; zone_name: string; position: number; of: number; experience: number }>;
   }>;
   members: Array<{ character_id: number; character_name: string; guild_id: number; experience: number }>;
 }
@@ -85,7 +86,8 @@ function GuildHero({ g, standings, nowMs }: { g: GuildSummary; standings: Standi
   const live = g.active_run && new Date(g.active_run.ends_at).getTime() > nowMs ? g.active_run : null;
   const target = live ? Math.floor(new Date(live.ends_at).getTime() / 1000) : g.next_launch_unix;
   const sg = standings?.guilds.find(x => x.guild_id === g.external_guild_id);
-  const zoneRank = sg?.zones.find(z => z.zone_id === g.tracked_zone_id);
+  const zoneRank = sg?.zones.find(z => z.zone_id === g.tracked_zone_id) ?? sg?.zones[0];
+  const otherZones = (sg?.zones.length ?? 0) - (zoneRank ? 1 : 0);
   const top3 = (standings?.members ?? []).filter(m => m.guild_id === g.external_guild_id).slice(0, 3);
   const window = g.season_start && g.season_end ? `${g.season_start} → ${g.season_end}` : g.season_start ? `from ${g.season_start}` : g.season_end ? `until ${g.season_end}` : null;
 
@@ -94,7 +96,11 @@ function GuildHero({ g, standings, nowMs }: { g: GuildSummary; standings: Standi
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-2 flex-wrap">
           <div>
-            <CardTitle className="text-xl">{g.guild_name}</CardTitle>
+            <div className="flex items-center gap-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={DREAM_BADGE_URL} alt="" className="h-8 w-8 object-contain" />
+              <CardTitle className="text-xl">{g.guild_name}</CardTitle>
+            </div>
             <CardDescription className="flex gap-1.5 flex-wrap mt-1.5">
               <Badge variant="outline" className="gap-1"><MapPin className="h-3 w-3" />{g.zone_name}</Badge>
               {g.level_range && <Badge variant="outline">Lv {g.level_range}</Badge>}
@@ -136,11 +142,14 @@ function GuildHero({ g, standings, nowMs }: { g: GuildSummary; standings: Standi
         {/* Standing / last run / top members */}
         <div className="grid gap-3 sm:grid-cols-3 text-sm">
           <div className="rounded-lg border p-3">
-            <div className="text-xs text-muted-foreground mb-0.5">Season standing</div>
-            {sg?.overall_rank ? (
+            <div className="text-xs text-muted-foreground mb-0.5">Location standing</div>
+            {zoneRank ? (
               <>
-                <div className="text-2xl font-bold">{ordinal(sg.overall_rank)}<span className="text-sm font-normal text-muted-foreground"> / {sg.of}</span></div>
-                {zoneRank && <div className="text-xs text-muted-foreground">{ordinal(zoneRank.position)} in {zoneRank.zone_name}</div>}
+                <div className="text-2xl font-bold">{ordinal(zoneRank.position)}<span className="text-sm font-normal text-muted-foreground"> / {zoneRank.of}</span></div>
+                <div className="text-xs text-muted-foreground truncate">
+                  {zoneRank.zone_name}{otherZones > 0 ? ` · +${otherZones} more` : ''}
+                </div>
+                {sg?.overall_rank && <div className="text-[11px] text-muted-foreground/70 mt-0.5">Overall {ordinal(sg.overall_rank)} of {sg.of}</div>}
               </>
             ) : <div className="text-muted-foreground">—</div>}
           </div>
@@ -169,7 +178,8 @@ function GuildHero({ g, standings, nowMs }: { g: GuildSummary; standings: Standi
         </div>
 
         <div className="flex gap-2 flex-wrap">
-          <Link href="/assault/stats"><Button size="sm"><BarChart3 className="h-4 w-4 mr-1" />Dream member stats</Button></Link>
+          <Link href="/assault/leaderboard"><Button size="sm"><Medal className="h-4 w-4 mr-1" />Member leaderboard</Button></Link>
+          <Link href="/assault/stats"><Button size="sm" variant="outline"><BarChart3 className="h-4 w-4 mr-1" />Season stats</Button></Link>
           <Link href="/assault/checklist"><Button size="sm" variant="outline"><CheckSquare className="h-4 w-4 mr-1" />Checklist</Button></Link>
           <Link href="/assault/locations"><Button size="sm" variant="outline"><MapPin className="h-4 w-4 mr-1" />Locations</Button></Link>
         </div>
@@ -202,6 +212,8 @@ export default function AssaultLandingPage() {
 
   const tools = [
     { href: '/assault/stats', icon: BarChart3, title: 'Stats', desc: 'Season standing, member leaderboards.' },
+    { href: '/assault/leaderboard', icon: Medal, title: 'Leaderboard', desc: 'Member assault rankings.' },
+    { href: '/assault/conquest', icon: Globe, title: 'Conquest', desc: 'Every location, every guild.' },
     { href: '/assault/locations', icon: MapPin, title: 'Locations', desc: 'Enemies, drops, gold per hour.' },
     { href: '/assault/guide', icon: BookOpen, title: 'Guide', desc: 'Zone info, 5Ps, hits-to-kill, gear.' },
     { href: '/assault/checklist', icon: CheckSquare, title: 'Checklist', desc: 'Track your prep each launch.' },
@@ -232,7 +244,7 @@ export default function AssaultLandingPage() {
         </p>
       )}
 
-      <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+      <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
         {tools.map(t => (
           <Link key={t.href} href={t.href}>
             <Card className="h-full hover:border-orange-500/60 transition">

@@ -28,7 +28,7 @@ import { getSlotState, loadoutCost, type CombatPotion, type XpPotion } from '@/l
 import { buildTemplateVars, renderTemplate, todayLaunchUnix, utcDateString } from '@/lib/assault-template';
 import { postToChannelReturnId, editOriginalInteractionResponse } from '@/lib/discord-api';
 import { createAdminClient } from '@/lib/supabase-server';
-import { getZonePlan, listZones, shrineInfoFor, applyZoneSelection } from '@/lib/assault-plan';
+import { getZonePlan, getZonePlanById, listZones, shrineInfoFor, applyZoneSelection } from '@/lib/assault-plan';
 import { FIVE_PS, HITS_TO_KILL, GEAR_LINK, POTION_SLOTS, TERRITORY_BOOSTS, EXP_REWARDS, KILL_REWARDS, EXP_SPLIT } from '@/lib/assault-plan-static';
 import { computeLaunchDate, getChecklistTemplate, buildTimedChecklist, type ChecklistItem } from '@/lib/assault-checklist-service';
 import { getDiscordChecked, toggleDiscordItem, resetDiscord } from '@/lib/assault-checklist-discord';
@@ -167,6 +167,7 @@ export async function handleAssaultCommand(interaction: Interaction) {
       return handleChecklist(interaction, sub);
     case 'plan':
       return handlePlan(interaction, sub);
+    case 'conquest-info':
     case 'conquest':
       return handleConquest();
     case 'potions':
@@ -545,12 +546,11 @@ async function handlePlan(interaction: Interaction, sub: Option) {
   const denied = await gateStaffRole(interaction, guildId);
   if (denied) return denied;
 
-  const zoneOverride = findOption(sub.options, 'zone')?.value as string | undefined;
   const config = await getAssaultConfig(guildId);
-  const zone = zoneOverride || config?.zone_name;
-  if (!zone) return ephemeral('No zone configured for this guild and no override provided.');
+  const zone = config?.zone_name;
+  if (!zone) return ephemeral('No zone configured for this guild. Use `/assault set-zone`.');
 
-  const plan = await getZonePlan(zone);
+  const plan = config?.tracked_zone_id ? await getZonePlanById(config.tracked_zone_id) : await getZonePlan(zone);
   if (plan.enemies.length === 0) {
     return ephemeral(`No enemies cached for zone **${zone}**. Run combat-enemies-sync first.`);
   }

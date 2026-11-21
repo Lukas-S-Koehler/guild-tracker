@@ -13,6 +13,8 @@ interface Enemy {
   image_url?: string | null; ev_per_kill: number; gph: number; loot: Loot[];
 }
 interface Location {
+  image_url?: string | null; description?: string | null;
+  weather?: { name: string; buffs: string[]; ends_at: string } | null;
   zone_id: number | null; zone: string; shrine?: boolean; enemies: Enemy[]; total_gph: number;
   level_min: number | null; level_max: number | null; priced_items?: number; total_items?: number; prices_updated_at?: string | null;
 }
@@ -53,11 +55,21 @@ export default function LocationsPage() {
         {locations?.map(loc => (
           <Card key={loc.zone_id ?? loc.zone}>
             <CardHeader className="pb-2">
-              <div className="flex items-start justify-between gap-2 flex-wrap">
-                <div>
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                {loc.image_url && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={loc.image_url} alt={loc.zone} className="h-16 w-16 rounded-lg object-cover border shrink-0" loading="lazy" />
+                )}
+                <div className="flex-1 min-w-[10rem]">
                   <CardTitle className="text-lg">{loc.zone}</CardTitle>
+                  {loc.description && <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{loc.description}</p>}
                   <CardDescription className="flex gap-1.5 flex-wrap mt-1">
                     <Badge variant="outline">Lv {loc.level_min}{loc.level_max !== loc.level_min ? `–${loc.level_max}` : ''}</Badge>
+                    {loc.weather && (
+                      <Badge variant="outline" className="font-normal" title={loc.weather.buffs.join(' · ')}>
+                        ☁ {loc.weather.name}{loc.weather.buffs[0] ? ` · ${loc.weather.buffs[0]}` : ''}
+                      </Badge>
+                    )}
                     {loc.shrine && <Badge variant="secondary" className="gap-1"><Landmark className="h-3 w-3" />Shrine</Badge>}
                     {loc.total_items != null && loc.total_items > 0 && loc.priced_items! < loc.total_items && (
                       <Badge variant="outline" className="text-amber-500">{loc.total_items - loc.priced_items!} unpriced drops</Badge>

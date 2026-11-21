@@ -356,6 +356,10 @@ export class IdleMMOApi {
     );
   }
 
+  async getWorldLocations(): Promise<WorldLocationsResponse> {
+    return this.fetch<WorldLocationsResponse>(`${IDLEMMO_BASE_URL}/v1/world/locations/list`);
+  }
+
   async getEnemiesList(): Promise<EnemiesListResponse> {
     return this.fetch<EnemiesListResponse>(`${IDLEMMO_BASE_URL}/v1/combat/enemies/list`);
   }
@@ -380,6 +384,33 @@ export interface CombatEnemyEntry {
   chance_of_loot: number;
   location: { id: number; name: string };
   loot: EnemyLootDrop[];
+}
+
+export interface WorldWeather {
+  key: string;
+  icon: string;
+  name: string;
+  window: string;
+  starts_at: string;
+  starts_at_time: string;
+  ends_at: string;
+  buffs: string[];
+}
+
+export interface WorldLocation {
+  id: number;
+  name: string;
+  key: string;
+  description: string | null;
+  image_url: string | null;
+  x: number;
+  y: number;
+  forecast: Array<{ day_name: string; date: string; weathers: WorldWeather[] }>;
+}
+
+export interface WorldLocationsResponse {
+  locations: WorldLocation[];
+  endpoint_updates_at: string;
 }
 
 export interface EnemiesListResponse {

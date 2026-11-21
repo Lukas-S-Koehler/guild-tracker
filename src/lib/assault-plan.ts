@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase-server';
+import { getLocationMeta, type LocationMeta } from '@/lib/world-locations';
 import { upsertAssaultConfig, listAssaultConfigs } from '@/lib/assault-service';
 
 export const KILLS_PER_HOUR = 1200; // 3s per kill
@@ -32,6 +33,9 @@ export interface PlannedEnemy {
 }
 
 export interface ZonePlan {
+  image_url?: string | null;
+  description?: string | null;
+  weather?: LocationMeta['weather'];
   zone_id?: number | null;
   shrine?: boolean;
   priced_items?: number;
@@ -175,9 +179,14 @@ export async function listLocationPlans(): Promise<ZonePlan[]> {
   const { prices, updatedAt } = await loadPrices(rows.flatMap((r) => (r.loot ?? []).map((l) => l.name)));
   const byZone = new Map<number, EnemyRow[]>();
   for (const r of rows) byZone.set(r.zone_id, [...(byZone.get(r.zone_id) ?? []), r]);
+  const meta = await getLocationMeta().catch(() => new Map<number, LocationMeta>());
   return Array.from(byZone.entries())
     .sort((a, b) => a[0] - b[0])
-    .map(([, zr]) => buildPlan('', zr, prices, updatedAt));
+    .map(([id, zr]) => {
+      const plan = buildPlan('', zr, prices, updatedAt);
+      const m = meta.get(id);
+      return { ...plan, image_url: m?.image_url ?? null, description: m?.description ?? null, weather: m?.weather ?? null };
+    });
 }
 
 const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');

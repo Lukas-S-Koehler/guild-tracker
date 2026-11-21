@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { refreshAllZoneSnapshots } from '@/lib/assault-plan';
 import { createAdminClient } from '@/lib/supabase-server';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
+import { syncWorldLocations } from '@/lib/world-locations';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,6 +77,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  try { await syncWorldLocations(api); } catch { /* non-fatal */ }
   let zonesRefreshed = 0;
   try { zonesRefreshed = await refreshAllZoneSnapshots(); } catch { /* non-fatal */ }
 

@@ -8,6 +8,7 @@ import {
   getSeasonOverview,
   getTopAssaulters,
   getTrackedExternalIds,
+  getTrackedGuilds,
 } from '@/lib/assault-standings-service';
 
 interface Option { name: string; type?: number; value?: string | number; options?: Option[] }
@@ -48,7 +49,7 @@ async function buildEmbed(sub: Option): Promise<unknown> {
 
   // season
   const season = seasonArg ? Number(seasonArg) : await getCurrentSeason();
-  const ov = await getSeasonOverview(season, ids);
+  const ov = await getSeasonOverview(season, await getTrackedGuilds());
   const fields = ov.guilds.map(g => ({
     name: `${g.guild_name}${g.guild_tag ? ` [${g.guild_tag}]` : ''} — ${g.overall_rank ? `${ordinal(g.overall_rank)} of ${g.of}` : 'unranked'}`,
     value: g.zones.length === 0

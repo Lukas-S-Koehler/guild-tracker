@@ -636,7 +636,7 @@ export async function registerAssaultCommand(): Promise<{ ok: boolean; error?: s
         description: 'Quickly update zone / shrine / kill order',
         options: [
           guildOpt,
-          { name: 'zone', type: 3, description: 'Zone name', required: false },
+          { name: 'zone', type: 3, description: 'Location (fills level range, shrine, mob order)', required: false, autocomplete: true },
           { name: 'shrine', type: 3, description: 'Shrine info / location', required: false },
           { name: 'mob_order', type: 3, description: 'Kill order string (overrides enemy_priority formatting)', required: false },
         ],
@@ -676,20 +676,11 @@ export async function registerAssaultCommand(): Promise<{ ok: boolean; error?: s
       {
         name: 'plan',
         type: 1,
-        description: 'Show kill priority + gold/hr for a zone',
-        options: [
-          guildOpt,
-          {
-            name: 'zone',
-            type: 3,
-            description: 'Override zone (autocomplete). Defaults to guild config.',
-            required: false,
-            autocomplete: true,
-          },
-        ],
+        description: "Show kill priority + gold/hr for the guild's selected zone",
+        options: [guildOpt],
       },
       {
-        name: 'conquest',
+        name: 'conquest-info',
         type: 1,
         description: 'Show conquest mechanics: EXP split, waves, territory boosts, shard rewards',
       },

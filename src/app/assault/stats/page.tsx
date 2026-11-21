@@ -5,11 +5,16 @@ import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, Loader2, Trophy, Crown } from 'lucide-react';
+import { ArrowLeft, Loader2, Trophy, Crown, Globe } from 'lucide-react';
+import { DREAM_BADGE_URL } from '@/lib/dream-badge';
 
-interface ZoneStanding { zone_id: number; zone_name: string; position: number; of: number; kills: number; experience: number; leader: { name: string; experience: number } | null }
+interface FieldEntry { position: number; guild_id: number; name: string; tag: string | null; experience: number; kills: number; ours: boolean }
+interface ZoneStanding {
+  zone_id: number; zone_name: string; image_url: string | null; position: number; of: number;
+  kills: number; experience: number; field: FieldEntry[];
+}
 interface GuildStanding {
-  guild_id: number; guild_name: string; guild_tag: string | null;
+  guild_id: number; guild_name: string; guild_tag: string | null; note: string | null;
   overall_rank: number | null; of: number; experience: number; kills: number; zones: ZoneStanding[];
 }
 interface Finish { zone_id: number; zone_name: string; season_number: number; guild_name: string; position: number; of: number; experience: number }
@@ -18,7 +23,6 @@ interface Standings {
   current_season: number; season: number; seasons: number[]; snapshot_at: string | null;
   guilds: GuildStanding[]; best_finishes: Finish[]; members: Member[]; error?: string;
 }
-interface RunRow { id: string; guild_id: string; season_number: number | null; total_kills: number; total_experience: number; starts_at: string; zone_name: string; status: string }
 
 const ordinal = (n: number) => {
   const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
@@ -26,10 +30,45 @@ const ordinal = (n: number) => {
 };
 const compact = (n: number) => Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
 
+function LocationCard({ z }: { z: ZoneStanding }) {
+  const top = z.position === 1;
+  return (
+    <div className={`rounded-xl border overflow-hidden bg-card ${top ? 'border-amber-500/60' : ''}`}>
+      <div className="relative h-20 bg-muted">
+        {z.image_url && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={z.image_url} alt="" className="absolute inset-0 h-full w-full object-cover opacity-60" loading="lazy" />
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-card via-card/40 to-transparent" />
+        <div className="absolute bottom-2 left-3 right-3 flex items-end justify-between">
+          <div className="font-semibold leading-tight">{z.zone_name}</div>
+          <div className={`text-3xl font-bold leading-none ${top ? 'text-amber-500' : ''}`}>
+            {ordinal(z.position)}<span className="text-xs font-normal text-muted-foreground"> /{z.of}</span>
+          </div>
+        </div>
+      </div>
+      <div className="p-3 space-y-2">
+        <div className="flex gap-3 text-xs text-muted-foreground">
+          <span><strong className="text-foreground">{compact(z.experience)}</strong> XP</span>
+          <span><strong className="text-foreground">{compact(z.kills)}</strong> kills</span>
+        </div>
+        <ol className="text-xs space-y-0.5">
+          {z.field.map(f => (
+            <li key={f.guild_id} className={`flex items-center gap-1.5 ${f.ours ? 'font-semibold text-orange-400' : 'text-muted-foreground'}`}>
+              <span className="w-6 tabular-nums">{ordinal(f.position)}</span>
+              <span className="truncate flex-1">{f.name}</span>
+              <span className="tabular-nums">{compact(f.experience)}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  );
+}
+
 export default function AssaultStatsPage() {
   const [season, setSeason] = useState<number | null>(null);
   const [data, setData] = useState<Standings | null>(null);
-  const [runs, setRuns] = useState<RunRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -38,29 +77,26 @@ export default function AssaultStatsPage() {
     fetch(`/api/assault/standings${qs}`).then(r => r.json()).then((d: Standings) => { setData(d); setLoading(false); });
   }, [season]);
 
-  useEffect(() => {
-    if (!data) return;
-    fetch(`/api/assault/stats?season=${data.season}`).then(r => r.json()).then(d => setRuns(d.runs ?? []));
-  }, [data?.season]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const seasons = data ? Array.from(new Set([data.current_season, ...data.seasons])).sort((a, b) => b - a) : [];
 
   return (
-    <div className="container mx-auto p-4 max-w-5xl space-y-5">
+    <div className="container mx-auto p-4 max-w-5xl space-y-6">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
           <Link href="/assault"><Button variant="ghost" size="sm"><ArrowLeft className="h-4 w-4 mr-1" />Assault</Button></Link>
           <h1 className="text-2xl font-bold">Conquest Standing</h1>
         </div>
-        <select
-          className="border rounded px-2 py-1 text-sm bg-background"
-          value={data?.season ?? ''}
-          onChange={e => setSeason(parseInt(e.target.value, 10))}
-        >
-          {seasons.map(s => (
-            <option key={s} value={s}>Season {s}{s === data?.current_season ? ' (current)' : ''}</option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2">
+          <Link href="/assault/conquest"><Button variant="outline" size="sm"><Globe className="h-4 w-4 mr-1" />All locations</Button></Link>
+          <Link href="/assault/leaderboard"><Button variant="outline" size="sm"><Trophy className="h-4 w-4 mr-1" />Leaderboard</Button></Link>
+          <select
+            className="border rounded px-2 py-1 text-sm bg-background"
+            value={data?.season ?? ''}
+            onChange={e => setSeason(parseInt(e.target.value, 10))}
+          >
+            {seasons.map(s => <option key={s} value={s}>Season {s}{s === data?.current_season ? ' (current)' : ''}</option>)}
+          </select>
+        </div>
       </div>
 
       {loading && <Loader2 className="h-5 w-5 animate-spin" />}
@@ -68,49 +104,36 @@ export default function AssaultStatsPage() {
 
       {data && !data.error && (
         <>
-          {/* Hero: standing per guild */}
-          <div className="grid gap-4 md:grid-cols-2">
-            {data.guilds.map(g => (
-              <Card key={g.guild_id} className="overflow-hidden">
-                <CardHeader className="pb-2">
-                  <CardDescription className="flex items-center gap-1">
-                    {g.guild_name}{g.guild_tag && <span className="opacity-60">[{g.guild_tag}]</span>}
-                  </CardDescription>
-                  <div className="flex items-baseline gap-2">
-                    <CardTitle className="text-5xl font-bold tracking-tight">
-                      {g.overall_rank ? ordinal(g.overall_rank) : '—'}
-                    </CardTitle>
-                    <span className="text-muted-foreground text-sm">of {g.of} guilds · {compact(g.experience)} XP</span>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-1.5 pt-2">
-                  {g.zones.length === 0 && <p className="text-sm text-muted-foreground">No zone data yet.</p>}
-                  {g.zones.map(z => (
-                    <div key={z.zone_id} className="flex items-center gap-2 text-sm">
-                      <span className={`w-9 text-right font-semibold tabular-nums ${z.position === 1 ? 'text-amber-500' : ''}`}>
-                        {ordinal(z.position)}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <div className="truncate">{z.zone_name}</div>
-                        <div className="h-1 rounded bg-muted mt-0.5">
-                          <div
-                            className="h-1 rounded bg-primary/70"
-                            style={{ width: `${Math.max(4, 100 - ((z.position - 1) / Math.max(1, z.of - 1)) * 100)}%` }}
-                          />
-                        </div>
-                      </div>
-                      <span className="text-muted-foreground tabular-nums text-xs w-20 text-right">{compact(z.experience)} XP</span>
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          {data.guilds.map(g => (
+            <section key={g.guild_id} className="space-y-3">
+              <div className="flex items-center gap-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={DREAM_BADGE_URL} alt="" className="h-10 w-10 object-contain" />
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-lg font-semibold leading-tight truncate">{g.guild_name}</h2>
+                  <p className="text-xs text-muted-foreground">
+                    {g.zones.length} location{g.zones.length === 1 ? '' : 's'} this season · {compact(g.experience)} XP total
+                  </p>
+                </div>
+                {g.overall_rank && (
+                  <Badge variant="secondary" className="font-normal">
+                    Overall <strong className="ml-1">{ordinal(g.overall_rank)}</strong>/{g.of}
+                  </Badge>
+                )}
+              </div>
+              {g.zones.length === 0 ? (
+                <Card><CardContent className="py-4 text-sm text-muted-foreground">{g.note ?? 'No zone data yet.'}</CardContent></Card>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {g.zones.map(z => <LocationCard key={z.zone_id} z={z} />)}
+                </div>
+              )}
+            </section>
+          ))}
           {data.snapshot_at && (
-            <p className="text-xs text-muted-foreground -mt-2">Updated {new Date(data.snapshot_at).toLocaleString()}</p>
+            <p className="text-xs text-muted-foreground -mt-3">Updated {new Date(data.snapshot_at).toLocaleString()}</p>
           )}
 
-          {/* Best finishes */}
           {data.best_finishes.length > 0 && (
             <Card>
               <CardHeader className="pb-2">
@@ -128,11 +151,10 @@ export default function AssaultStatsPage() {
             </Card>
           )}
 
-          {/* Members */}
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base"><Trophy className="h-4 w-4" />Member standing — Season {data.season}</CardTitle>
-              <CardDescription>Total XP across zones for our assault guilds.</CardDescription>
+              <CardTitle className="flex items-center gap-2 text-base"><Trophy className="h-4 w-4" />Top assaulters — Season {data.season}</CardTitle>
+              <CardDescription>Top 10 by XP. <Link href="/assault/leaderboard" className="underline">Full leaderboard →</Link></CardDescription>
             </CardHeader>
             <CardContent>
               <table className="w-full text-sm">
@@ -146,7 +168,7 @@ export default function AssaultStatsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.members.map((m, i) => (
+                  {data.members.slice(0, 10).map((m, i) => (
                     <tr key={m.character_id} className="border-t">
                       <td className="py-1">{i + 1}</td>
                       <td className="py-1">
@@ -165,33 +187,6 @@ export default function AssaultStatsPage() {
               </table>
             </CardContent>
           </Card>
-
-          {/* Run history, status subtle */}
-          {runs.length > 0 && (
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-base">Assault runs</CardTitle></CardHeader>
-              <CardContent>
-                <table className="w-full text-sm">
-                  <tbody>
-                    {runs.slice(0, 30).map(r => (
-                      <tr key={r.id} className="border-t first:border-0">
-                        <td className="py-1 text-muted-foreground">{new Date(r.starts_at).toLocaleDateString()}</td>
-                        <td className="py-1">{r.zone_name}</td>
-                        <td className="py-1 text-right tabular-nums">{r.total_kills.toLocaleString()} kills</td>
-                        <td className="py-1 text-right tabular-nums">{compact(r.total_experience)} XP</td>
-                        <td className="py-1 text-right">
-                          <span
-                            title={r.status === 'finalized' ? 'Final' : 'In progress / interim'}
-                            className={`inline-block h-2 w-2 rounded-full ${r.status === 'finalized' ? 'bg-emerald-500' : 'bg-amber-400'}`}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </CardContent>
-            </Card>
-          )}
         </>
       )}
     </div>
