@@ -38,14 +38,16 @@ async function writeState(state: GuideState) {
 }
 
 function buildIndex(guildId: string, channelId: string, firstIds: string[]) {
-  const lines = GUIDE_SECTIONS.map((s, i) => `${s.emoji} **[${shortTitle(s)}](${msgLink(guildId, channelId, firstIds[i])})**`);
+  // Bare message links render as clickable jump pills; masked [text](discord link) does not.
+  const lines = GUIDE_SECTIONS.map((s, i) => `${s.emoji} **${shortTitle(s)}** → ${msgLink(guildId, channelId, firstIds[i])}`);
   return [
     '# 📖 IdleMMO Guide',
     '-# Goals, typical paths and tips from the community. Tap a section to jump to it.',
     '',
     ...lines,
     '',
-    `🌐 [Web version](<${GUIDE_SITE_URL}/guide>) · updated <t:${Math.floor(Date.now() / 1000)}:R>`,
+    `🌐 Web version (nicer view): ${GUIDE_SITE_URL}/guide`,
+    `-# Updated <t:${Math.floor(Date.now() / 1000)}:R>`,
   ].join('\n');
 }
 
@@ -68,13 +70,23 @@ export async function publishGuide(guildId: string, channelId: string, fresh: bo
     slots = [];
   }
 
-  const footer = `-# [⬆️ Back to index](${msgLink(guildId, channelId, indexId)})`;
+  const footer = `-# ⬆️ Back to index → ${msgLink(guildId, channelId, indexId)}`;
+  const outro = [
+    '## 🌐 Read it on the web',
+    'The **web version is the nicer view**: proper tables, callouts and a quick-jump menu.',
+    `# ${GUIDE_SITE_URL}/guide`,
+    footer,
+  ].join('\n');
   const firstIds: string[] = [];
   const used: string[] = [];
   let slot = 0;
 
-  for (const section of GUIDE_SECTIONS) {
-    const msgs = sectionToDiscord(section, GUIDE_SITE_URL, footer);
+  const blocks = [
+    ...GUIDE_SECTIONS.map((section) => ({ title: section.title, msgs: sectionToDiscord(section, GUIDE_SITE_URL, footer), indexed: true })),
+    { title: 'Web version', msgs: [outro], indexed: false },
+  ];
+
+  for (const { title, msgs, indexed } of blocks) {
     for (let j = 0; j < msgs.length; j++) {
       let id: string;
       if (slot < slots.length) {
@@ -83,10 +95,10 @@ export async function publishGuide(guildId: string, channelId: string, fresh: bo
         if (!r.ok) return `❌ Couldn't edit an existing guide message (deleted?). Run \`/guide publish fresh:true\`.\n-# ${r.error}`;
       } else {
         const r = await postToChannelRich(channelId, payload(msgs[j]));
-        if (!r.ok || !r.messageId) return `❌ Post failed at **${section.title}**: ${r.error}`;
+        if (!r.ok || !r.messageId) return `❌ Post failed at **${title}**: ${r.error}`;
         id = r.messageId;
       }
-      if (j === 0) firstIds.push(id);
+      if (j === 0 && indexed) firstIds.push(id);
       used.push(id);
       slot++;
     }
@@ -107,7 +119,7 @@ export async function publishGuide(guildId: string, channelId: string, fresh: bo
   await writeState({ guild_id: guildId, channel_id: channelId, message_ids: [indexId, ...used] });
 
   const verb = reuse ? 'Updated' : 'Published';
-  return `✅ ${verb} guide: ${GUIDE_SECTIONS.length} sections, ${used.length} messages. [Index](${msgLink(guildId, channelId, indexId)})${pinNote}`;
+  return `✅ ${verb} guide: ${GUIDE_SECTIONS.length} sections, ${used.length} messages. Index: ${msgLink(guildId, channelId, indexId)}${pinNote}`;
 }
 
 interface GuideInteraction {
@@ -147,7 +159,7 @@ export async function handleGuideCommand(i: GuideInteraction, staffRoleId: strin
 
   // show
   const state = await readState();
-  const lines = [`🌐 [Web guide](<${GUIDE_SITE_URL}/guide>)`];
-  if (state) lines.unshift(`📖 [Guide index](${msgLink(state.guild_id, state.channel_id, state.message_ids[0])})`);
+  const lines = [`🌐 Web guide (nicer view): <${GUIDE_SITE_URL}/guide>`];
+  if (state) lines.unshift(`📖 Guide index: ${msgLink(state.guild_id, state.channel_id, state.message_ids[0])}`);
   return NextResponse.json({ type: 4, data: { content: lines.join('\n'), flags: 64 } });
 }
