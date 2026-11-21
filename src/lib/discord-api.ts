@@ -143,6 +143,40 @@ export async function postToChannelRich(
   }
 }
 
+/** Delete a message from a channel. */
+export async function deleteChannelMessage(
+  channelId: string,
+  messageId: string
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(`${DISCORD_API}/channels/${channelId}/messages/${messageId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bot ${getBotToken()}` },
+    });
+    if (!res.ok && res.status !== 404) return { ok: false, error: `Delete ${res.status}: ${await res.text()}` };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+/** Pin a message in a channel (bot needs Pin Messages / Manage Messages). */
+export async function pinChannelMessage(
+  channelId: string,
+  messageId: string
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(`${DISCORD_API}/channels/${channelId}/pins/${messageId}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bot ${getBotToken()}` },
+    });
+    if (!res.ok) return { ok: false, error: `Pin ${res.status}: ${await res.text()}` };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 /** Verify Discord Interactions request signature (ed25519). */
 export async function verifyDiscordSignature(
   rawBody: string,
@@ -454,6 +488,35 @@ export async function registerRaidCommand(): Promise<{ ok: boolean; error?: stri
     await discordFetch(`/applications/${appId}/commands`, {
       method: 'POST',
       body: JSON.stringify({ name: 'raid', description: 'Show raid times' }),
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+/** Register the /guide slash command. Call once via admin. */
+export async function registerGuideCommand(): Promise<{ ok: boolean; error?: string }> {
+  const appId = process.env.DISCORD_APPLICATION_ID;
+  if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };
+  try {
+    await discordFetch(`/applications/${appId}/commands`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: 'guide',
+        description: 'IdleMMO general guide',
+        options: [
+          { name: 'show', type: 1, description: 'Get links to the guide' },
+          {
+            name: 'publish',
+            type: 1,
+            description: 'Staff: post or update the guide in this channel',
+            options: [
+              { name: 'fresh', type: 5, description: 'Delete the old posts and repost from scratch', required: false },
+            ],
+          },
+        ],
+      }),
     });
     return { ok: true };
   } catch (err) {

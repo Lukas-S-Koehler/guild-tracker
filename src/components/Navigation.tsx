@@ -51,6 +51,7 @@ export default function Navigation() {
     { href: '/overview', label: 'Overview' },
     { href: '/leaderboard', label: 'Leaderboard' },
     { href: '/assault', label: 'Assault' },
+    { href: '/guide', label: 'Guide' },
     { href: '/data-management', label: 'Manage Data', requiresSuperAdmin: true },
     { href: '/admin', label: 'Admin', requiresRole: 'LEADER' },
   ];

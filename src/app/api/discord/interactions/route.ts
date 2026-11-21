@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { waitUntil } from '@vercel/functions';
 import { createAdminClient } from '@/lib/supabase-server';
-import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerAltCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, registerAssaultCommand, registerLookupCommand, registerRaidCommand, sendInteractionFollowup, editOriginalInteractionResponse, editChannelMessageRich, postToChannel, listGlobalCommands, listGuildCommands, deleteGlobalCommand, deleteGuildCommand } from '@/lib/discord-api';
+import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerAltCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, registerAssaultCommand, registerLookupCommand, registerRaidCommand, registerGuideCommand, sendInteractionFollowup, editOriginalInteractionResponse, editChannelMessageRich, postToChannel, listGlobalCommands, listGuildCommands, deleteGlobalCommand, deleteGuildCommand } from '@/lib/discord-api';
 import { handleAssaultCommand, handleAssaultAutocomplete, handleAssaultChecklistComponent, handleAssaultPotionsComponent } from '@/lib/assault-discord';
 import { handleRaidCommand } from '@/lib/raid-discord';
+import { handleGuideCommand } from '@/lib/guide-discord';
 import { getDiscordProfile, formatCharacterLine } from '@/lib/lookup-service';
 import { switchAccountMain } from '@/lib/alt-switch';
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
@@ -120,6 +121,10 @@ export async function GET(req: NextRequest) {
     const result = await registerRaidCommand();
     return NextResponse.json(result);
   }
+  if (searchParams.get('action') === 'register-guide') {
+    const result = await registerGuideCommand();
+    return NextResponse.json(result);
+  }
   if (searchParams.get('action') === 'register-lookup') {
     const result = await registerLookupCommand();
     return NextResponse.json(result);
@@ -193,6 +198,10 @@ export async function POST(req: NextRequest) {
 
   if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'raid') {
     return handleRaidCommand();
+  }
+
+  if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'guide') {
+    return handleGuideCommand(interaction, STAFF_ROLE_ID);
   }
 
   if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'lookup') {
