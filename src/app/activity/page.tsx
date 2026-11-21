@@ -292,7 +292,7 @@ function ActivityPageContent() {
                       <button className="text-muted-foreground">
                         {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       </button>
-                      <div className="flex-1 grid grid-cols-4 gap-4 items-center">
+                      <div className="flex-1 min-w-0 grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4 items-center">
                         <span className="font-medium">{ign}</span>
                         <span className="text-center text-sm text-muted-foreground">
                           {log.raids} {log.raids === 1 ? 'raid' : 'raids'}
@@ -315,7 +315,7 @@ function ActivityPageContent() {
 
                     {isExpanded && (
                       <div className="px-4 pb-4 bg-muted/30 space-y-3">
-                        <div className="grid grid-cols-3 gap-4 text-sm pt-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm pt-3">
                           <div>
                             <span className="text-muted-foreground">Challenge Donations:</span>
                             <span className="ml-2 font-medium">{formatGold(log.gold_donated)}</span>

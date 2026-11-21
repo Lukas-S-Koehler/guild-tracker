@@ -387,7 +387,7 @@ function MembersPageContent() {
                             ) : (
                               <div>
                                 <h4 className="text-sm font-semibold mb-3">Last 7 Days Activity</h4>
-                                <div className="grid grid-cols-7 gap-2">
+                                <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
                                   {memberActivity[member.id].map((day) => (
                                     <div
                                       key={day.date}

@@ -334,6 +334,7 @@ function DataManagementContent() {
                           <div className="mb-3 p-2 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded text-xs text-blue-700 dark:text-blue-300">
                             <strong>Editing Note:</strong> When editing gold values, requirement status is recalculated based only on gold threshold.
                           </div>
+                          <div className="overflow-x-auto">
                           <table className="w-full text-sm">
                             <thead>
                               <tr className="text-left border-b">
@@ -403,6 +404,7 @@ function DataManagementContent() {
                               ))}
                             </tbody>
                           </table>
+                          </div>
                         </div>
                       )}
                     </div>

@@ -213,6 +213,7 @@ export default function AssaultStatsPage() {
               <CardDescription>Top 10 by XP. <Link href="/assault/leaderboard" className="underline">Full leaderboard →</Link></CardDescription>
             </CardHeader>
             <CardContent>
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-muted-foreground">
                   <tr>
@@ -241,6 +242,7 @@ export default function AssaultStatsPage() {
                   )}
                 </tbody>
               </table>
+              </div>
             </CardContent>
           </Card>
         </>

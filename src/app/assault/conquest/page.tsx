@@ -108,18 +108,22 @@ export default function ConquestLocationsPage() {
                 </CardHeader>
               </div>
               <CardContent className="pt-2">
+                <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <tbody>
                     {top.map(f => <Row key={f.guild_id} f={f} />)}
                     {oursInRest.map(f => <Row key={f.guild_id} f={f} />)}
                   </tbody>
                 </table>
+                </div>
                 {rest.length > 0 && (
                   <details className="mt-1">
                     <summary className="text-xs text-muted-foreground cursor-pointer">Show all {z.guild_count}</summary>
+                    <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <tbody>{rest.map(f => <Row key={f.guild_id} f={f} />)}</tbody>
                     </table>
+                    </div>
                   </details>
                 )}
               </CardContent>

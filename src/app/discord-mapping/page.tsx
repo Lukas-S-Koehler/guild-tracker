@@ -449,7 +449,7 @@ function DiscordMappingContent() {
           ) : (
             <>
               {/* Totals row */}
-              <div className="grid grid-cols-4 gap-2 text-center">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
                 {[
                   { label: 'Guilds', value: perGuildStats.length, color: '' },
                   { label: 'Members', value: allStats?.total ?? 0, color: '' },

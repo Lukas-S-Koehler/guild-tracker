@@ -56,17 +56,17 @@ export default function Navigation() {
   ];
 
   return (
-    <header className="border-b sticky top-0 z-50 bg-background/95 backdrop-blur">
-      <div className="container mx-auto px-4">
-        <nav className="flex items-center justify-between h-14">
-          <Link href="/" className="font-bold text-lg">
+    <header className="border-b sticky top-0 z-50 w-full max-w-[100vw] overflow-x-clip bg-background/95 backdrop-blur">
+      <div className="container mx-auto px-4 max-w-full">
+        <nav className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2 lg:min-h-14 lg:flex-nowrap lg:py-0">
+          <Link href="/" className="font-bold text-lg whitespace-nowrap shrink-0">
             ⚔️ Guild Tracker
           </Link>
 
-          <div className="flex items-center gap-4">
+          <div className="contents lg:flex lg:items-center lg:gap-4">
             {/* Navigation Links */}
             {currentGuild && (
-              <div className="flex items-center gap-1 text-sm">
+              <div className="order-last flex w-full min-w-0 max-w-full items-center gap-1 overflow-x-auto whitespace-nowrap text-sm lg:order-none lg:w-auto lg:overflow-visible">
                 {navLinks.map((link) => {
                   if (link.requiresSuperAdmin && !isSuperAdmin) return null;
                   if (!isSuperAdmin && link.requiresRole && !hasRole(link.requiresRole)) return null;
@@ -76,7 +76,7 @@ export default function Navigation() {
                     <Link
                       key={link.href}
                       href={link.href}
-                      className={`px-3 py-2 rounded-md transition-colors ${
+                      className={`shrink-0 px-3 py-2 rounded-md transition-colors ${
                         isActive
                           ? 'bg-muted font-medium'
                           : 'hover:bg-muted'
@@ -91,12 +91,12 @@ export default function Navigation() {
 
             {/* Guild Indicator & User Menu */}
             {currentGuild ? (
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 items-center gap-2">
                 {/* Guild selector */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="gap-2">
-                      <span className="font-medium">{currentGuild.guild_name}</span>
+                    <Button variant="outline" size="sm" className="gap-2 max-w-[11rem] sm:max-w-none">
+                      <span className="font-medium truncate">{currentGuild.guild_name}</span>
                       {!isGuest && (
                         <Badge variant="outline" className={`${getRoleBadgeColor(currentGuild.role)} text-xs`}>
                           {getRoleIcon(currentGuild.role)}

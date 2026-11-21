@@ -284,7 +284,7 @@ export default function AssaultGuidePage() {
           <CardDescription>Target 2–3 hits for max throughput.</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="rounded-lg border overflow-hidden">
+          <div className="rounded-lg border overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/50 text-muted-foreground text-xs">
                 <tr>
@@ -393,7 +393,7 @@ export default function AssaultGuidePage() {
             <p className="text-muted-foreground mb-2">
               Top 10 guilds by zone EXP rule next season. Boost applies to Primary Skill EXP, Dungeon/World Boss/Combat/Hunting/Slayer EXP, and Dungeon/World Boss Magic Find.
             </p>
-            <div className="rounded-lg border overflow-hidden">
+            <div className="rounded-lg border overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50 text-muted-foreground text-xs">
                   <tr>
@@ -430,10 +430,11 @@ export default function AssaultGuidePage() {
               Two leaderboards per zone — EXP contribution & kills. You can place on both. Rewards stack across zones.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="rounded-lg border overflow-hidden">
+              <div className="rounded-lg border overflow-x-auto">
                 <div className="bg-muted/50 px-3 py-2 text-xs font-semibold flex items-center gap-2">
                   <Zap className="h-3.5 w-3.5" /> EXP leaderboard
                 </div>
+                <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <tbody>
                     {EXP_REWARDS.map((r, i) => (
@@ -451,11 +452,13 @@ export default function AssaultGuidePage() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
-              <div className="rounded-lg border overflow-hidden">
+              <div className="rounded-lg border overflow-x-auto">
                 <div className="bg-muted/50 px-3 py-2 text-xs font-semibold flex items-center gap-2">
                   <Target className="h-3.5 w-3.5" /> Kills leaderboard
                 </div>
+                <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <tbody>
                     {KILL_REWARDS.map((r, i) => (
@@ -473,6 +476,7 @@ export default function AssaultGuidePage() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             </div>
           </div>

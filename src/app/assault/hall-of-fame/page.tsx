@@ -168,6 +168,7 @@ export default function HallOfFamePage() {
                   </select>
                 </CardHeader>
                 <CardContent>
+                  <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="text-muted-foreground text-xs">
                       <tr>
@@ -192,6 +193,7 @@ export default function HallOfFamePage() {
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 </CardContent>
               </Card>
             )}
