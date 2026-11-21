@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 // pg_cron fires this every minute. We pick reminders whose time_utc == current UTC HH:MM.
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get('Authorization');
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!process.env.CRON_SECRET || authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

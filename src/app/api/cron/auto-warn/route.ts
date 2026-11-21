@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 // Accepts either CRON_SECRET (all guilds) or officer session (single guild via x-guild-id)
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get('Authorization');
-  const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
+  const isCron = !!process.env.CRON_SECRET && authHeader === `Bearer ${process.env.CRON_SECRET}`;
   const guildIdHeader = req.headers.get('x-guild-id');
 
   if (!isCron) {

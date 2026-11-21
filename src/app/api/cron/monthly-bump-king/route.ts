@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 // Runs on 1st of month. One global bump tracker across the family of guilds.
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get('Authorization');
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!process.env.CRON_SECRET || authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
   }
 
