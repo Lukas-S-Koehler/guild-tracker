@@ -13,9 +13,8 @@ function nextUnix(hourUtc: number): number {
   return Math.floor((t <= now.getTime() ? t + 86_400_000 : t) / 1000);
 }
 
-const hh = (h: number) => `${String(h).padStart(2, '0')}:00`;
 const slot = (h: number, prefix = '') =>
-  `${prefix}**${hh(h)} UTC** · <t:${nextUnix(h)}:t> your time · <t:${nextUnix(h)}:R>`;
+  `${prefix}<t:${nextUnix(h)}:t> · <t:${nextUnix(h)}:R>`;
 
 export function handleRaidCommand() {
   const embed = {
@@ -39,7 +38,6 @@ export function handleRaidCommand() {
         inline: false,
       },
     ],
-    footer: { text: 'Times in UTC (server time EST + 1h earlier in UTC)' },
   };
   return NextResponse.json({ type: 4, data: { embeds: [embed] } });
 }
