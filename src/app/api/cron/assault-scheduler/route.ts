@@ -11,6 +11,7 @@ import {
   nowHHMM,
   isAssaultDay,
 } from '@/lib/assault-service';
+import { listTrackedGuilds, syncRunForLaunch } from '@/lib/assault-conquest-service';
 import { buildTemplateVars, renderTemplate, todayLaunchUnix, utcDateString } from '@/lib/assault-template';
 
 export const dynamic = 'force-dynamic';
@@ -36,6 +37,7 @@ export async function POST(req: NextRequest) {
   const DAY_SPAN = [-1, 0, 1, 2];
 
   const configs = await listAssaultConfigs();
+  const trackedByGuild = new Map((await listTrackedGuilds()).map(t => [t.guild_id, t]));
   for (const config of configs) {
     if (!config.announcement_channel_id) continue;
 
@@ -66,6 +68,21 @@ export async function POST(req: NextRequest) {
         try {
           if (await isAlreadySent(config.guild_id, step.id, launchDate)) {
             results.push({ guild_id: config.guild_id, step_key: step.step_key, launch_date: launchDate, ok: true, skipped: 'already sent' });
+            continue;
+          }
+          // Stat-sync steps: pull conquest data and post stats instead of a template message
+          if (step.step_key === 'sync_13h' || step.step_key === 'sync_25h') {
+            const tracked = trackedByGuild.get(config.guild_id);
+            await markSent(config.guild_id, step.id, launchDate);
+            const r = tracked
+              ? await syncRunForLaunch(tracked, launchUnix, step.step_key === 'sync_25h').catch(e => ({ ok: false, error: String(e) }))
+              : { ok: false, error: 'no conquest config / api key' };
+            if (!r.ok) {
+              await releaseSent(config.guild_id, step.id, launchDate); // retry next tick within grace
+              results.push({ guild_id: config.guild_id, step_key: step.step_key, launch_date: launchDate, ok: false, error: r.error });
+            } else {
+              results.push({ guild_id: config.guild_id, step_key: step.step_key, launch_date: launchDate, ok: true });
+            }
             continue;
           }
           const rolePrefix = step.mention_roles.length

@@ -360,7 +360,7 @@ export async function removeGuildMemberRole(
 export async function editOriginalInteractionResponse(
   applicationId: string,
   interactionToken: string,
-  payload: { content?: string; flags?: number; allowed_mentions?: unknown }
+  payload: { content?: string; flags?: number; allowed_mentions?: unknown; embeds?: unknown[] }
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch(
@@ -440,6 +440,59 @@ export async function registerBumpsCommand(): Promise<{ ok: boolean; error?: str
       method: 'POST',
       body: JSON.stringify(command),
     });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+/** Register the /lookup slash command. Call once via admin. */
+export async function registerLookupCommand(): Promise<{ ok: boolean; error?: string }> {
+  const appId = process.env.DISCORD_APPLICATION_ID;
+  if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };
+
+  const command = {
+    name: 'lookup',
+    description: 'Show linked characters, Dream guild status and stats for a Discord user',
+    options: [
+      {
+        name: 'user',
+        type: 6, // USER
+        description: 'Discord user (defaults to you)',
+        required: false,
+      },
+    ],
+  };
+
+  try {
+    await discordFetch(`/applications/${appId}/commands`, {
+      method: 'POST',
+      body: JSON.stringify(command),
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+/** Register the /assault-stats slash command. Call once via admin. */
+export async function registerAssaultStatsCommand(): Promise<{ ok: boolean; error?: string }> {
+  const appId = process.env.DISCORD_APPLICATION_ID;
+  if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };
+
+  const seasonOpt = (desc: string) => ({ name: 'season', type: 4, description: desc, required: false, min_value: 1 });
+  const command = {
+    name: 'assault-stats',
+    description: 'Conquest / assault statistics for our guilds',
+    options: [
+      { name: 'zones', type: 1, description: 'Best finishes per conquest location' },
+      { name: 'top', type: 1, description: 'Best Dream assaulters by total XP', options: [seasonOpt('Season (omit for all-time)')] },
+      { name: 'season', type: 1, description: 'Overall season position + per-zone standing', options: [seasonOpt('Season (default current)')] },
+    ],
+  };
+
+  try {
+    await discordFetch(`/applications/${appId}/commands`, { method: 'POST', body: JSON.stringify(command) });
     return { ok: true };
   } catch (err) {
     return { ok: false, error: String(err) };

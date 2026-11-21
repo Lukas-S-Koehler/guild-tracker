@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { refreshAllZoneSnapshots } from '@/lib/assault-plan';
 import { createAdminClient } from '@/lib/supabase-server';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 
@@ -109,8 +110,12 @@ export async function POST(req: NextRequest) {
     processed += batch.length;
   }
 
+  let zonesRefreshed = 0;
+  try { zonesRefreshed = await refreshAllZoneSnapshots(); } catch { /* non-fatal */ }
+
   return NextResponse.json({
     success: true,
+    zones_refreshed: zonesRefreshed,
     total: items.length,
     processed,
     partial: processed < items.length,

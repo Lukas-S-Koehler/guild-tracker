@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
   let runsQuery = supabase
     .from('assault_runs')
     .select('*')
-    .eq('status', 'finalized')
+    .in('status', ['finalized', 'collecting'])
     .order('starts_at', { ascending: false });
   if (season) runsQuery = runsQuery.eq('season_number', parseInt(season, 10));
   if (guildId) runsQuery = runsQuery.eq('guild_id', guildId);

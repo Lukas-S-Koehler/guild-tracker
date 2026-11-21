@@ -20,6 +20,8 @@ interface AssaultConfig {
   active: boolean;
   launch_time_utc: string;
   zone_name: string;
+  zone_id?: number;
+  tracked_zone_id?: number | null;
   level_range: string;
   shrine_info: string;
   target_mob_count: string;
@@ -222,6 +224,7 @@ function GuildPanel({ guildId, guildName, onMsg }: {
     paused_until: config.paused_until,
   };
   const zone: ZoneValue = {
+    zone_id: config.tracked_zone_id ?? null,
     zone_name: config.zone_name,
     level_range: config.level_range,
     shrine_info: config.shrine_info,
@@ -284,7 +287,7 @@ function GuildPanel({ guildId, guildName, onMsg }: {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle>Zone & Enemy Loadout</CardTitle></CardHeader>
+        <CardHeader><CardTitle>Location & Enemy Loadout</CardTitle></CardHeader>
         <CardContent><ZoneEditor value={zone} onSave={patchConfig} /></CardContent>
       </Card>
 

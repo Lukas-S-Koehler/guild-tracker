@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase-server';
 import { IdleMMOApi, type ConquestContribution } from '@/lib/idlemmo-api';
 import { postToChannelRich } from '@/lib/discord-api';
+import { getCurrentSeason, storeZoneStandings, storeSeasonContributions } from '@/lib/assault-standings-service';
 
 export interface AssaultConquestConfig {
   guild_id: string;
@@ -83,9 +84,10 @@ export async function upsertRun(row: Omit<AssaultRunRow, 'id' | 'total_kills' | 
     .maybeSingle();
   if (existing) return existing as AssaultRunRow;
 
+  const season = row.season_number ?? (await getCurrentSeason());
   const { data, error } = await supabase
     .from('assault_runs')
-    .insert(row)
+    .insert({ ...row, season_number: season })
     .select('*')
     .single();
   if (error) throw new Error(error.message);
@@ -113,10 +115,26 @@ export async function finalizeRun(
   run: AssaultRunRow,
   config: AssaultConquestConfig,
 ): Promise<{ contributions: number; top: ConquestContribution[] }> {
+  return syncRun(run, config, { final: true });
+}
+
+/** Pull latest contributions into the DB. Only marks the run 'finalized' when opts.final. */
+export async function syncRun(
+  run: AssaultRunRow,
+  config: AssaultConquestConfig,
+  opts: { final: boolean },
+): Promise<{ contributions: number; top: ConquestContribution[] }> {
   if (!config.api_key) throw new Error('missing api_key');
   const api = new IdleMMOApi(config.api_key);
   const inspect = await api.inspectConquestZone(run.zone_id, run.season_number ?? undefined);
   const zone = inspect.zone;
+
+  // Keep season standings + member season totals fresh as a side effect
+  try {
+    const season = run.season_number ?? (await getCurrentSeason());
+    await storeZoneStandings(zone, season);
+    await storeSeasonContributions(zone, season, new Set([run.external_guild_id]));
+  } catch { /* non-fatal */ }
 
   // Find our guild entry inside the zone's guilds list
   const ours = zone.guilds.find(g => g.guild.id === run.external_guild_id);
@@ -160,7 +178,7 @@ export async function finalizeRun(
   await supabase
     .from('assault_runs')
     .update({
-      status: 'finalized',
+      status: opts.final ? 'finalized' : run.status,
       snapshot_taken_at: new Date().toISOString(),
       total_kills: totalKills,
       total_experience: totalXp,
@@ -179,7 +197,9 @@ export async function postFinalizeEmbed(
   run: AssaultRunRow,
   config: AssaultConquestConfig,
   top: ConquestContribution[],
+  opts: { label?: string; final?: boolean } = {},
 ): Promise<string | null> {
+  const final = opts.final ?? true;
   if (!config.announcement_channel_id) return null;
 
   const fields = top.slice(0, 10).map((c, i) => ({
@@ -189,8 +209,8 @@ export async function postFinalizeEmbed(
   }));
 
   const embed = {
-    title: `⚔️ Assault Complete — ${run.zone_name}`,
-    description: `**${config.guild_name ?? run.guild_id}** finished their assault.\n\nTotal: **${run.total_kills.toLocaleString()} kills** · **${run.total_experience.toLocaleString()} XP**`,
+    title: `⚔️ ${opts.label ?? 'Assault Complete'} — ${run.zone_name}`,
+    description: `**${config.guild_name ?? run.guild_id}** ${final ? 'finished their assault' : 'assault progress so far'}.\n\nTotal: **${run.total_kills.toLocaleString()} kills** · **${run.total_experience.toLocaleString()} XP**`,
     color: 0xff6b35,
     fields: fields.length > 0 ? fields : [{ name: 'No contributions recorded', value: '—', inline: false }],
     timestamp: new Date().toISOString(),
@@ -200,9 +220,73 @@ export async function postFinalizeEmbed(
   const res = await postToChannelRich(config.announcement_channel_id, { embeds: [embed] });
   if (!res.ok) return null;
 
-  if (res.messageId) {
+  if (res.messageId && final) {
     const supabase = createAdminClient();
     await supabase.from('assault_runs').update({ discord_message_id: res.messageId }).eq('id', run.id);
   }
   return res.messageId ?? null;
+}
+
+
+/** Find the run for a scheduled launch (±3h of launch), discovering it via the conquest view if needed. */
+export async function findRunForLaunch(
+  config: AssaultConquestConfig,
+  launchUnix: number,
+): Promise<AssaultRunRow | null> {
+  const supabase = createAdminClient();
+  const lo = new Date((launchUnix - 3 * 3600) * 1000).toISOString();
+  const hi = new Date((launchUnix + 3 * 3600) * 1000).toISOString();
+  const query = () => supabase
+    .from('assault_runs')
+    .select('*')
+    .eq('guild_id', config.guild_id)
+    .gte('starts_at', lo)
+    .lte('starts_at', hi)
+    .order('starts_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const { data: existing } = await query();
+  if (existing) return existing as AssaultRunRow;
+
+  // Discover from conquest view (only works while the assault is still listed as active)
+  if (!config.api_key || !config.external_guild_id) return null;
+  const view = await new IdleMMOApi(config.api_key).getConquestView();
+  for (const zone of Object.values(view.zones)) {
+    for (const aa of zone.active_assaults ?? []) {
+      if (aa.guild.id !== config.external_guild_id) continue;
+      if (config.tracked_zone_id && config.tracked_zone_id !== zone.location.id) continue;
+      const t = new Date(aa.starts_at).getTime() / 1000;
+      if (t < launchUnix - 3 * 3600 || t > launchUnix + 3 * 3600) continue;
+      return upsertRun({
+        guild_id: config.guild_id,
+        external_guild_id: aa.guild.id,
+        zone_id: zone.location.id,
+        zone_key: zone.location.key,
+        zone_name: zone.location.name,
+        season_number: null,
+        starts_at: aa.starts_at,
+        ends_at: aa.ends_at,
+      });
+    }
+  }
+  return null;
+}
+
+/** Scheduled stat sync (+13h interim, +25h final). Posts a stats embed to the announcement channel. */
+export async function syncRunForLaunch(
+  config: AssaultConquestConfig,
+  launchUnix: number,
+  final: boolean,
+): Promise<{ ok: boolean; error?: string }> {
+  const run = await findRunForLaunch(config, launchUnix);
+  if (!run) return { ok: false, error: 'no assault run found for launch' };
+  const { top } = await syncRun(run, config, { final });
+  const supabase = createAdminClient();
+  const { data: fresh } = await supabase.from('assault_runs').select('*').eq('id', run.id).single();
+  await postFinalizeEmbed((fresh ?? run) as AssaultRunRow, config, top, {
+    label: final ? 'Assault Final Stats (25h)' : 'Assault Update (13h)',
+    final,
+  });
+  return { ok: true };
 }

@@ -8,6 +8,7 @@ import {
   finalizeRun,
   postFinalizeEmbed,
 } from '@/lib/assault-conquest-service';
+import { getCurrentSeason, standingsStale, syncSeason } from '@/lib/assault-standings-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -74,6 +75,19 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       errors.push(`finalize ${run.id}: ${String(e)}`);
     }
+  }
+
+  // 3. Hourly: refresh current-season standings (all zones) + member totals
+  try {
+    const season = await getCurrentSeason();
+    if (anyKey && (await standingsStale(season, 55 * 60 * 1000))) {
+      const ids = new Set(tracked.map(t => t.external_guild_id).filter((x): x is number => x != null));
+      const r = await syncSeason(new IdleMMOApi(anyKey), season, season, ids);
+      summary.standings = { season, ...r, errors: undefined };
+      errors.push(...r.errors);
+    }
+  } catch (e) {
+    errors.push(`standings: ${String(e)}`);
   }
 
   summary.errors = errors;

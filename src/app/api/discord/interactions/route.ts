@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { waitUntil } from '@vercel/functions';
 import { createAdminClient } from '@/lib/supabase-server';
-import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerAltCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, registerAssaultCommand, sendInteractionFollowup, editOriginalInteractionResponse, editChannelMessageRich, postToChannel, listGlobalCommands, listGuildCommands, deleteGlobalCommand, deleteGuildCommand } from '@/lib/discord-api';
+import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerAltCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, registerAssaultCommand, registerLookupCommand, registerAssaultStatsCommand, sendInteractionFollowup, editOriginalInteractionResponse, editChannelMessageRich, postToChannel, listGlobalCommands, listGuildCommands, deleteGlobalCommand, deleteGuildCommand } from '@/lib/discord-api';
 import { handleAssaultCommand, handleAssaultAutocomplete, handleAssaultChecklistComponent, handleAssaultPotionsComponent } from '@/lib/assault-discord';
+import { handleAssaultStatsCommand } from '@/lib/assault-stats-discord';
+import { getDiscordProfile, formatCharacterLine } from '@/lib/lookup-service';
 import { switchAccountMain } from '@/lib/alt-switch';
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
 import { formatLeaderboard } from '@/lib/utils';
@@ -114,6 +116,14 @@ export async function GET(req: NextRequest) {
     const result = await registerBumpsCommand();
     return NextResponse.json(result);
   }
+  if (searchParams.get('action') === 'register-assault-stats') {
+    const result = await registerAssaultStatsCommand();
+    return NextResponse.json(result);
+  }
+  if (searchParams.get('action') === 'register-lookup') {
+    const result = await registerLookupCommand();
+    return NextResponse.json(result);
+  }
   if (searchParams.get('action') === 'register-assault') {
     const result = await registerAssaultCommand();
     return NextResponse.json(result);
@@ -179,6 +189,14 @@ export async function POST(req: NextRequest) {
 
   if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'whip') {
     return handleWhipCommand(interaction);
+  }
+
+  if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'assault-stats') {
+    return handleAssaultStatsCommand(interaction);
+  }
+
+  if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'lookup') {
+    return handleLookupCommand(interaction);
   }
 
   if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'bumps') {
@@ -830,4 +848,52 @@ async function handleAltCommand(interaction: {
     type: 4,
     data: { content: `👑 **${target.ign}** is now main (account: ${result.account_size} chars, ${result.rows_written} rows rewritten, locked as manual).`, flags: 64 },
   });
+}
+
+
+async function handleLookupCommand(interaction: {
+  token: string;
+  member?: { user?: { id: string }; roles?: string[] };
+  user?: { id: string };
+  data: { options?: Array<{ name: string; value: string | number }> };
+}) {
+  const callerId = interaction.member?.user?.id ?? interaction.user?.id;
+  const targetOpt = interaction.data.options?.find((o) => o.name === 'user')?.value;
+  const targetId = targetOpt ? String(targetOpt) : callerId;
+  if (!targetId) {
+    return NextResponse.json({ type: 4, data: { content: 'Could not determine user.', flags: 64 } });
+  }
+
+  // Staff only, except looking yourself up
+  if (targetId !== callerId) {
+    const denied = denyIfMissingStaffRole(interaction.member?.roles);
+    if (denied) return denied;
+  }
+
+  const appId = process.env.DISCORD_APPLICATION_ID;
+  if (!appId) {
+    return NextResponse.json({ type: 4, data: { content: 'DISCORD_APPLICATION_ID not set.', flags: 64 } });
+  }
+
+  waitUntil((async () => {
+    let content: string;
+    try {
+      const profile = await getDiscordProfile(targetId);
+      if (profile.characters.length === 0) {
+        content = `No tracked characters linked to <@${targetId}>. Use \`/map\` to link one.`;
+      } else {
+        content = `**Characters for <@${targetId}>**\n\n` + profile.characters.map(formatCharacterLine).join('\n\n');
+        if (content.length > 1900) content = content.slice(0, 1900) + '…';
+      }
+    } catch (err) {
+      content = `Lookup failed: ${String(err)}`;
+    }
+    await editOriginalInteractionResponse(appId, interaction.token, {
+      content,
+      flags: 64,
+      allowed_mentions: { parse: [] },
+    });
+  })());
+
+  return NextResponse.json({ type: 5, data: { flags: 64 } });
 }

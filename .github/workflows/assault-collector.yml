@@ -1,0 +1,20 @@
+name: Assault Collector
+
+# Discovers active assaults and finalizes ended runs.
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Hit assault collector
+        run: |
+          response=$(curl -s -L --retry 3 --retry-delay 5 -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/assault-collector" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+          http_code=$(echo "$response" | tail -1)
+          echo "$response" | head -n -1
+          [ "$http_code" = "200" ] || { echo "ERROR status $http_code"; exit 1; }

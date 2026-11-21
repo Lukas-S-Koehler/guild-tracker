@@ -4,16 +4,19 @@ import { useState, useEffect } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { ArrowUp, ArrowDown, Trash2, Plus } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 
 export interface Enemy { name: string; level: number; gold_per_hr: number }
 export interface ZoneValue {
+  zone_id: number | null;
   zone_name: string;
   level_range: string;
   shrine_info: string;
   target_mob_count: string;
   enemy_priority: Enemy[];
 }
+
+interface LocationOption { zone_id: number | null; zone: string; level_min: number | null; level_max: number | null; total_gph: number }
 
 const HITS_TO_KILL = [
   { hits: 2, seconds: 3.00, kills: 10800 },
@@ -27,82 +30,69 @@ export default function ZoneEditor({
   onSave,
 }: {
   value: ZoneValue;
-  onSave: (v: ZoneValue) => Promise<void>;
+  onSave: (v: { zone_id?: number; target_mob_count?: string }) => Promise<void>;
 }) {
-  const [draft, setDraft] = useState<ZoneValue>(value);
+  const [locations, setLocations] = useState<LocationOption[]>([]);
+  const [zoneId, setZoneId] = useState<number | null>(value.zone_id);
+  const [mobs, setMobs] = useState(value.target_mob_count);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => setDraft(value), [value]);
+  useEffect(() => { setZoneId(value.zone_id); setMobs(value.target_mob_count); }, [value]);
+  useEffect(() => {
+    fetch('/api/assault/locations').then(r => r.json()).then(j => setLocations(j.locations ?? [])).catch(() => {});
+  }, []);
 
-  const setEnemy = (i: number, patch: Partial<Enemy>) =>
-    setDraft(d => ({
-      ...d,
-      enemy_priority: d.enemy_priority.map((e, idx) => idx === i ? { ...e, ...patch } : e),
-    }));
-
-  const move = (i: number, dir: -1 | 1) => {
-    setDraft(d => {
-      const arr = [...d.enemy_priority];
-      const j = i + dir;
-      if (j < 0 || j >= arr.length) return d;
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-      return { ...d, enemy_priority: arr };
-    });
-  };
-
-  const remove = (i: number) =>
-    setDraft(d => ({ ...d, enemy_priority: d.enemy_priority.filter((_, idx) => idx !== i) }));
-
-  const add = () =>
-    setDraft(d => ({ ...d, enemy_priority: [...d.enemy_priority, { name: '', level: 0, gold_per_hr: 0 }] }));
+  const changed = zoneId !== value.zone_id || mobs !== value.target_mob_count;
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <Label>Zone Name</Label>
-          <Input value={draft.zone_name} onChange={e => setDraft(d => ({ ...d, zone_name: e.target.value }))} />
-        </div>
-        <div>
-          <Label>Level Range</Label>
-          <Input value={draft.level_range} onChange={e => setDraft(d => ({ ...d, level_range: e.target.value }))} />
-        </div>
-        <div>
-          <Label>Shrine Status / Location</Label>
-          <Input value={draft.shrine_info} onChange={e => setDraft(d => ({ ...d, shrine_info: e.target.value }))} />
+          <Label>Location</Label>
+          <select
+            className="w-full border rounded px-2 py-2 text-sm bg-background"
+            value={zoneId ?? ''}
+            onChange={e => setZoneId(e.target.value ? Number(e.target.value) : null)}
+          >
+            <option value="">Select location…</option>
+            {locations.map(l => (
+              <option key={l.zone_id} value={l.zone_id ?? ''}>
+                {l.zone} (Lv {l.level_min}–{l.level_max})
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted-foreground mt-1">
+            Level range, shrine and gold-ranked enemies fill in automatically and refresh with market prices.
+          </p>
         </div>
         <div>
           <Label>Target Mob Count</Label>
-          <Input value={draft.target_mob_count} onChange={e => setDraft(d => ({ ...d, target_mob_count: e.target.value }))} />
+          <Input value={mobs} onChange={e => setMobs(e.target.value)} />
         </div>
       </div>
 
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <Label>Enemy Gold Priority</Label>
-          <Button variant="outline" size="sm" onClick={add}><Plus className="h-3 w-3 mr-1" />Add</Button>
+      <div className="border rounded p-3 bg-muted/20 space-y-2">
+        <div className="flex items-center gap-2 flex-wrap text-sm">
+          <strong>{value.zone_name || '—'}</strong>
+          {value.level_range && <Badge variant="outline">Lv {value.level_range}</Badge>}
+          {value.shrine_info && <Badge variant="secondary">{value.shrine_info}</Badge>}
         </div>
         <div className="space-y-1">
-          {draft.enemy_priority.map((e, i) => (
-            <div key={i} className="flex items-center gap-2 border rounded p-2 bg-muted/30">
-              <span className="text-xs text-muted-foreground w-6">{i + 1}.</span>
-              <Input className="flex-1" placeholder="Name" value={e.name} onChange={ev => setEnemy(i, { name: ev.target.value })} />
-              <Input className="w-16" type="number" placeholder="Lvl" value={e.level} onChange={ev => setEnemy(i, { level: Number(ev.target.value) })} />
-              <Input className="w-24" type="number" placeholder="g/hr" value={e.gold_per_hr} onChange={ev => setEnemy(i, { gold_per_hr: Number(ev.target.value) })} />
-              <Button size="sm" variant="ghost" onClick={() => move(i, -1)}><ArrowUp className="h-3 w-3" /></Button>
-              <Button size="sm" variant="ghost" onClick={() => move(i, 1)}><ArrowDown className="h-3 w-3" /></Button>
-              <Button size="sm" variant="ghost" onClick={() => remove(i)}><Trash2 className="h-3 w-3" /></Button>
+          {value.enemy_priority.map((e, i) => (
+            <div key={`${e.name}-${i}`} className="flex items-center gap-2 text-sm">
+              <span className="text-xs text-muted-foreground w-5">{i + 1}.</span>
+              <span className="flex-1">{e.name}</span>
+              <span className="text-muted-foreground text-xs">Lv {e.level}</span>
+              <span className="w-24 text-right tabular-nums">{e.gold_per_hr.toLocaleString()} g/h</span>
             </div>
           ))}
-          {draft.enemy_priority.length === 0 && (
-            <p className="text-xs text-muted-foreground">No enemies — add one.</p>
-          )}
+          {value.enemy_priority.length === 0 && <p className="text-xs text-muted-foreground">No enemies yet — pick a location.</p>}
         </div>
       </div>
 
       <div className="border rounded p-3 bg-muted/20">
         <Label className="mb-2 block">Hits-to-Kill Reference</Label>
-        <div className="grid grid-cols-4 gap-2 text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
           {HITS_TO_KILL.map(r => (
             <div key={r.hits} className="text-center border rounded p-1">
               <div className="font-semibold">{r.hits} hits</div>
@@ -114,13 +104,18 @@ export default function ZoneEditor({
       </div>
 
       <Button
-        disabled={saving}
+        disabled={saving || !changed || zoneId == null}
         onClick={async () => {
           setSaving(true);
-          try { await onSave(draft); } finally { setSaving(false); }
+          try {
+            await onSave({
+              ...(zoneId != null && zoneId !== value.zone_id ? { zone_id: zoneId } : {}),
+              ...(mobs !== value.target_mob_count ? { target_mob_count: mobs } : {}),
+            });
+          } finally { setSaving(false); }
         }}
       >
-        {saving ? 'Saving…' : 'Save Zone & Enemies'}
+        {saving ? 'Saving…' : 'Save Location'}
       </Button>
     </div>
   );

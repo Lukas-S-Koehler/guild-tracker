@@ -28,7 +28,7 @@ import { getSlotState, loadoutCost, type CombatPotion, type XpPotion } from '@/l
 import { buildTemplateVars, renderTemplate, todayLaunchUnix, utcDateString } from '@/lib/assault-template';
 import { postToChannelReturnId, editOriginalInteractionResponse } from '@/lib/discord-api';
 import { createAdminClient } from '@/lib/supabase-server';
-import { getZonePlan, listZones, shrineInfoFor } from '@/lib/assault-plan';
+import { getZonePlan, listZones, shrineInfoFor, applyZoneSelection } from '@/lib/assault-plan';
 import { FIVE_PS, HITS_TO_KILL, GEAR_LINK, POTION_SLOTS, TERRITORY_BOOSTS, EXP_REWARDS, KILL_REWARDS, EXP_SPLIT } from '@/lib/assault-plan-static';
 import { computeLaunchDate, getChecklistTemplate, buildTimedChecklist, type ChecklistItem } from '@/lib/assault-checklist-service';
 import { getDiscordChecked, toggleDiscordItem, resetDiscord } from '@/lib/assault-checklist-discord';
@@ -456,15 +456,20 @@ async function handleSetZone(interaction: Interaction, sub: Option) {
   const shrine = findOption(sub.options, 'shrine')?.value as string | undefined;
   const mobOrder = findOption(sub.options, 'mob_order')?.value as string | undefined;
   const patch: Record<string, unknown> = {};
-  if (zone) patch.zone_name = zone;
+  if (zone) {
+    // Derive everything from the chosen location (name, id/key, level range, shrine, gold-ranked mobs)
+    const plan = await getZonePlan(zone);
+    if (plan.zone_id == null) return ephemeral(`Unknown or uncached location **${zone}**.`);
+    try { await applyZoneSelection(guildId, plan.zone_id); } catch (e) { return ephemeral(String(e)); }
+  }
   if (shrine) patch.shrine_info = shrine;
   if (mobOrder) {
     // store as single synthetic enemy entry to override formatted mob_order
     patch.enemy_priority = [{ name: mobOrder, level: 0, gold_per_hr: 0 }];
   }
-  if (Object.keys(patch).length === 0) return ephemeral('Provide at least one of zone / shrine / mob_order.');
-  await upsertAssaultConfig(guildId, patch);
-  return ephemeral(`Updated \`${guildId}\`: ${Object.keys(patch).join(', ')}.`);
+  if (!zone && Object.keys(patch).length === 0) return ephemeral('Provide at least one of zone / shrine / mob_order.');
+  if (Object.keys(patch).length > 0) await upsertAssaultConfig(guildId, patch);
+  return ephemeral(`Updated \`${guildId}\`: ${[zone ? 'zone (auto-filled)' : null, ...Object.keys(patch)].filter(Boolean).join(', ')}.`);
 }
 
 async function handleSkipToday(interaction: Interaction, sub: Option) {

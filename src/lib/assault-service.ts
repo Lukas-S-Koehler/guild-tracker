@@ -7,6 +7,8 @@ export interface AssaultConfig {
   active: boolean;
   launch_time_utc: string;
   zone_name: string;
+  tracked_zone_id?: number | null;
+  tracked_zone_key?: string | null;
   level_range: string;
   shrine_info: string;
   target_mob_count: string;

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { refreshAllZoneSnapshots } from '@/lib/assault-plan';
 import { createAdminClient } from '@/lib/supabase-server';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 
@@ -75,8 +76,12 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  let zonesRefreshed = 0;
+  try { zonesRefreshed = await refreshAllZoneSnapshots(); } catch { /* non-fatal */ }
+
   return NextResponse.json({
     success: true,
+    zones_refreshed: zonesRefreshed,
     enemies: enemyRows.length,
     new_loot_items: newItems,
     enemy_error: enemyError,
