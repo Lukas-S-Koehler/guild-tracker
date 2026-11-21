@@ -155,7 +155,7 @@ export interface SeasonOverview {
   season: number;
   seasons: number[];
   guilds: Array<{
-    guild_id: number; guild_name: string; guild_tag: string | null; note: string | null;
+    guild_id: number; guild_name: string; guild_tag: string | null; note: string | null; last_active_season: number | null;
     overall_rank: number | null; of: number; experience: number; kills: number;
     zones: Array<{ zone_id: number; zone_name: string; image_url: string | null; position: number; of: number; kills: number; experience: number; leader: { name: string; experience: number } | null; field: FieldEntry[] }>;
   }>;
@@ -221,6 +221,19 @@ export async function getSeasonOverview(season: number, trackedGuilds: TrackedGu
     return top;
   };
 
+  // Last season each tracked guild appeared in at all (for a friendly empty state)
+  const lastActive = new Map<number, number>();
+  for (const tg of trackedGuilds) {
+    if (rows.some(r => r.external_guild_id === tg.external_id)) continue;
+    const { data: la } = await supabase
+      .from('assault_zone_standings')
+      .select('season_number')
+      .eq('external_guild_id', tg.external_id)
+      .order('season_number', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (la) lastActive.set(tg.external_id, (la as { season_number: number }).season_number);
+  }
   const guilds = trackedGuilds.map(tg => {
     const gid = tg.external_id;
     const mine = rows.filter(r => r.external_guild_id === gid);
@@ -230,12 +243,15 @@ export async function getSeasonOverview(season: number, trackedGuilds: TrackedGu
       guild_id: gid,
       guild_name: mine[0]?.guild_name ?? tg.name,
       guild_tag: mine[0]?.guild_tag ?? null,
+      last_active_season: lastActive.get(gid) ?? null,
       note: mine.length ? null : (() => {
         const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, '');
         const alt = rows.find(r => norm(r.guild_name) === norm(tg.name) && r.external_guild_id !== gid);
         return alt
           ? `Standings list "${alt.guild_name}" under id ${alt.external_guild_id}, but assault_configs has ${gid}. Fix assault_configs.external_guild_id.`
-          : `No conquest activity recorded for this guild in season ${season}.`;
+          : lastActive.has(gid)
+            ? `No assaults this season. Last active: season ${lastActive.get(gid)}.`
+            : `No conquest activity recorded for this guild in any stored season.`;
       })(),
       overall_rank: rank >= 0 ? rank + 1 : null,
       of: ranked.length,

@@ -1,5 +1,5 @@
 import { createAdminClient } from '@/lib/supabase-server';
-import { IdleMMOApi, type ConquestContribution } from '@/lib/idlemmo-api';
+import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { postToChannelRich } from '@/lib/discord-api';
 import { getCurrentSeason, storeZoneStandings, storeSeasonContributions } from '@/lib/assault-standings-service';
 
@@ -118,16 +118,61 @@ function toInt(x: string | number | undefined | null): number {
 export async function finalizeRun(
   run: AssaultRunRow,
   config: AssaultConquestConfig,
-): Promise<{ contributions: number; top: ConquestContribution[] }> {
+): Promise<{ contributions: number; top: WaveEntry[]; wave: number }> {
   return syncRun(run, config, { final: true });
 }
 
 /** Pull latest contributions into the DB. Only marks the run 'finalized' when opts.final. */
+export interface WaveEntry {
+  character_id: number;
+  name: string;
+  level: number | null;
+  kills: number;
+  experience: number;
+}
+
+/** Previous wave (same guild, zone and season) before this run. */
+async function previousRun(run: AssaultRunRow): Promise<AssaultRunRow | null> {
+  if (run.season_number == null) return null;
+  const supabase = createAdminClient();
+  const { data } = await supabase
+    .from('assault_runs')
+    .select('*')
+    .eq('guild_id', run.guild_id)
+    .eq('zone_id', run.zone_id)
+    .eq('season_number', run.season_number)
+    .lt('starts_at', run.starts_at)
+    .order('starts_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data as AssaultRunRow | null) ?? null;
+}
+
+/** 1-based wave number within (guild, zone, season), ordered by start. */
+export async function waveNumber(run: AssaultRunRow): Promise<number> {
+  const supabase = createAdminClient();
+  let q = supabase
+    .from('assault_runs')
+    .select('id', { count: 'exact', head: true })
+    .eq('guild_id', run.guild_id)
+    .eq('zone_id', run.zone_id)
+    .lte('starts_at', run.starts_at);
+  if (run.season_number != null) q = q.eq('season_number', run.season_number);
+  const { count } = await q;
+  return count ?? 1;
+}
+
+/**
+ * Sync one assault wave.
+ * The inspect endpoint returns season-cumulative totals per character, so a wave's
+ * contribution = cumulative now - cumulative at the end of the previous wave
+ * (stored in assault_run_snapshots). The first wave of a season has a zero baseline.
+ */
 export async function syncRun(
   run: AssaultRunRow,
   config: AssaultConquestConfig,
   opts: { final: boolean },
-): Promise<{ contributions: number; top: ConquestContribution[] }> {
+): Promise<{ contributions: number; top: WaveEntry[]; wave: number }> {
   if (!config.api_key) throw new Error('missing api_key');
   const api = new IdleMMOApi(config.api_key);
   const inspect = await api.inspectConquestZone(run.zone_id, run.season_number ?? undefined);
@@ -140,21 +185,48 @@ export async function syncRun(
     await storeSeasonContributions(zone, season, new Set([run.external_guild_id]));
   } catch { /* non-fatal */ }
 
-  // Find our guild entry inside the zone's guilds list
   const ours = zone.guilds.find(g => g.guild.id === run.external_guild_id);
-  const contributions = ours?.contributions ?? [];
+  const cumulative = ours?.contributions ?? [];
 
   const supabase = createAdminClient();
 
-  // Replace prior contrib rows for idempotency
-  await supabase.from('assault_contributions').delete().eq('run_id', run.id);
+  // Baseline = cumulative snapshot at the end of the previous wave
+  const baseline = new Map<number, { kills: number; experience: number }>();
+  const prev = await previousRun(run);
+  if (prev) {
+    const { data: snap } = await supabase
+      .from('assault_run_snapshots')
+      .select('character_id, kills, experience')
+      .eq('run_id', prev.id);
+    for (const r of (snap ?? []) as { character_id: number; kills: number; experience: number }[]) {
+      baseline.set(r.character_id, { kills: Number(r.kills), experience: Number(r.experience) });
+    }
+    if (baseline.size === 0) {
+      // Legacy first wave (recorded before snapshots existed): its stored contributions were cumulative.
+      const { data: legacy } = await supabase
+        .from('assault_contributions')
+        .select('character_id, kills, experience')
+        .eq('run_id', prev.id);
+      for (const r of (legacy ?? []) as { character_id: number; kills: number; experience: number }[]) {
+        baseline.set(r.character_id, { kills: Number(r.kills), experience: Number(r.experience) });
+      }
+    }
+  }
 
   let totalKills = 0;
   let totalXp = 0;
-  if (contributions.length > 0) {
-    const rows = contributions.map((c) => {
-      const kills = toInt(c.kills);
-      const xp = toInt(c.experience);
+  const waveRows = cumulative
+    .map((c) => {
+      const base = baseline.get(c.character.id);
+      const kills = Math.max(0, toInt(c.kills) - (base?.kills ?? 0));
+      const xp = Math.max(0, toInt(c.experience) - (base?.experience ?? 0));
+      return { c, kills, xp };
+    })
+    .filter(r => r.kills > 0 || r.xp > 0);
+
+  await supabase.from('assault_contributions').delete().eq('run_id', run.id);
+  if (waveRows.length > 0) {
+    const rows = waveRows.map(({ c, kills, xp }) => {
       totalKills += kills;
       totalXp += xp;
       return {
@@ -171,12 +243,21 @@ export async function syncRun(
     if (error) throw new Error(error.message);
   }
 
-  // If our entry has aggregate totals, prefer those
-  if (ours) {
-    const aggKills = toInt(ours.kills);
-    const aggXp = toInt(ours.experience);
-    if (aggKills > 0) totalKills = aggKills;
-    if (aggXp > 0) totalXp = aggXp;
+  // Save the cumulative snapshot (the next wave's baseline) unless a later wave has
+  // already started - then the cumulative numbers include that wave's XP.
+  const { count: laterStarted } = await supabase
+    .from('assault_runs')
+    .select('id', { count: 'exact', head: true })
+    .eq('guild_id', run.guild_id)
+    .eq('zone_id', run.zone_id)
+    .gt('starts_at', run.starts_at)
+    .lte('starts_at', new Date().toISOString());
+  if (!laterStarted && cumulative.length > 0) {
+    await supabase.from('assault_run_snapshots').delete().eq('run_id', run.id);
+    const { error } = await supabase.from('assault_run_snapshots').insert(
+      cumulative.map(c => ({ run_id: run.id, character_id: c.character.id, kills: toInt(c.kills), experience: toInt(c.experience) })),
+    );
+    if (error) throw new Error(error.message);
   }
 
   await supabase
@@ -190,31 +271,31 @@ export async function syncRun(
     })
     .eq('id', run.id);
 
-  const top = [...contributions]
-    .sort((a, b) => toInt(b.kills) - toInt(a.kills))
-    .slice(0, 10);
+  const top: WaveEntry[] = waveRows
+    .map(({ c, kills, xp }) => ({ character_id: c.character.id, name: c.character.name, level: c.character.total_level, kills, experience: xp }))
+    .sort((a, b) => b.experience - a.experience);
 
-  return { contributions: contributions.length, top };
+  return { contributions: waveRows.length, top, wave: await waveNumber(run) };
 }
 
 export async function postFinalizeEmbed(
   run: AssaultRunRow,
   config: AssaultConquestConfig,
-  top: ConquestContribution[],
-  opts: { label?: string; final?: boolean } = {},
+  top: WaveEntry[],
+  opts: { label?: string; final?: boolean; wave?: number } = {},
 ): Promise<string | null> {
   const final = opts.final ?? true;
   if (!config.announcement_channel_id) return null;
 
   const fields = top.slice(0, 10).map((c, i) => ({
-    name: `#${i + 1} ${c.character.name} (Lv ${c.character.total_level})`,
-    value: `${toInt(c.kills).toLocaleString()} kills · ${toInt(c.experience).toLocaleString()} XP`,
+    name: `#${i + 1} ${c.name}${c.level ? ` (Lv ${c.level})` : ''}`,
+    value: `${c.experience.toLocaleString()} XP · ${c.kills.toLocaleString()} kills`,
     inline: false,
   }));
 
   const embed = {
-    title: `⚔️ ${opts.label ?? 'Assault Complete'} — ${run.zone_name}`,
-    description: `**${config.guild_name ?? run.guild_id}** ${final ? 'finished their assault' : 'assault progress so far'}.\n\nTotal: **${run.total_kills.toLocaleString()} kills** · **${run.total_experience.toLocaleString()} XP**`,
+    title: `⚔️ ${opts.label ?? 'Assault Complete'} — ${run.zone_name}${opts.wave ? ` · Wave ${opts.wave}` : ''}`,
+    description: `**${config.guild_name ?? run.guild_id}** ${final ? 'finished this wave' : 'wave progress so far'}.\n\nWave total: **${run.total_experience.toLocaleString()} XP** · **${run.total_kills.toLocaleString()} kills** · **${top.length}** participants`,
     color: 0xff6b35,
     fields: fields.length > 0 ? fields : [{ name: 'No contributions recorded', value: '—', inline: false }],
     timestamp: new Date().toISOString(),
@@ -230,7 +311,6 @@ export async function postFinalizeEmbed(
   }
   return res.messageId ?? null;
 }
-
 
 /** Find the run for a scheduled launch (±3h of launch), discovering it via the conquest view if needed. */
 export async function findRunForLaunch(
@@ -285,12 +365,13 @@ export async function syncRunForLaunch(
 ): Promise<{ ok: boolean; error?: string }> {
   const run = await findRunForLaunch(config, launchUnix);
   if (!run) return { ok: false, error: 'no assault run found for launch' };
-  const { top } = await syncRun(run, config, { final });
+  const { top, wave } = await syncRun(run, config, { final });
   const supabase = createAdminClient();
   const { data: fresh } = await supabase.from('assault_runs').select('*').eq('id', run.id).single();
   await postFinalizeEmbed((fresh ?? run) as AssaultRunRow, config, top, {
     label: final ? 'Assault Final Stats (25h)' : 'Assault Update (13h)',
     final,
+    wave,
   });
   return { ok: true };
 }

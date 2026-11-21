@@ -654,15 +654,6 @@ export async function registerAssaultCommand(): Promise<{ ok: boolean; error?: s
         options: [guildOpt],
       },
       {
-        name: 'lb',
-        type: 1,
-        description: 'Show top contributors leaderboard',
-        options: [
-          { ...guildOpt, required: false },
-          { name: 'season', type: 4, description: 'Season number (optional)', required: false },
-        ],
-      },
-      {
         name: 'last',
         type: 1,
         description: 'Show last finalized assault summary for a guild',

@@ -14,11 +14,16 @@ interface ZoneStanding {
   kills: number; experience: number; field: FieldEntry[];
 }
 interface GuildStanding {
-  guild_id: number; guild_name: string; guild_tag: string | null; note: string | null;
+  guild_id: number; guild_name: string; guild_tag: string | null; note: string | null; last_active_season: number | null;
   overall_rank: number | null; of: number; experience: number; kills: number; zones: ZoneStanding[];
 }
 interface Finish { zone_id: number; zone_name: string; season_number: number; guild_name: string; position: number; of: number; experience: number }
 interface Member { character_id: number; character_name: string; total_level: number | null; guild_id: number; kills: number; experience: number; zones: number }
+interface Wave {
+  id: string; wave: number; guild_name: string; zone_name: string; image_url: string | null;
+  starts_at: string; status: string; total_kills: number; total_experience: number; participants: number;
+  members: Array<{ character_id: number; name: string; level: number | null; kills: number; experience: number }>;
+}
 interface Standings {
   current_season: number; season: number; seasons: number[]; snapshot_at: string | null;
   guilds: GuildStanding[]; best_finishes: Finish[]; members: Member[]; error?: string;
@@ -70,12 +75,18 @@ export default function AssaultStatsPage() {
   const [season, setSeason] = useState<number | null>(null);
   const [data, setData] = useState<Standings | null>(null);
   const [loading, setLoading] = useState(true);
+  const [waves, setWaves] = useState<Wave[]>([]);
 
   useEffect(() => {
     setLoading(true);
     const qs = season ? `?season=${season}` : '';
     fetch(`/api/assault/standings${qs}`).then(r => r.json()).then((d: Standings) => { setData(d); setLoading(false); });
   }, [season]);
+
+  useEffect(() => {
+    if (!data) return;
+    fetch(`/api/assault/waves?season=${data.season}`).then(r => r.json()).then(j => setWaves(j.waves ?? [])).catch(() => setWaves([]));
+  }, [data?.season]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const seasons = data ? Array.from(new Set([data.current_season, ...data.seasons])).sort((a, b) => b - a) : [];
 
@@ -122,7 +133,12 @@ export default function AssaultStatsPage() {
                 )}
               </div>
               {g.zones.length === 0 ? (
-                <Card><CardContent className="py-4 text-sm text-muted-foreground">{g.note ?? 'No zone data yet.'}</CardContent></Card>
+                <p className="text-sm text-muted-foreground rounded-lg border border-dashed px-3 py-2.5">
+                  {g.last_active_season
+                    ? <>No assaults this season · last active in <strong>Season {g.last_active_season}</strong>.{' '}
+                        <button className="underline" onClick={() => setSeason(g.last_active_season)}>View</button></>
+                    : (g.note ?? 'No zone data yet.')}
+                </p>
               ) : (
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {g.zones.map(z => <LocationCard key={z.zone_id} z={z} />)}
@@ -132,6 +148,63 @@ export default function AssaultStatsPage() {
           ))}
           {data.snapshot_at && (
             <p className="text-xs text-muted-foreground -mt-3">Updated {new Date(data.snapshot_at).toLocaleString()}</p>
+          )}
+
+          {waves.length > 0 && (
+            <section className="space-y-3">
+              <h2 className="text-lg font-semibold">Assault waves — Season {data.season}</h2>
+              <div className="grid gap-3 md:grid-cols-2">
+                {waves.map(w => (
+                  <div key={w.id} className="rounded-xl border bg-card overflow-hidden">
+                    <div className="relative h-14 bg-muted">
+                      {w.image_url && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={w.image_url} alt="" className="absolute inset-0 h-full w-full object-cover opacity-50" loading="lazy" />
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-card to-transparent" />
+                      <div className="absolute bottom-1.5 left-3 right-3 flex items-end justify-between">
+                        <div>
+                          <div className="font-semibold leading-tight">Wave {w.wave} · {w.zone_name}</div>
+                          <div className="text-xs text-muted-foreground">{w.guild_name} · {new Date(w.starts_at).toLocaleDateString()}</div>
+                        </div>
+                        <span
+                          title={w.status === 'finalized' ? 'Final' : 'In progress / interim'}
+                          className={`h-2 w-2 rounded-full mb-1 ${w.status === 'finalized' ? 'bg-emerald-500' : 'bg-amber-400'}`}
+                        />
+                      </div>
+                    </div>
+                    <div className="p-3 space-y-2 text-sm">
+                      <div className="flex gap-4 text-xs text-muted-foreground">
+                        <span><strong className="text-foreground text-base">{compact(w.total_experience)}</strong> XP</span>
+                        <span><strong className="text-foreground text-base">{compact(w.total_kills)}</strong> kills</span>
+                        <span><strong className="text-foreground text-base">{w.participants}</strong> members</span>
+                      </div>
+                      <ol className="text-xs space-y-0.5">
+                        {w.members.slice(0, 3).map((m, i) => (
+                          <li key={m.character_id} className="flex justify-between gap-2">
+                            <span className="truncate">{['🥇', '🥈', '🥉'][i]} {m.name}</span>
+                            <span className="text-muted-foreground tabular-nums">{compact(m.experience)} XP</span>
+                          </li>
+                        ))}
+                      </ol>
+                      {w.members.length > 3 && (
+                        <details>
+                          <summary className="text-xs text-muted-foreground cursor-pointer">All {w.members.length} members</summary>
+                          <ol start={4} className="text-xs space-y-0.5 mt-1">
+                            {w.members.slice(3).map(m => (
+                              <li key={m.character_id} className="flex justify-between gap-2">
+                                <span className="truncate">{m.name}</span>
+                                <span className="text-muted-foreground tabular-nums">{m.experience.toLocaleString()} XP · {m.kills.toLocaleString()}</span>
+                              </li>
+                            ))}
+                          </ol>
+                        </details>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
           )}
 
           {data.best_finishes.length > 0 && (

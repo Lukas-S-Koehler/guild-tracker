@@ -159,8 +159,6 @@ export async function handleAssaultCommand(interaction: Interaction) {
       return handlePingNow(interaction, sub);
     case 'skip-today':
       return handleSkipToday(interaction, sub);
-    case 'lb':
-      return handleLb(sub);
     case 'last':
       return handleLast(sub);
     case 'checklist':
@@ -197,42 +195,6 @@ interface ContribRow {
   run_id: string;
 }
 
-async function handleLb(sub: Option) {
-  const guildId = String(findOption(sub.options, 'guild')?.value ?? '');
-  const season = findOption(sub.options, 'season')?.value as number | undefined;
-  const supabase = createAdminClient();
-
-  let q = supabase.from('assault_runs').select('*').eq('status', 'finalized');
-  if (guildId) q = q.eq('guild_id', guildId);
-  if (season) q = q.eq('season_number', season);
-  const { data: runs } = await q;
-  const runList = (runs as RunRow[]) ?? [];
-  const runIds = runList.map((r) => r.id);
-  if (runIds.length === 0) return ephemeral('No finalized runs yet.');
-
-  const { data: contribs } = await supabase
-    .from('assault_contributions')
-    .select('character_name, total_level, kills, experience, run_id')
-    .in('run_id', runIds);
-
-  const byName = new Map<string, { name: string; lvl: number | null; kills: number; xp: number; runs: number }>();
-  for (const c of (contribs as ContribRow[]) ?? []) {
-    const key = c.character_name.toLowerCase();
-    const cur = byName.get(key);
-    if (cur) {
-      cur.kills += c.kills;
-      cur.xp += c.experience;
-      cur.runs += 1;
-    } else {
-      byName.set(key, { name: c.character_name, lvl: c.total_level, kills: c.kills, xp: c.experience, runs: 1 });
-    }
-  }
-  const top = Array.from(byName.values()).sort((a, b) => b.kills - a.kills).slice(0, 10);
-  const header = `🏆 **Assault Leaderboard**${guildId ? ` — ${await getGuildName(guildId)}` : ''}${season ? ` · Season ${season}` : ''}`;
-  const lines = top.map((e, i) => `**${i + 1}.** ${e.name}${e.lvl ? ` (Lv ${e.lvl})` : ''} — ${e.kills.toLocaleString()} kills · ${e.xp.toLocaleString()} XP · ${e.runs} runs`);
-  return NextResponse.json({ type: 4, data: { content: [header, ...lines].join('\n'), flags: 64 } });
-}
-
 async function handleLast(sub: Option) {
   const guildId = String(findOption(sub.options, 'guild')?.value ?? '');
   if (!guildId) return ephemeral('Missing guild.');
@@ -241,22 +203,29 @@ async function handleLast(sub: Option) {
     .from('assault_runs')
     .select('*')
     .eq('guild_id', guildId)
-    .eq('status', 'finalized')
+    .gt('total_experience', 0)
     .order('starts_at', { ascending: false })
     .limit(1)
     .maybeSingle();
   const run = data as RunRow | null;
-  if (!run) return ephemeral('No finalized runs yet.');
+  if (!run) return ephemeral('No assault waves recorded yet.');
+  const { count } = await supabase
+    .from('assault_runs')
+    .select('id', { count: 'exact', head: true })
+    .eq('guild_id', guildId)
+    .eq('zone_id', (run as RunRow & { zone_id: number }).zone_id)
+    .eq('season_number', run.season_number)
+    .lte('starts_at', run.starts_at);
   const { data: contribs } = await supabase
     .from('assault_contributions')
     .select('character_name, total_level, kills, experience, run_id')
     .eq('run_id', run.id)
-    .order('kills', { ascending: false })
+    .order('experience', { ascending: false })
     .limit(5);
   const name = await getGuildName(guildId);
-  const top = ((contribs as ContribRow[]) ?? []).map((c, i) => `  ${i + 1}. ${c.character_name} — ${c.kills.toLocaleString()} kills`);
+  const top = ((contribs as ContribRow[]) ?? []).map((c, i) => `  ${i + 1}. ${c.character_name} — ${c.experience.toLocaleString()} XP · ${c.kills.toLocaleString()} kills`);
   const content =
-    `⚔️ **Last Assault — ${name}** (${run.zone_name})\n` +
+    `⚔️ **Last Assault — ${name}** (${run.zone_name}${count ? ` · wave ${count}` : ''})\n` +
     `Started: <t:${Math.floor(new Date(run.starts_at).getTime() / 1000)}:f>\n` +
     `Total: **${run.total_kills.toLocaleString()} kills** · **${run.total_experience.toLocaleString()} XP**\n` +
     (top.length ? `Top 5:\n${top.join('\n')}` : '');
@@ -417,9 +386,11 @@ async function handleStatus() {
     const launchLine = nextUnix
       ? `Next launch: <t:${nextUnix}:F> (<t:${nextUnix}:R>)`
       : `Next launch: — (no assault day scheduled)`;
+    // Paused guilds: just the name + state, no schedule line
     lines.push(
-      `**${name}** — ${state}${skip}\n` +
-        `${launchLine} • Zone: ${c.zone_name} • Shrine: ${c.shrine_info}`
+      c.active
+        ? `**${name}** — ${state}${skip}\n${launchLine} • Zone: ${c.zone_name} • Shrine: ${c.shrine_info}`
+        : `**${name}** — ${state}`
     );
   }
   // Public reply (no ephemeral flag) so everyone in the channel sees it.

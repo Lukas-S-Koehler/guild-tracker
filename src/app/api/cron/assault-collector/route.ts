@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
-import { createAdminClient } from '@/lib/supabase-server';
 import {
   listTrackedGuilds,
   upsertRun,
   listUnfinalizedPastRuns,
   finalizeRun,
-  postFinalizeEmbed,
 } from '@/lib/assault-conquest-service';
 import { getCurrentSeason, standingsStale, syncSeason } from '@/lib/assault-standings-service';
 
@@ -60,17 +58,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 2. Finalize past-ended runs
-  const past = await listUnfinalizedPastRuns(now);
+  // 2. Fallback only: quietly finalize runs the scheduler's 13h/25h syncs never finalized.
+  //    (Posting + wave stats are handled by the scheduler's sync steps.)
+  const past = await listUnfinalizedPastRuns(new Date(now.getTime() - 30 * 3600 * 1000));
   for (const run of past) {
     const cfg = configByExternal.get(run.external_guild_id);
     if (!cfg) continue;
     try {
-      const { top } = await finalizeRun(run, cfg);
-      // reload fresh row for accurate totals
-      const supabase = createAdminClient();
-      const { data: fresh } = await supabase.from('assault_runs').select('*').eq('id', run.id).single();
-      if (fresh) await postFinalizeEmbed(fresh as typeof run, cfg, top);
+      await finalizeRun(run, cfg);
       summary.finalized = (summary.finalized as number) + 1;
     } catch (e) {
       errors.push(`finalize ${run.id}: ${String(e)}`);
