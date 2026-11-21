@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { waitUntil } from '@vercel/functions';
 import { createAdminClient } from '@/lib/supabase-server';
-import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerAltCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, registerAssaultCommand, registerLookupCommand, registerAssaultStatsCommand, sendInteractionFollowup, editOriginalInteractionResponse, editChannelMessageRich, postToChannel, listGlobalCommands, listGuildCommands, deleteGlobalCommand, deleteGuildCommand } from '@/lib/discord-api';
+import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerAltCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, registerAssaultCommand, registerLookupCommand, registerRaidCommand, sendInteractionFollowup, editOriginalInteractionResponse, editChannelMessageRich, postToChannel, listGlobalCommands, listGuildCommands, deleteGlobalCommand, deleteGuildCommand } from '@/lib/discord-api';
 import { handleAssaultCommand, handleAssaultAutocomplete, handleAssaultChecklistComponent, handleAssaultPotionsComponent } from '@/lib/assault-discord';
-import { handleAssaultStatsCommand } from '@/lib/assault-stats-discord';
+import { handleRaidCommand } from '@/lib/raid-discord';
 import { getDiscordProfile, formatCharacterLine } from '@/lib/lookup-service';
 import { switchAccountMain } from '@/lib/alt-switch';
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
@@ -116,8 +116,8 @@ export async function GET(req: NextRequest) {
     const result = await registerBumpsCommand();
     return NextResponse.json(result);
   }
-  if (searchParams.get('action') === 'register-assault-stats') {
-    const result = await registerAssaultStatsCommand();
+  if (searchParams.get('action') === 'register-raid') {
+    const result = await registerRaidCommand();
     return NextResponse.json(result);
   }
   if (searchParams.get('action') === 'register-lookup') {
@@ -191,8 +191,8 @@ export async function POST(req: NextRequest) {
     return handleWhipCommand(interaction);
   }
 
-  if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'assault-stats') {
-    return handleAssaultStatsCommand(interaction);
+  if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'raid') {
+    return handleRaidCommand();
   }
 
   if (interaction.type === INTERACTION_TYPE_COMMAND && interaction.data?.name === 'lookup') {
@@ -482,28 +482,11 @@ async function handleMapCommand(interaction: {
     });
   }
 
-  // Propagate to all alt-linked members (same logic as PATCH /api/members/list)
-  const [{ data: fwdLinks }, { data: revLinks }] = await Promise.all([
-    supabase.from('member_alts').select('alt_member_id').eq('member_id', member.id).not('alt_member_id', 'is', null),
-    supabase.from('member_alts').select('member_id').eq('alt_member_id', member.id),
-  ]);
-
-  const linkedIds = new Set<string>([
-    ...(fwdLinks ?? []).map((r) => r.alt_member_id).filter(Boolean) as string[],
-    ...(revLinks ?? []).map((r) => r.member_id).filter(Boolean) as string[],
-  ]);
-
-  const parentIds = (revLinks ?? []).map((r) => r.member_id).filter(Boolean) as string[];
-  if (parentIds.length > 0) {
-    const { data: siblingLinks } = await supabase
-      .from('member_alts')
-      .select('alt_member_id')
-      .in('member_id', parentIds)
-      .not('alt_member_id', 'is', null);
-    for (const r of siblingLinks ?? []) {
-      if (r.alt_member_id && r.alt_member_id !== member.id) linkedIds.add(r.alt_member_id);
-    }
-  }
+  // Propagate to every member in the account (full transitive closure, any chain shape)
+  const { getAccountMemberIds } = await import('@/lib/alt-graph');
+  const account = await getAccountMemberIds(supabase, [member.id]);
+  account.delete(member.id);
+  const linkedIds = account;
 
   const allLinkedIds = Array.from(linkedIds);
   if (allLinkedIds.length > 0) {

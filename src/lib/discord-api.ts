@@ -446,6 +446,21 @@ export async function registerBumpsCommand(): Promise<{ ok: boolean; error?: str
   }
 }
 
+/** Register the /raid slash command. Call once via admin. */
+export async function registerRaidCommand(): Promise<{ ok: boolean; error?: string }> {
+  const appId = process.env.DISCORD_APPLICATION_ID;
+  if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };
+  try {
+    await discordFetch(`/applications/${appId}/commands`, {
+      method: 'POST',
+      body: JSON.stringify({ name: 'raid', description: 'Show raid times' }),
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 /** Register the /lookup slash command. Call once via admin. */
 export async function registerLookupCommand(): Promise<{ ok: boolean; error?: string }> {
   const appId = process.env.DISCORD_APPLICATION_ID;
@@ -469,30 +484,6 @@ export async function registerLookupCommand(): Promise<{ ok: boolean; error?: st
       method: 'POST',
       body: JSON.stringify(command),
     });
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: String(err) };
-  }
-}
-
-/** Register the /assault-stats slash command. Call once via admin. */
-export async function registerAssaultStatsCommand(): Promise<{ ok: boolean; error?: string }> {
-  const appId = process.env.DISCORD_APPLICATION_ID;
-  if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };
-
-  const seasonOpt = (desc: string) => ({ name: 'season', type: 4, description: desc, required: false, min_value: 1 });
-  const command = {
-    name: 'assault-stats',
-    description: 'Conquest / assault statistics for our guilds',
-    options: [
-      { name: 'zones', type: 1, description: 'Best finishes per conquest location' },
-      { name: 'top', type: 1, description: 'Best Dream assaulters by total XP', options: [seasonOpt('Season (omit for all-time)')] },
-      { name: 'season', type: 1, description: 'Overall season position + per-zone standing', options: [seasonOpt('Season (default current)')] },
-    ],
-  };
-
-  try {
-    await discordFetch(`/applications/${appId}/commands`, { method: 'POST', body: JSON.stringify(command) });
     return { ok: true };
   } catch (err) {
     return { ok: false, error: String(err) };
@@ -598,11 +589,17 @@ export async function registerAssaultCommand(): Promise<{ ok: boolean; error?: s
     autocomplete: true,
   };
 
+  const seasonOpt = (desc: string) => ({ name: 'season', type: 4, description: desc, required: false, min_value: 1 });
   const command = {
     name: 'assault',
     description: 'Manage the daily guild assault schedule',
     options: [
       { name: 'status', type: 1, description: 'Show active state + countdowns for both guilds' },
+      { name: 'zones', type: 1, description: 'Best finishes per conquest location' },
+      { name: 'top', type: 1, description: 'Best Dream assaulters by total XP', options: [seasonOpt('Season (omit for all-time)')] },
+      { name: 'lb', type: 1, description: 'Leaderboard (same as top)', options: [seasonOpt('Season (omit for all-time)')] },
+      { name: 'leaderboard', type: 1, description: 'Leaderboard (same as top)', options: [seasonOpt('Season (omit for all-time)')] },
+      { name: 'season', type: 1, description: 'Overall season position + per-zone standing', options: [seasonOpt('Season (default current)')] },
       {
         name: 'toggle',
         type: 1,

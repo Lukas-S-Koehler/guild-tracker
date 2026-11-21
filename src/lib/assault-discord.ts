@@ -27,6 +27,7 @@ import {
 import { getSlotState, loadoutCost, type CombatPotion, type XpPotion } from '@/lib/potion-rules';
 import { buildTemplateVars, renderTemplate, todayLaunchUnix, utcDateString } from '@/lib/assault-template';
 import { postToChannelReturnId, editOriginalInteractionResponse } from '@/lib/discord-api';
+import { handleAssaultStatsCommand } from '@/lib/assault-stats-discord';
 import { createAdminClient } from '@/lib/supabase-server';
 import { getZonePlan, getZonePlanById, listZones, shrineInfoFor, applyZoneSelection } from '@/lib/assault-plan';
 import { FIVE_PS, HITS_TO_KILL, GEAR_LINK, POTION_SLOTS, TERRITORY_BOOSTS, EXP_REWARDS, KILL_REWARDS, EXP_SPLIT } from '@/lib/assault-plan-static';
@@ -151,6 +152,15 @@ export async function handleAssaultCommand(interaction: Interaction) {
   switch (sub.name) {
     case 'status':
       return handleStatus();
+    case 'zones':
+    case 'top':
+    case 'season':
+    case 'lb':
+    case 'leaderboard':
+      return handleAssaultStatsCommand({
+        token: interaction.token,
+        data: { options: [{ ...sub, name: sub.name === 'lb' || sub.name === 'leaderboard' ? 'top' : sub.name } as never] },
+      });
     case 'toggle':
       return handleToggle(interaction, sub);
     case 'set-time':
