@@ -31,6 +31,8 @@ import { createAdminClient } from '@/lib/supabase-server';
 import { getZonePlan, getZonePlanById, listZones, shrineInfoFor, applyZoneSelection } from '@/lib/assault-plan';
 import { FIVE_PS, HITS_TO_KILL, GEAR_LINK, POTION_SLOTS, TERRITORY_BOOSTS, EXP_REWARDS, KILL_REWARDS, EXP_SPLIT } from '@/lib/assault-plan-static';
 import { computeLaunchDate, getChecklistTemplate, buildTimedChecklist, type ChecklistItem } from '@/lib/assault-checklist-service';
+import { COLORS, podium, statFields, linkRow, siteUrl, padR, padL } from '@/lib/assault-embed';
+import { formatGold } from '@/lib/utils';
 import { getDiscordChecked, toggleDiscordItem, resetDiscord } from '@/lib/assault-checklist-discord';
 
 interface Option {
@@ -222,14 +224,30 @@ async function handleLast(sub: Option) {
     .eq('run_id', run.id)
     .order('experience', { ascending: false })
     .limit(5);
+  const { count: participants } = await supabase
+    .from('assault_contributions')
+    .select('run_id', { count: 'exact', head: true })
+    .eq('run_id', run.id);
   const name = await getGuildName(guildId);
-  const top = ((contribs as ContribRow[]) ?? []).map((c, i) => `  ${i + 1}. ${c.character_name} — ${c.experience.toLocaleString()} XP · ${c.kills.toLocaleString()} kills`);
-  const content =
-    `⚔️ **Last Assault — ${name}** (${run.zone_name}${count ? ` · wave ${count}` : ''})\n` +
-    `Started: <t:${Math.floor(new Date(run.starts_at).getTime() / 1000)}:f>\n` +
-    `Total: **${run.total_kills.toLocaleString()} kills** · **${run.total_experience.toLocaleString()} XP**\n` +
-    (top.length ? `Top 5:\n${top.join('\n')}` : '');
-  return NextResponse.json({ type: 4, data: { content, flags: 64 } });
+  const startUnix = Math.floor(new Date(run.starts_at).getTime() / 1000);
+  const entries = ((contribs as ContribRow[]) ?? []).map((c) => ({
+    name: c.character_name, level: c.total_level, experience: c.experience, kills: c.kills,
+  }));
+  const embed = {
+    title: `⚔️ Last Assault — ${name}`,
+    url: siteUrl('/assault/stats'),
+    description:
+      `**${run.zone_name}**${count ? ` · wave ${count}` : ''} · launched <t:${startUnix}:f> (<t:${startUnix}:R>)\n\n` +
+      (entries.length ? podium(entries, { max: 5, totalXp: run.total_experience }) : '_No contributions recorded._'),
+    color: COLORS.orange,
+    fields: statFields([
+      ['⚡ Total XP', formatGold(run.total_experience)],
+      ['⚔️ Kills', run.total_kills.toLocaleString()],
+      ['👥 Participants', String(participants ?? entries.length)],
+    ]),
+    footer: { text: `Season ${run.season_number ?? '?'} · full stats on the website` },
+  };
+  return NextResponse.json({ type: 4, data: { embeds: [embed], components: [linkRow('/assault/stats', 'Full stats')], flags: 64 } });
 }
 
 /** Resolve a launch context for the personal checklist.
@@ -368,6 +386,7 @@ export function buildChecklistPayload(opts: {
         label: '🔄 Reset',
         custom_id: `assault_check_reset:${launchDate}`.slice(0, 100),
       },
+      { type: 2, style: 5, label: '🌐 Nicer view on website', url: siteUrl('/assault/checklist') },
     ],
   });
   return { content, components: rows };
@@ -376,25 +395,34 @@ export function buildChecklistPayload(opts: {
 async function handleStatus() {
   const configs = await listAssaultConfigs();
   if (configs.length === 0) return ephemeral('No assault configs exist.');
-  const lines: string[] = [];
   const now = new Date();
+  const fields: Array<{ name: string; value: string; inline: boolean }> = [];
+  const paused: string[] = [];
   for (const c of configs) {
     const name = await getGuildName(c.guild_id);
-    const state = c.active ? '🟢 Active' : '⏸️ Paused';
-    const skip = c.skip_date === utcDateString(now) ? ' (today skipped)' : '';
+    if (!c.active) { paused.push(name); continue; }
+    const skip = c.skip_date === utcDateString(now) ? ' · ⏭️ today skipped' : '';
     const nextUnix = nextAssaultLaunchUnix(c, now);
-    const launchLine = nextUnix
-      ? `Next launch: <t:${nextUnix}:F> (<t:${nextUnix}:R>)`
-      : `Next launch: — (no assault day scheduled)`;
-    // Paused guilds: just the name + state, no schedule line
-    lines.push(
-      c.active
-        ? `**${name}** — ${state}${skip}\n${launchLine} • Zone: ${c.zone_name} • Shrine: ${c.shrine_info}`
-        : `**${name}** — ${state}`
-    );
+    fields.push({
+      name: `🟢 ${name}${skip}`,
+      value: [
+        nextUnix ? `⏰ <t:${nextUnix}:F> (<t:${nextUnix}:R>)` : '⏰ no assault day scheduled',
+        `📍 ${c.zone_name}`,
+        `🛐 ${c.shrine_info}`,
+      ].join('\n'),
+      inline: true,
+    });
   }
+  const embed = {
+    title: '📋 Assault Status',
+    url: siteUrl('/assault'),
+    color: COLORS.blue,
+    description: fields.length === 0 ? '_No active assaults._' : undefined,
+    fields,
+    footer: paused.length ? { text: `⏸️ Paused: ${paused.join(', ')}` } : undefined,
+  };
   // Public reply (no ephemeral flag) so everyone in the channel sees it.
-  return NextResponse.json({ type: 4, data: { content: lines.join('\n\n') } });
+  return NextResponse.json({ type: 4, data: { embeds: [embed], components: [linkRow('/assault', 'Assault dashboard')] } });
 }
 
 async function handleToggle(interaction: Interaction, sub: Option) {
@@ -549,23 +577,16 @@ async function handlePlan(interaction: Interaction, sub: Option) {
     ? `🗓️ **${daysLine}** @ **${hhmm} UTC**${windowLine}`
     : null;
 
-  const descLines = [
-    `**${guildName}** — ${levelRange} · ${shrine}`,
-    `💰 Best: **${plan.total_gph.toLocaleString()} g/h** · 🎯 Target: **${targetMobs}** mobs (+10–20% flee)`,
-    scheduleLine,
-    nextUnix
-      ? `⏰ Next launch: <t:${nextUnix}:F> (<t:${nextUnix}:R>)`
-      : config ? '⏰ Next launch: — (no assault day in window)' : null,
-  ].filter(Boolean);
-
-  const killPriority = plan.enemies.slice(0, 10).map((e, i) =>
-    `**${i + 1}.** ${e.name} (Lv ${e.level}) — ${e.gph.toLocaleString()} g/h · ${e.drop_count} drops`
-  ).join('\n').slice(0, 1024);
+  const nameW = Math.min(22, Math.max(...plan.enemies.slice(0, 10).map((e) => e.name.length)));
+  const killPriority =
+    '```\n' +
+    plan.enemies.slice(0, 10).map((e, i) =>
+      `${padL(String(i + 1), 2)} ${padR(e.name, nameW)} L${padR(String(e.level), 3)} ${padL(e.gph.toLocaleString(), 8)} g/h`
+    ).join('\n') +
+    '\n```';
 
   const prep = FIVE_PS.map((p, i) => `**${i + 1}. ${p.when}** — ${p.text}`).join('\n').slice(0, 1024);
-
   const potions = POTION_SLOTS.map((s) => `**${s.slot}:** ${s.examples}`).join('\n').slice(0, 1024);
-
   const hitsTable =
     '```\nHits  Time/Kill  Kills/9h\n' +
     HITS_TO_KILL.map((h) => `${String(h.hits).padEnd(5)} ${h.time.padEnd(10)} ${h.kills}`).join('\n') +
@@ -573,27 +594,47 @@ async function handlePlan(interaction: Interaction, sub: Option) {
 
   const embed = {
     title: `🗺️ Assault Plan — ${plan.zone}`,
-    description: descLines.join('\n'),
-    color: 0xf59e0b,
+    url: siteUrl('/assault/locations'),
+    description: [
+      `**${guildName}**`,
+      scheduleLine,
+      nextUnix
+        ? `⏰ Next launch: <t:${nextUnix}:F> (<t:${nextUnix}:R>)`
+        : config ? '⏰ Next launch: — (no assault day in window)' : null,
+    ].filter(Boolean).join('\n'),
+    color: COLORS.amber,
     fields: [
-      { name: '🎯 Kill Priority (gold/hr)', value: killPriority, inline: false },
-      { name: '⚡ Prep Sequence', value: prep, inline: false },
-      { name: '🧪 Potions (4 slots)', value: potions, inline: false },
+      { name: '📈 Level', value: levelRange, inline: true },
+      { name: '🛐 Shrine', value: shrine.replace('🛐 ', ''), inline: true },
+      { name: '💰 Best', value: `${plan.total_gph.toLocaleString()} g/h`, inline: true },
+      { name: `🎯 Kill Priority — target ${targetMobs} mobs (+10–20% flee)`, value: killPriority.slice(0, 1024), inline: false },
+      { name: '⚡ Prep Sequence', value: prep, inline: true },
+      { name: '🧪 Potions (4 slots)', value: potions, inline: true },
       { name: '⚔️ Hits-to-Kill (target 2–3)', value: hitsTable.slice(0, 1024), inline: false },
-      { name: '🛡️ Gear', value: `[Gear tiers & upgrades](${GEAR_LINK}) — BiS3+ legendary rec. for Isle of Whispers`, inline: false },
     ],
+    footer: { text: 'Gear tiers & upgrades + full zone details on the website' },
   };
 
-  return NextResponse.json({ type: 4, data: { embeds: [embed] } });
+  return NextResponse.json({
+    type: 4,
+    data: {
+      embeds: [embed],
+      components: [{
+        type: 1,
+        components: [
+          { type: 2, style: 5, label: '🌐 Zone details', url: siteUrl('/assault/locations') },
+          { type: 2, style: 5, label: '🛡️ Gear guide', url: GEAR_LINK },
+        ],
+      }],
+    },
+  });
 }
 
 async function handleConquest() {
   const expSplit = EXP_SPLIT.map((x) => `**${x.pct}** ${x.label}`).join(' · ');
   const notes = [
-    '• Rounded down per enemy. Potions/buffs boost all three.',
-    '• Min guild EXP ignores negative class effects (e.g. Forsaken −50%).',
-    '• Higher-level / scaled enemies yield more EXP.',
-    '• Only battles started *after* assault launch count.',
+    '• Rounded down per enemy; potions/buffs boost all three. Higher-level enemies yield more.',
+    '• Only battles started *after* assault launch count. Min guild EXP ignores negative class effects.',
   ].join('\n');
 
   const territory =
@@ -609,11 +650,12 @@ async function handleConquest() {
 
   const embed = {
     title: '⚔️ Conquest Mechanics',
+    url: siteUrl('/assault/conquest'),
     description: 'How EXP, territory, and shard rewards work.',
-    color: 0x8b5cf6,
+    color: COLORS.purple,
     fields: [
       { name: '⚡ EXP split per kill', value: `${expSplit}\n\n${notes}`, inline: false },
-      { name: '⏳ Waves & cost', value: 'Wave length: **1 hour** · Cost: **1 mark / wave**', inline: false },
+      { name: '⏳ Waves & cost', value: 'Wave length: **1 hour** · Cost: **1 mark / wave** · You can place on both leaderboards per zone; rewards stack across zones.', inline: false },
       {
         name: '👑 Territory boosts (next season, top 10)',
         value:
@@ -623,11 +665,10 @@ async function handleConquest() {
       },
       { name: '🏆 EXP leaderboard rewards', value: fmtRewards(EXP_REWARDS), inline: true },
       { name: '🎯 Kills leaderboard rewards', value: fmtRewards(KILL_REWARDS), inline: true },
-      { name: '💡 Note', value: 'You can place on both leaderboards per zone. Rewards stack across zones.', inline: false },
     ],
   };
 
-  return NextResponse.json({ type: 4, data: { embeds: [embed], flags: 64 } });
+  return NextResponse.json({ type: 4, data: { embeds: [embed], components: [linkRow('/assault/conquest', 'Conquest details')], flags: 64 } });
 }
 
 function qualityEmoji(q: string | null | undefined): string {
@@ -1086,7 +1127,7 @@ async function handleLoadout(interaction: Interaction, sub: Option) {
     combat,
     xp,
   });
-  return NextResponse.json({ type: 4, data: { embeds: [embed], flags: 64 } });
+  return NextResponse.json({ type: 4, data: { embeds: [embed], components: [linkRow('/assault/potions', 'Edit on website')], flags: 64 } });
 }
 
 interface ComponentInteraction {

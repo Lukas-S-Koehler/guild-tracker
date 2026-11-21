@@ -360,7 +360,7 @@ export async function removeGuildMemberRole(
 export async function editOriginalInteractionResponse(
   applicationId: string,
   interactionToken: string,
-  payload: { content?: string; flags?: number; allowed_mentions?: unknown; embeds?: unknown[] }
+  payload: { content?: string; flags?: number; allowed_mentions?: unknown; embeds?: unknown[]; components?: unknown[] }
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch(

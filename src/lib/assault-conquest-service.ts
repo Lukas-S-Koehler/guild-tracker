@@ -1,6 +1,8 @@
 import { createAdminClient } from '@/lib/supabase-server';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { postToChannelRich } from '@/lib/discord-api';
+import { formatGold } from '@/lib/utils';
+import { COLORS, podium, statFields, siteUrl, linkRow } from '@/lib/assault-embed';
 import { getCurrentSeason, storeZoneStandings, storeSeasonContributions } from '@/lib/assault-standings-service';
 
 export interface AssaultConquestConfig {
@@ -304,22 +306,48 @@ export async function postFinalizeEmbed(
   const final = opts.final ?? true;
   if (!config.announcement_channel_id) return null;
 
-  const fields = top.slice(0, 10).map((c, i) => ({
-    name: `#${i + 1} ${c.name}${c.level ? ` (Lv ${c.level})` : ''}`,
-    value: `${c.experience.toLocaleString()} XP · ${c.kills.toLocaleString()} kills`,
-    inline: false,
-  }));
+  const guildName = config.guild_name ?? run.guild_id;
+  const n = top.length;
+  const totalXp = run.total_experience;
+  const avgXp = n > 0 ? Math.round(totalXp / n) : 0;
+  const topKiller = [...top].sort((a, b) => b.kills - a.kills)[0];
+  const startUnix = Math.floor(new Date(run.starts_at).getTime() / 1000);
+
+  const descLines = [
+    `**${guildName}** ${final ? 'finished this wave' : 'wave progress so far'} · launched <t:${startUnix}:R>`,
+    '',
+    n > 0
+      ? podium(top.map(c => ({ name: c.name, level: c.level, experience: c.experience, kills: c.kills })), { max: 10, totalXp })
+      : '_No contributions recorded._',
+  ];
+
+  const fields = [
+    ...statFields([
+      ['⚡ Total XP', formatGold(totalXp)],
+      ['⚔️ Kills', run.total_kills.toLocaleString()],
+      ['👥 Participants', String(n)],
+    ]),
+    ...(n > 0
+      ? statFields([
+          ['📊 Avg XP / player', formatGold(avgXp)],
+          ...(topKiller && topKiller.name !== top[0].name
+            ? [['🎯 Top killer', `${topKiller.name} · ${topKiller.kills.toLocaleString()}`] as [string, string]]
+            : []),
+        ])
+      : []),
+  ];
 
   const embed = {
     title: `⚔️ ${opts.label ?? 'Assault Complete'} — ${run.zone_name}${opts.wave ? ` · Wave ${opts.wave}` : ''}`,
-    description: `**${config.guild_name ?? run.guild_id}** ${final ? 'finished this wave' : 'wave progress so far'}.\n\nWave total: **${run.total_experience.toLocaleString()} XP** · **${run.total_kills.toLocaleString()} kills** · **${top.length}** participants`,
-    color: 0xff6b35,
-    fields: fields.length > 0 ? fields : [{ name: 'No contributions recorded', value: '—', inline: false }],
+    url: siteUrl('/assault/stats'),
+    description: descLines.join('\n').slice(0, 4000),
+    color: final ? COLORS.green : COLORS.orange,
+    fields,
     timestamp: new Date().toISOString(),
-    footer: { text: `Season ${run.season_number ?? '?'} · ${new Date(run.starts_at).toISOString().slice(0, 10)}` },
+    footer: { text: `Season ${run.season_number ?? '?'} · ${final ? 'Final' : 'Interim'} · full stats on the website` },
   };
 
-  const res = await postToChannelRich(config.announcement_channel_id, { embeds: [embed] });
+  const res = await postToChannelRich(config.announcement_channel_id, { embeds: [embed], components: [linkRow('/assault/stats', 'Full stats & hall of fame')] });
   if (!res.ok) return null;
 
   if (res.messageId && final) {
@@ -440,7 +468,7 @@ export async function syncRunForLaunch(
   const { data: fresh } = await supabase.from('assault_runs').select('*').eq('id', run.id).single();
   if (opts.post !== false) {
     await postFinalizeEmbed((fresh ?? run) as AssaultRunRow, config, top, {
-      label: final ? 'Assault Final Stats (25h)' : 'Assault Update (13h)',
+      label: final ? 'Assault Final Stats' : 'Assault Update',
       final,
       wave,
     });
