@@ -5,6 +5,7 @@ import {
   deleteChannelMessage,
   editChannelMessageRich,
   editOriginalInteractionResponse,
+  listChannelMessages,
   pinChannelMessage,
   postToChannelRich,
 } from '@/lib/discord-api';
@@ -34,29 +35,64 @@ async function readState(): Promise<GuideState | null> {
 }
 
 async function writeState(state: GuideState) {
-  await createAdminClient().from('app_settings').upsert({ key: STATE_KEY, value: JSON.stringify(state) });
+  const { error } = await createAdminClient()
+    .from('app_settings')
+    .upsert({ key: STATE_KEY, value: JSON.stringify(state) }, { onConflict: 'key' });
+  if (error) throw new Error(`Saving guide state failed: ${error.message}`);
+}
+
+// Stay under Discord's per-channel rate limit (5 writes / 5s).
+const pace = () => new Promise((r) => setTimeout(r, 1100));
+
+const GUIDE_PREFIXES = [
+  '# 📖 IdleMMO Guide',
+  '📖 Publishing guide',
+  '## 🌐 Read it on the web',
+  ...GUIDE_SECTIONS.map((s) => `## ${s.emoji} ${s.title}`),
+];
+const isGuideMessage = (content: string) =>
+  GUIDE_PREFIXES.some((p) => content.startsWith(p)) || content.includes('Back to index');
+
+/** Delete guide messages this bot posted in a channel (used when we've lost track of IDs). */
+async function cleanupChannel(channelId: string, botId: string): Promise<number> {
+  const r = await listChannelMessages(channelId);
+  let n = 0;
+  for (const m of r.messages ?? []) {
+    if (m.author.id === botId && isGuideMessage(m.content)) {
+      await deleteChannelMessage(channelId, m.id);
+      n++;
+      await pace();
+    }
+  }
+  return n;
 }
 
 function buildIndex(guildId: string, channelId: string, firstIds: string[]) {
-  // Bare message links render as clickable jump pills; masked [text](discord link) does not.
-  const lines = GUIDE_SECTIONS.map((s, i) => `${s.emoji} **${shortTitle(s)}** → ${msgLink(guildId, channelId, firstIds[i])}`);
+  const lines = GUIDE_SECTIONS.map((s, i) => `${s.emoji} **[${shortTitle(s)}](${msgLink(guildId, channelId, firstIds[i])})**`);
   return [
     '# 📖 IdleMMO Guide',
     '-# Goals, typical paths and tips from the community. Tap a section to jump to it.',
     '',
     ...lines,
     '',
-    `🌐 Web version (nicer view): ${GUIDE_SITE_URL}/guide`,
-    `-# Updated <t:${Math.floor(Date.now() / 1000)}:R>`,
+    `🌐 [Web version](<${GUIDE_SITE_URL}/guide>) · updated <t:${Math.floor(Date.now() / 1000)}:R>`,
   ].join('\n');
 }
 
-export async function publishGuide(guildId: string, channelId: string, fresh: boolean): Promise<string> {
+export async function publishGuide(guildId: string, channelId: string, botId: string, fresh: boolean): Promise<string> {
   const prev = await readState();
   const reuse = !fresh && prev?.channel_id === channelId && prev.message_ids.length > 0;
 
-  if (!reuse && fresh && prev) {
-    for (const id of prev.message_ids) await deleteChannelMessage(prev.channel_id, id);
+  let removed = 0;
+  if (!reuse) {
+    // Old tracked guide elsewhere → remove it; then sweep this channel for untracked leftovers.
+    if (prev && prev.channel_id !== channelId) {
+      for (const id of prev.message_ids) {
+        await deleteChannelMessage(prev.channel_id, id);
+        await pace();
+      }
+    }
+    removed = await cleanupChannel(channelId, botId);
   }
 
   let indexId: string;
@@ -68,6 +104,8 @@ export async function publishGuide(guildId: string, channelId: string, fresh: bo
     if (!r.ok || !r.messageId) return `❌ Couldn't post here: ${r.error}`;
     indexId = r.messageId;
     slots = [];
+    await writeState({ guild_id: guildId, channel_id: channelId, message_ids: [indexId] });
+    await pace();
   }
 
   const footer = `-# ⬆️ Back to index → ${msgLink(guildId, channelId, indexId)}`;
@@ -101,11 +139,19 @@ export async function publishGuide(guildId: string, channelId: string, fresh: bo
       if (j === 0 && indexed) firstIds.push(id);
       used.push(id);
       slot++;
+      // Persist as we go so a crash mid-publish never leaves untracked messages.
+      if (slot > slots.length) {
+        await writeState({ guild_id: guildId, channel_id: channelId, message_ids: [indexId, ...used] });
+      }
+      await pace();
     }
   }
 
   // Guide got shorter → drop leftover slots.
-  for (const id of slots.slice(slot)) await deleteChannelMessage(channelId, id);
+  for (const id of slots.slice(slot)) {
+    await deleteChannelMessage(channelId, id);
+    await pace();
+  }
 
   const idx = await editChannelMessageRich(channelId, indexId, payload(buildIndex(guildId, channelId, firstIds)));
   if (!idx.ok) return `❌ Couldn't update the index: ${idx.error}`;
@@ -119,7 +165,8 @@ export async function publishGuide(guildId: string, channelId: string, fresh: bo
   await writeState({ guild_id: guildId, channel_id: channelId, message_ids: [indexId, ...used] });
 
   const verb = reuse ? 'Updated' : 'Published';
-  return `✅ ${verb} guide: ${GUIDE_SECTIONS.length} sections, ${used.length} messages. Index: ${msgLink(guildId, channelId, indexId)}${pinNote}`;
+  const cleaned = removed ? ` Removed ${removed} old guide messages.` : '';
+  return `✅ ${verb} guide: ${GUIDE_SECTIONS.length} sections, ${used.length} messages.${cleaned} Index: ${msgLink(guildId, channelId, indexId)}${pinNote}`;
 }
 
 interface GuideInteraction {
@@ -147,7 +194,7 @@ export async function handleGuideCommand(i: GuideInteraction, staffRoleId: strin
       (async () => {
         let content: string;
         try {
-          content = await publishGuide(guild_id, channel_id, fresh);
+          content = await publishGuide(guild_id, channel_id, i.application_id, fresh);
         } catch (err) {
           content = `❌ ${String(err)}`;
         }

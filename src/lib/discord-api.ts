@@ -160,6 +160,21 @@ export async function deleteChannelMessage(
   }
 }
 
+/** Fetch the most recent messages in a channel (max 100). */
+export async function listChannelMessages(
+  channelId: string,
+  limit = 100
+): Promise<{ ok: boolean; messages?: Array<{ id: string; content: string; author: { id: string } }>; error?: string }> {
+  try {
+    const messages = await discordFetch<Array<{ id: string; content: string; author: { id: string } }>>(
+      `/channels/${channelId}/messages?limit=${Math.min(limit, 100)}`
+    );
+    return { ok: true, messages };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 /** Pin a message in a channel (bot needs Pin Messages / Manage Messages). */
 export async function pinChannelMessage(
   channelId: string,
