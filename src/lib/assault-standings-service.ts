@@ -91,33 +91,60 @@ export async function storeSeasonContributions(zone: ConquestZone, season: numbe
   return n;
 }
 
+/** IdleMMO guild id -> that guild's own API key (guild_config). */
+export async function getGuildApiKeys(): Promise<Map<number, string>> {
+  const supabase = createAdminClient();
+  const { data } = await supabase.from('guild_config').select('guild_id, api_key').not('api_key', 'is', null);
+  const map = new Map<number, string>();
+  for (const r of (data ?? []) as { guild_id: string; api_key: string }[]) {
+    const id = parseInt(r.guild_id, 10);
+    if (!Number.isNaN(id) && r.api_key) map.set(id, r.api_key);
+  }
+  return map;
+}
+
 /**
- * Sync standings for one season: one conquest-view call (all zones, all guilds),
- * then an inspect call per zone where one of our guilds appears (for member contributions).
+ * Sync standings for one season: one conquest-view call (all zones, all guilds), then for each
+ * location where a guild with its own API key appears, an inspect call WITH THAT GUILD'S KEY.
+ * (The inspect endpoint only returns member contributions for the key's own guild.)
  */
 export async function syncSeason(
   api: IdleMMOApi,
   season: number,
   currentSeason: number,
-  trackedIds: Set<number>,
-): Promise<{ zones: number; standings: number; contributions: number; errors: string[] }> {
+  keys: Map<number, string>,
+): Promise<{ zones: number; standings: number; contributions: number; guildsWithData: number; errors: string[] }> {
   const errors: string[] = [];
   const seasonParam = season === currentSeason ? undefined : season;
   const view = await api.getConquestView(seasonParam);
   let standings = 0;
   let contributions = 0;
+  const withData = new Set<number>();
+  const apis = new Map<number, IdleMMOApi>();
   const zones = Object.values(view.zones);
   for (const zone of zones) {
     try {
       standings += await storeZoneStandings(zone, season);
-      if (!zone.guilds?.some(g => trackedIds.has(g.guild.id))) continue;
-      const inspect = await api.inspectConquestZone(zone.location.id, seasonParam);
-      contributions += await storeSeasonContributions(inspect.zone, season, trackedIds);
     } catch (e) {
-      errors.push(`zone ${zone.location.id}: ${String(e)}`);
+      errors.push(`zone ${zone.location.id} standings: ${String(e)}`);
+      continue;
+    }
+    for (const g of zone.guilds ?? []) {
+      const key = keys.get(g.guild.id);
+      if (!key) continue;
+      try {
+        let ga = apis.get(g.guild.id);
+        if (!ga) { ga = new IdleMMOApi(key); apis.set(g.guild.id, ga); }
+        const inspect = await ga.inspectConquestZone(zone.location.id, seasonParam);
+        const n = await storeSeasonContributions(inspect.zone, season, new Set([g.guild.id]));
+        contributions += n;
+        if (n > 0) withData.add(g.guild.id);
+      } catch (e) {
+        errors.push(`zone ${zone.location.id} guild ${g.guild.id}: ${String(e)}`);
+      }
     }
   }
-  return { zones: zones.length, standings, contributions, errors };
+  return { zones: zones.length, standings, contributions, guildsWithData: withData.size, errors };
 }
 
 /** True when the current season's standings are older than maxAgeMs. */

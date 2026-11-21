@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { listTrackedGuilds } from '@/lib/assault-conquest-service';
-import { getCurrentSeason, getDreamExternalIds, syncSeason } from '@/lib/assault-standings-service';
+import { getCurrentSeason, getGuildApiKeys, syncSeason } from '@/lib/assault-standings-service';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -24,14 +24,14 @@ export async function POST(req: NextRequest) {
   const tracked = await listTrackedGuilds();
   const key = tracked.find(t => t.api_key)?.api_key;
   if (!key) return NextResponse.json({ error: 'no api key available' }, { status: 400 });
-  // Member contributions for every Dream guild (not only our assault guilds)
-  const ids = new Set(await getDreamExternalIds());
+  // Member contributions per guild, fetched with that guild's own key (view-only data)
+  const keys = await getGuildApiKeys();
 
   const api = new IdleMMOApi(key);
   const results: Record<number, unknown> = {};
   for (let season = to; season >= from; season--) {
     try {
-      results[season] = await syncSeason(api, season, current, ids);
+      results[season] = await syncSeason(api, season, current, keys);
     } catch (e) {
       results[season] = { error: String(e) };
     }
