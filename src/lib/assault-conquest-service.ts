@@ -79,14 +79,31 @@ export interface AssaultRunRow {
 
 export async function upsertRun(row: Omit<AssaultRunRow, 'id' | 'total_kills' | 'total_experience' | 'status' | 'snapshot_taken_at' | 'discord_message_id'>): Promise<AssaultRunRow> {
   const supabase = createAdminClient();
-  const { data: existing } = await supabase
+  // Match an existing run (exact or a scheduled-time placeholder within +-3h) and adopt the API's exact times
+  const t = new Date(row.starts_at).getTime();
+  const { data: near } = await supabase
     .from('assault_runs')
     .select('*')
     .eq('external_guild_id', row.external_guild_id)
     .eq('zone_id', row.zone_id)
-    .eq('starts_at', row.starts_at)
+    .gte('starts_at', new Date(t - 3 * 3600 * 1000).toISOString())
+    .lte('starts_at', new Date(t + 3 * 3600 * 1000).toISOString())
+    .order('starts_at', { ascending: true })
+    .limit(1)
     .maybeSingle();
-  if (existing) return existing as AssaultRunRow;
+  if (near) {
+    const ex = near as AssaultRunRow;
+    if (new Date(ex.starts_at).getTime() !== t || new Date(ex.ends_at).getTime() !== new Date(row.ends_at).getTime()) {
+      const { data: upd } = await supabase
+        .from('assault_runs')
+        .update({ starts_at: row.starts_at, ends_at: row.ends_at, updated_at: new Date().toISOString() })
+        .eq('id', ex.id)
+        .select('*')
+        .single();
+      return (upd as AssaultRunRow) ?? ex;
+    }
+    return ex;
+  }
 
   const season = row.season_number ?? (await getCurrentSeason());
   const { data, error } = await supabase
@@ -336,6 +353,20 @@ export async function findRunForLaunch(
   // Discover from conquest view (only works while the assault is still listed as active)
   if (!config.api_key || !config.external_guild_id) return null;
   const view = await new IdleMMOApi(config.api_key).getConquestView();
+  const scheduled = async () => {
+    // Not listed any more (assault already ended): create the run from the schedule so the wave can still be synced.
+    if (!config.tracked_zone_id) return null;
+    return upsertRun({
+      guild_id: config.guild_id,
+      external_guild_id: config.external_guild_id!,
+      zone_id: config.tracked_zone_id,
+      zone_key: config.tracked_zone_key ?? '',
+      zone_name: config.zone_name,
+      season_number: null,
+      starts_at: new Date(launchUnix * 1000).toISOString(),
+      ends_at: new Date((launchUnix + 9 * 3600) * 1000).toISOString(),
+    });
+  };
   for (const zone of Object.values(view.zones)) {
     for (const aa of zone.active_assaults ?? []) {
       if (aa.guild.id !== config.external_guild_id) continue;
@@ -354,7 +385,7 @@ export async function findRunForLaunch(
       });
     }
   }
-  return null;
+  return scheduled();
 }
 
 /** Scheduled stat sync (+13h interim, +25h final). Posts a stats embed to the announcement channel. */
@@ -362,16 +393,19 @@ export async function syncRunForLaunch(
   config: AssaultConquestConfig,
   launchUnix: number,
   final: boolean,
-): Promise<{ ok: boolean; error?: string }> {
+  opts: { post?: boolean } = {},
+): Promise<{ ok: boolean; error?: string; run_id?: string; wave?: number; total_experience?: number; participants?: number }> {
   const run = await findRunForLaunch(config, launchUnix);
   if (!run) return { ok: false, error: 'no assault run found for launch' };
   const { top, wave } = await syncRun(run, config, { final });
   const supabase = createAdminClient();
   const { data: fresh } = await supabase.from('assault_runs').select('*').eq('id', run.id).single();
-  await postFinalizeEmbed((fresh ?? run) as AssaultRunRow, config, top, {
-    label: final ? 'Assault Final Stats (25h)' : 'Assault Update (13h)',
-    final,
-    wave,
-  });
-  return { ok: true };
+  if (opts.post !== false) {
+    await postFinalizeEmbed((fresh ?? run) as AssaultRunRow, config, top, {
+      label: final ? 'Assault Final Stats (25h)' : 'Assault Update (13h)',
+      final,
+      wave,
+    });
+  }
+  return { ok: true, run_id: run.id, wave, total_experience: Number((fresh as AssaultRunRow | null)?.total_experience ?? 0), participants: top.length };
 }
