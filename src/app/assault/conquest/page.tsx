@@ -6,8 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, Loader2 } from 'lucide-react';
+import { DREAM_BADGE_URL } from '@/lib/dream-badge';
 
-interface FieldEntry { position: number; guild_id: number; name: string; tag: string | null; experience: number; kills: number; ours: boolean }
+interface FieldEntry { position: number; guild_id: number; name: string; tag: string | null; experience: number; kills: number; ours: boolean; dream?: boolean }
 interface Zone { zone_id: number; zone_name: string; image_url: string | null; guild_count: number; guilds: FieldEntry[] }
 interface Payload { current_season: number; season: number; seasons: number[]; zones: Zone[]; error?: string }
 
@@ -19,9 +20,13 @@ const compact = (n: number) => Intl.NumberFormat('en', { notation: 'compact', ma
 
 function Row({ f }: { f: FieldEntry }) {
   return (
-    <tr className={`border-t ${f.ours ? 'bg-orange-500/10 font-semibold text-orange-400' : ''}`}>
+    <tr className={`border-t ${f.ours ? 'bg-orange-500/10 font-semibold text-orange-400' : f.dream ? 'bg-sky-500/10 text-sky-300' : ''}`}>
       <td className="py-1 w-10 tabular-nums">{ordinal(f.position)}</td>
-      <td className="py-1">{f.name}{f.tag ? <span className="text-xs text-muted-foreground ml-1">[{f.tag}]</span> : null}</td>
+      <td className="py-1">
+        {f.dream && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={DREAM_BADGE_URL} alt="Dream" className="inline h-4 w-4 object-contain mr-1 align-text-bottom" />
+        )}{f.name}{f.tag ? <span className="text-xs text-muted-foreground ml-1">[{f.tag}]</span> : null}</td>
       <td className="py-1 text-right tabular-nums text-xs">{f.kills.toLocaleString()}</td>
       <td className="py-1 text-right tabular-nums">{compact(f.experience)}</td>
     </tr>
@@ -32,6 +37,22 @@ export default function ConquestLocationsPage() {
   const [season, setSeason] = useState<number | null>(null);
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
+  const [dreamOnly, setDreamOnly] = useState(true);
+
+  // ?season=N&zone=ID deep link (e.g. from best finishes)
+  const [focusZone, setFocusZone] = useState<number | null>(null);
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const sn = parseInt(q.get('season') ?? '', 10);
+    const zn = parseInt(q.get('zone') ?? '', 10);
+    if (sn) setSeason(sn);
+    if (zn) setFocusZone(zn);
+  }, []);
+
+  useEffect(() => {
+    if (!data || focusZone == null) return;
+    document.getElementById(`zone-${focusZone}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [data, focusZone]);
 
   useEffect(() => {
     setLoading(true);
@@ -48,6 +69,10 @@ export default function ConquestLocationsPage() {
             <p className="text-sm text-muted-foreground">Guild rankings for every location. Our guilds are highlighted.</p>
           </div>
         </div>
+        <div className="flex items-center gap-2">
+        <Button variant={dreamOnly ? 'default' : 'outline'} size="sm" onClick={() => setDreamOnly(v => !v)}>
+          Dream guilds only
+        </Button>
         <select
           className="border rounded px-2 py-1 text-sm bg-background"
           value={data?.season ?? ''}
@@ -55,6 +80,7 @@ export default function ConquestLocationsPage() {
         >
           {data?.seasons.map(s => <option key={s} value={s}>Season {s}{s === data.current_season ? ' (current)' : ''}</option>)}
         </select>
+        </div>
       </div>
 
       {loading && <Loader2 className="h-5 w-5 animate-spin" />}
@@ -64,12 +90,12 @@ export default function ConquestLocationsPage() {
       )}
 
       <div className="grid gap-4 md:grid-cols-2">
-        {data?.zones.map(z => {
+        {data?.zones.filter(z => !dreamOnly || z.guilds.some(f => f.dream || f.ours)).map(z => {
           const top = z.guilds.slice(0, 10);
           const rest = z.guilds.slice(10);
           const oursInRest = rest.filter(f => f.ours);
           return (
-            <Card key={z.zone_id} className="overflow-hidden">
+            <Card key={z.zone_id} id={`zone-${z.zone_id}`} className={`overflow-hidden scroll-mt-20 ${focusZone === z.zone_id ? 'ring-2 ring-orange-500/60' : ''}`}>
               <div className="relative h-16 bg-muted">
                 {z.image_url && (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -101,7 +127,7 @@ export default function ConquestLocationsPage() {
           );
         })}
       </div>
-      <CardDescription className="text-xs">Columns: rank, guild, kills, XP.</CardDescription>
+      <CardDescription className="text-xs">Columns: rank, guild, kills, XP. Orange = our assault guilds, blue = other Dream guilds.</CardDescription>
     </div>
   );
 }

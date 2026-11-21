@@ -50,7 +50,7 @@ export async function GET() {
   const out = ((configs as Config[]) ?? []).map((c) => {
     const gc = Array.isArray(c.guild_config) ? c.guild_config[0] : c.guild_config;
     const guildRuns = (runs ?? []).filter((r) => r.guild_id === c.guild_id);
-    const lastFinalized = guildRuns.find((r) => r.status === 'finalized');
+    const lastFinalized = guildRuns.find((r) => Number(r.total_experience) > 0 && new Date(r.starts_at) <= new Date());
     const active = guildRuns.find((r) => r.status === 'collecting' && new Date(r.ends_at) > new Date());
     return {
       guild_id: c.guild_id,

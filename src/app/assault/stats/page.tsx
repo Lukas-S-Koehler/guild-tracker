@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, Loader2, Trophy, Crown, Globe } from 'lucide-react';
+import { ArrowLeft, Loader2, Trophy, Globe } from 'lucide-react';
 import { DREAM_BADGE_URL } from '@/lib/dream-badge';
 
 interface FieldEntry { position: number; guild_id: number; name: string; tag: string | null; experience: number; kills: number; ours: boolean }
@@ -205,23 +205,6 @@ export default function AssaultStatsPage() {
                 ))}
               </div>
             </section>
-          )}
-
-          {data.best_finishes.length > 0 && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-base"><Crown className="h-4 w-4" />Best finishes</CardTitle>
-                <CardDescription>Our best placement per location, across all stored seasons.</CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-wrap gap-2">
-                {data.best_finishes.slice(0, 12).map(b => (
-                  <Badge key={b.zone_id} variant="secondary" className="gap-1 font-normal">
-                    <strong>{ordinal(b.position)}</strong>/{b.of} {b.zone_name}
-                    <span className="opacity-60">S{b.season_number}</span>
-                  </Badge>
-                ))}
-              </CardContent>
-            </Card>
           )}
 
           <Card>

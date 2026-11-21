@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, MapPin, BookOpen, CheckSquare, BarChart3, Settings, Swords, FlaskConical, Trophy, Clock, Landmark, Medal, Globe } from 'lucide-react';
+import { Loader2, MapPin, BookOpen, CheckSquare, BarChart3, Settings, Swords, FlaskConical, Trophy, Clock, Landmark, Medal, Globe, Crown } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { DREAM_BADGE_URL } from '@/lib/dream-badge';
 
@@ -24,7 +24,7 @@ interface GuildSummary {
   season_end: string | null;
   next_launch_unix: number | null;
   active_run: { ends_at: string; starts_at: string; zone_name: string } | null;
-  last_run: { ends_at: string; zone_name: string; total_kills: number; total_experience: number } | null;
+  last_run: { status?: string; starts_at: string; ends_at: string; zone_name: string; total_kills: number; total_experience: number } | null;
 }
 
 interface Standings {
@@ -33,6 +33,7 @@ interface Standings {
     zones: Array<{ zone_id: number; zone_name: string; position: number; of: number; experience: number }>;
   }>;
   members: Array<{ character_id: number; character_name: string; guild_id: number; experience: number }>;
+  best_finishes?: Array<{ zone_id: number; zone_name: string; season_number: number; guild_name: string; position: number; of: number; experience: number; image_url?: string | null }>;
 }
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -154,11 +155,18 @@ function GuildHero({ g, standings, nowMs }: { g: GuildSummary; standings: Standi
             ) : <div className="text-muted-foreground">—</div>}
           </div>
           <div className="rounded-lg border p-3">
-            <div className="text-xs text-muted-foreground mb-0.5">Last assault</div>
+            <div className="text-xs text-muted-foreground mb-0.5 flex items-center gap-1.5">
+              Last assault
+              {g.last_run && g.last_run.status !== 'finalized' && (
+                <span title="Data is still being collected; final numbers after the 25h sync" className="inline-flex items-center gap-1 text-[10px] text-amber-400/90">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />not final
+                </span>
+              )}
+            </div>
             {g.last_run ? (
               <>
                 <div className="text-2xl font-bold">{compact(g.last_run.total_experience)}<span className="text-sm font-normal text-muted-foreground"> XP</span></div>
-                <div className="text-xs text-muted-foreground">{g.last_run.total_kills.toLocaleString()} kills</div>
+                <div className="text-xs text-muted-foreground">{g.last_run.total_kills.toLocaleString()} kills · {new Date(g.last_run.starts_at).toLocaleDateString()}</div>
               </>
             ) : <div className="text-muted-foreground">—</div>}
           </div>
@@ -242,6 +250,45 @@ export default function AssaultLandingPage() {
         <p className="text-xs text-muted-foreground">
           Paused: {pausedGuilds.map(g => g.guild_name).join(', ')}
         </p>
+      )}
+
+      {standings?.best_finishes && standings.best_finishes.length > 0 && (
+        <section className="space-y-3">
+          <div className="flex items-end justify-between">
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2"><Crown className="h-5 w-5 text-amber-500" />Best finishes</h2>
+              <p className="text-xs text-muted-foreground">Our highest placement per location across all stored seasons.</p>
+            </div>
+            <Link href="/assault/conquest" className="text-xs text-muted-foreground underline">All locations →</Link>
+          </div>
+          <div className="grid gap-2.5 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
+            {standings.best_finishes.map(b => {
+              const tone = b.position === 1 ? 'border-amber-500/70' : b.position === 2 ? 'border-slate-400/60' : b.position === 3 ? 'border-amber-700/60' : '';
+              const label = b.position === 1 ? 'text-amber-500' : b.position === 2 ? 'text-slate-300' : b.position === 3 ? 'text-amber-600' : 'text-foreground';
+              return (
+                <Link key={b.zone_id} href={`/assault/conquest?season=${b.season_number}&zone=${b.zone_id}`}>
+                  <div className={`group relative overflow-hidden rounded-xl border bg-card h-full hover:border-orange-500/60 transition ${tone}`}>
+                    {b.image_url && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={b.image_url} alt="" className="absolute inset-0 h-full w-full object-cover opacity-25 group-hover:opacity-35 transition" loading="lazy" />
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-card via-card/70 to-card/20" />
+                    <div className="relative p-3 flex flex-col h-full min-h-[104px]">
+                      <div className="text-xs font-medium truncate">{b.zone_name}</div>
+                      <div className={`mt-auto text-3xl font-bold leading-none ${label}`}>
+                        {ordinal(b.position)}<span className="text-xs font-normal text-muted-foreground"> /{b.of}</span>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground mt-1 flex justify-between">
+                        <span>Season {b.season_number}</span>
+                        <span className="tabular-nums">{compact(b.experience)} XP</span>
+                      </div>
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
       )}
 
       <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-4">

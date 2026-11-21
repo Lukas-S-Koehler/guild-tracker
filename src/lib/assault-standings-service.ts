@@ -149,7 +149,7 @@ export interface ZoneFinish {
   guild_id: number; guild_name: string; position: number; of: number; kills: number; experience: number;
 }
 
-export interface FieldEntry { position: number; guild_id: number; name: string; tag: string | null; experience: number; kills: number; ours: boolean }
+export interface FieldEntry { position: number; guild_id: number; name: string; tag: string | null; experience: number; kills: number; ours: boolean; dream?: boolean }
 
 export interface SeasonOverview {
   season: number;
@@ -289,8 +289,10 @@ export async function getBestFinishes(trackedIds: number[]): Promise<ZoneFinish[
       best.set(r.zone_id, r);
     }
   }
+  const meta = await getLocationMeta().catch(() => new Map());
   return Array.from(best.values())
     .map(r => ({
+      image_url: meta.get(r.zone_id)?.image_url ?? null,
       zone_id: r.zone_id, zone_name: r.zone_name, season_number: r.season_number,
       guild_id: r.external_guild_id, guild_name: r.guild_name, position: r.position,
       of: r.zone_guild_count, kills: Number(r.kills), experience: Number(r.experience),
@@ -451,6 +453,8 @@ export async function getSeasonZones(season: number, trackedIds: number[]): Prom
   const rows = await fetchAll<StandingRow>((f, t) =>
     supabase.from('assault_zone_standings').select('*').eq('season_number', season).range(f, t));
   const meta = await getLocationMeta().catch(() => new Map());
+  const { data: dg } = await supabase.from('guilds').select('id');
+  const dreamIds = new Set(((dg ?? []) as { id: string }[]).map(g => parseInt(g.id, 10)).filter(n => !Number.isNaN(n)));
   const byZone = new Map<number, StandingRow[]>();
   for (const r of rows) byZone.set(r.zone_id, [...(byZone.get(r.zone_id) ?? []), r]);
   return Array.from(byZone.entries())
@@ -463,6 +467,7 @@ export async function getSeasonZones(season: number, trackedIds: number[]): Prom
       guilds: zr.sort((a, b) => a.position - b.position).map(r => ({
         position: r.position, guild_id: r.external_guild_id, name: r.guild_name, tag: r.guild_tag,
         experience: Number(r.experience), kills: Number(r.kills), ours: trackedIds.includes(r.external_guild_id),
+        dream: dreamIds.has(r.external_guild_id),
       })),
     }));
 }

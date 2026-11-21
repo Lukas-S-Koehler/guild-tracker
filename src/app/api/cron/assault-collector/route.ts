@@ -58,9 +58,10 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 2. Fallback only: quietly finalize runs the scheduler's 13h/25h syncs never finalized.
+  // 2. Fallback only: quietly finalize runs 2h after they end (XP is up to date by then). The 13h/25h scheduler syncs still
+  //    re-sync and post.
   //    (Posting + wave stats are handled by the scheduler's sync steps.)
-  const past = await listUnfinalizedPastRuns(new Date(now.getTime() - 30 * 3600 * 1000));
+  const past = await listUnfinalizedPastRuns(new Date(now.getTime() - 2 * 3600 * 1000));
   for (const run of past) {
     const cfg = configByExternal.get(run.external_guild_id);
     if (!cfg) continue;
