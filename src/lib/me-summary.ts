@@ -1,14 +1,19 @@
 /**
  * Personal dashboard data for /me.
  *
- * Everything is computed for one "focus" character (the claimed main by default,
- * or any character in the user's account bundle). Alts and warnings cover the
- * whole bundle. Inactivity mirrors /api/reports/inactivity so staff and member
- * see the same number.
+ * Default scope is the whole account (every character in the user's alt bundle).
+ * Passing a member_id narrows tiles, streak, heatmap, feed and journey to that one
+ * character. The daily check card, alts and warnings always cover the account.
+ *
+ * Activity is only checked once a day (GitHub daily-activity at 11:48 UTC), so the
+ * page reports the last checked game day instead of pretending to be live.
+ * Inactivity mirrors /api/reports/inactivity so staff and member see the same number.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getAccountCharacters, type AccountCharacter } from '@/lib/account-service';
 import { DAY_BOUNDARY_OFFSET_MINUTES } from '@/lib/activity-processor';
+import { IdleMMOApi } from '@/lib/idlemmo-api';
+import { bestRaidFor, guildRaids, type Raid } from '@/lib/raids';
 import {
   findLastMetWeek,
   getISOWeekKey,
@@ -19,8 +24,14 @@ import {
 } from '@/lib/warning-calculator';
 
 const DAY_MS = 86_400_000;
+const CL_REFRESH_MS = DAY_MS;
+/** Daily check: GitHub daily-activity.yml cron '48 11 * * *'. */
+const CHECK_UTC = { h: 11, m: 48 };
+const ASSAULT_TOP_GUILD = '138'; // Dream Invaders: hardcore assaults
+const ASSAULT_ENTRY_GUILD = '1184'; // Dream Engineers
 
 interface LogRow {
+  member_id: string;
   log_date: string;
   guild_id: string | null;
   raids: number | null;
@@ -28,7 +39,6 @@ interface LogRow {
   deposits_gold: number | null;
   met_requirement: boolean | null;
   bank_used: number | null;
-  bank_balance_after: number | null;
 }
 
 interface GuildRow {
@@ -38,32 +48,54 @@ interface GuildRow {
   min_level: number | null;
   display_order: number | null;
   is_active: boolean | null;
+  is_assault: boolean | null;
+}
+
+interface GuildCfg {
+  period: RequirementPeriod;
+  dailyReq: number;
+  weeklyReq: number;
+  depositsOnly: boolean;
+  overflow: boolean;
+  settings: Record<string, unknown>;
+  apiKey: string | null;
 }
 
 export interface FeedItem {
-  at: string; // ISO date or timestamp, sortable
+  at: string;
   kind: 'day' | 'warning' | 'join' | 'assault';
   title: string;
   detail?: string;
   tone: 'good' | 'bad' | 'warn' | 'info';
 }
 
+export interface CheckRow {
+  member_id: string;
+  ign: string;
+  guild_nickname: string | null;
+  period: RequirementPeriod;
+  required: number;
+  /** Daily: gold on the checked day. Weekly: week total as of the last check. */
+  contributed: number;
+  met: boolean;
+  bank_balance: number | null;
+  days_inactive: number;
+  warning_level: WarningLevel;
+  exempt: boolean;
+  week_end?: string;
+}
+
+export interface CharacterCard extends AccountCharacter {
+  last_seen: string | null;
+  combat_level: number | null;
+  is_focus: boolean;
+}
+
 export interface MeSummary {
   claimed: true;
-  focus: {
-    member_id: string;
-    ign: string;
-    avatar_url: string | null;
-    class: string | null;
-    total_level: number | null;
-    position: string | null;
-    guild_id: string | null;
-    guild_name: string | null;
-    guild_nickname: string | null;
-    in_dream_guild: boolean;
-    first_seen: string | null;
-    last_seen: string | null;
-  };
+  scope: 'account' | 'character';
+  /** Claimed main, or the selected character in character scope. */
+  focus: CharacterCard & { first_seen: string | null };
   tiles: {
     lifetime_raids: number;
     lifetime_gold: number;
@@ -75,37 +107,21 @@ export interface MeSummary {
     assault_experience: number;
     assault_runs: number;
   };
-  requirement: null | {
-    period: RequirementPeriod;
-    game_day: string;
-    resets_at: string;
-    required: number;
-    contributed: number;
-    raids: number;
-    met: boolean;
-    bank_balance: number;
-    overflow_enabled: boolean;
-    deposits_only: boolean;
-    week_end?: string;
-  };
+  check: { checked_day: string; next_check_at: string; rows: CheckRow[] };
+  status: { warning_level: WarningLevel; exempt: boolean };
   streak: { current: number; best: number; unit: 'day' | 'week' };
-  inactivity: null | {
-    days_inactive: number;
-    warning_level: WarningLevel;
-    exempt: boolean;
-    last_met: string | null;
-  };
   heatmap: { date: string; level: 0 | 1 | 2 | 3 }[];
   feed: FeedItem[];
   journey: { guild_id: string; name: string; nickname: string | null; from: string; to: string; days_logged: number; current: boolean }[];
+  raids: { guild: Raid[]; best: Raid | null; combat_level: number | null };
   nudge: null | {
-    kind: 'eligible' | 'next';
+    kind: 'eligible' | 'next' | 'assault';
     guild_name: string;
     guild_nickname: string | null;
     min_level: number;
     levels_needed: number;
   };
-  alts: (AccountCharacter & { last_seen: string | null; is_focus: boolean })[];
+  alts: CharacterCard[];
   warnings: {
     id: string;
     ign: string;
@@ -128,19 +144,26 @@ const addDays = (date: string, n: number) =>
   new Date(new Date(date + 'T00:00:00Z').getTime() + n * DAY_MS).toISOString().slice(0, 10);
 const daysBetween = (a: string, b: string) =>
   Math.round((new Date(b + 'T00:00:00Z').getTime() - new Date(a + 'T00:00:00Z').getTime()) / DAY_MS);
+const sev: Record<WarningLevel, number> = { safe: 0, warn1: 1, warn2: 2, kick: 3 };
 
-async function fetchLogs(supabase: SupabaseClient, memberIds: string[]): Promise<(LogRow & { member_id: string })[]> {
-  const out: (LogRow & { member_id: string })[] = [];
+function nextCheckAt(now = new Date()): string {
+  const t = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), CHECK_UTC.h, CHECK_UTC.m));
+  if (t <= now) t.setUTCDate(t.getUTCDate() + 1);
+  return t.toISOString();
+}
+
+async function fetchLogs(supabase: SupabaseClient, memberIds: string[]): Promise<LogRow[]> {
+  const out: LogRow[] = [];
   const page = 1000;
   for (let from = 0; ; from += page) {
     const { data, error } = await supabase
       .from('daily_logs')
-      .select('member_id, log_date, guild_id, raids, gold_donated, deposits_gold, met_requirement, bank_used, bank_balance_after')
+      .select('member_id, log_date, guild_id, raids, gold_donated, deposits_gold, met_requirement, bank_used')
       .in('member_id', memberIds)
       .order('log_date', { ascending: false })
       .range(from, from + page - 1);
     if (error || !data) break;
-    out.push(...(data as (LogRow & { member_id: string })[]));
+    out.push(...(data as LogRow[]));
     if (data.length < page) break;
   }
   return out;
@@ -148,6 +171,50 @@ async function fetchLogs(supabase: SupabaseClient, memberIds: string[]): Promise
 
 const gross = (l: LogRow, depositsOnly = false) =>
   depositsOnly ? Number(l.deposits_gold ?? 0) : Number(l.gold_donated ?? 0) + Number(l.deposits_gold ?? 0);
+
+/**
+ * Combat level per character, refreshed from the API at most once a day.
+ * Needs database/add-member-combat-level.sql; without it, returns nulls.
+ */
+async function loadCombatLevels(
+  supabase: SupabaseClient,
+  chars: AccountCharacter[],
+  cfgs: Map<string, GuildCfg>
+): Promise<Map<string, number | null>> {
+  const out = new Map<string, number | null>();
+  const { data, error } = await supabase
+    .from('members')
+    .select('id, combat_level, combat_level_synced_at')
+    .in('id', chars.map((c) => c.member_id));
+  if (error) return out; // column not migrated yet
+  const rows = new Map((data ?? []).map((r) => [r.id as string, r]));
+  const anyKey = Array.from(cfgs.values()).find((c) => c.apiKey)?.apiKey ?? null;
+
+  await Promise.all(
+    chars.map(async (c) => {
+      const row = rows.get(c.member_id);
+      const cached = (row?.combat_level as number | null) ?? null;
+      out.set(c.member_id, cached);
+      const fresh = row?.combat_level_synced_at && Date.now() - new Date(row.combat_level_synced_at).getTime() < CL_REFRESH_MS;
+      const key = (c.guild_id && cfgs.get(c.guild_id)?.apiKey) || anyKey;
+      if (fresh || !c.hashed_id || !key) return;
+      try {
+        const info = await new IdleMMOApi(key).getCharacterInformation(c.hashed_id);
+        const cl = info.skills?.combat?.level;
+        if (typeof cl === 'number' && cl > 0) {
+          out.set(c.member_id, cl);
+          await supabase
+            .from('members')
+            .update({ combat_level: cl, combat_level_synced_at: new Date().toISOString() })
+            .eq('id', c.member_id);
+        }
+      } catch (e) {
+        console.warn('[me-summary] combat level fetch failed for', c.ign, e);
+      }
+    })
+  );
+  return out;
+}
 
 export async function buildMeSummary(
   userId: string,
@@ -166,42 +233,59 @@ export async function buildMeSummary(
     return { claimed: false, pending: ign ? { ign } : null };
   }
 
-  const focusChar =
-    characters.find((c) => c.member_id === focusMemberId) ??
+  const selected = characters.find((c) => c.member_id === focusMemberId) ?? null;
+  const scope: MeSummary['scope'] = selected ? 'character' : 'account';
+  const main =
     characters.find((c) => c.claimed && c.in_dream_guild) ??
     characters.find((c) => c.in_dream_guild) ??
+    characters.find((c) => c.claimed) ??
     characters[0];
+  const focusChar = selected ?? main;
   const bundleIds = characters.map((c) => c.member_id);
+  const scopeIds = new Set(selected ? [selected.member_id] : bundleIds);
+  const dreamGuildIds = Array.from(new Set(characters.filter((c) => c.in_dream_guild && c.guild_id).map((c) => c.guild_id!)));
 
-  const [{ data: memberRows }, { data: guildRows }, logs, { data: warningRows }] = await Promise.all([
-    supabase.from('members').select('id, first_seen, last_seen, character_id, hashed_id').in('id', bundleIds),
-    supabase.from('guilds').select('id, name, nickname, min_level, display_order, is_active'),
-    fetchLogs(supabase, bundleIds),
-    supabase
-      .from('warnings')
-      .select('id, member_id, guild_id, warning_level, reason, is_auto, created_at')
-      .in('member_id', bundleIds)
-      .order('created_at', { ascending: false })
-      .limit(25),
-  ]);
+  const [{ data: memberRows }, { data: guildRows }, logs, { data: warningRows }, { data: cfgRows }, { data: bankRows }] =
+    await Promise.all([
+      supabase.from('members').select('id, first_seen, last_seen, character_id, hashed_id').in('id', bundleIds),
+      supabase.from('guilds').select('id, name, nickname, min_level, display_order, is_active, is_assault'),
+      fetchLogs(supabase, bundleIds),
+      supabase
+        .from('warnings')
+        .select('id, member_id, guild_id, warning_level, reason, is_auto, created_at')
+        .in('member_id', bundleIds)
+        .order('created_at', { ascending: false })
+        .limit(25),
+      supabase.from('guild_config').select('guild_id, api_key, settings').in('guild_id', dreamGuildIds.length ? dreamGuildIds : ['-']),
+      supabase.from('member_gold_bank').select('member_id, guild_id, balance').in('member_id', bundleIds),
+    ]);
   const memberMap = new Map((memberRows ?? []).map((m) => [m.id as string, m]));
   const guilds = (guildRows ?? []) as GuildRow[];
   const guildMap = new Map(guilds.map((g) => [g.id, g]));
-  const focusMember = memberMap.get(focusChar.member_id);
+  const ignOf = new Map(characters.map((c) => [c.member_id, c.ign]));
 
-  const focusLogs = logs.filter((l) => l.member_id === focusChar.member_id); // newest first
+  const cfgs = new Map<string, GuildCfg>();
+  for (const r of cfgRows ?? []) {
+    const s = (r.settings ?? {}) as Record<string, unknown>;
+    cfgs.set(r.guild_id as string, {
+      period: s.requirement_period === 'weekly' ? 'weekly' : 'daily',
+      dailyReq: Number(s.donation_requirement ?? 5000),
+      weeklyReq: Number(s.weekly_donation_requirement ?? 35000),
+      depositsOnly: s.deposits_only === true,
+      overflow: s.overflow_enabled !== false,
+      settings: s,
+      apiKey: (r.api_key as string | null) ?? null,
+    });
+  }
+  const focusCfg = focusChar.in_dream_guild && focusChar.guild_id ? cfgs.get(focusChar.guild_id) : undefined;
+  const period: RequirementPeriod = focusCfg?.period ?? 'daily';
+  const dailyReq = focusCfg?.dailyReq ?? 5000;
+
+  const combatLevels = await loadCombatLevels(supabase, characters, cfgs);
+
   const today = gameDayOf();
-
-  // ---- Guild config for the focus character's current guild
-  const { data: cfg } = focusChar.in_dream_guild && focusChar.guild_id
-    ? await supabase.from('guild_config').select('settings').eq('guild_id', focusChar.guild_id).maybeSingle()
-    : { data: null };
-  const settings = (cfg?.settings ?? {}) as Record<string, unknown>;
-  const period: RequirementPeriod = settings.requirement_period === 'weekly' ? 'weekly' : 'daily';
-  const dailyReq = Number(settings.donation_requirement ?? 5000);
-  const weeklyReq = Number(settings.weekly_donation_requirement ?? 35000);
-  const depositsOnly = settings.deposits_only === true;
-  const overflowEnabled = settings.overflow_enabled !== false;
+  const checkedDay = addDays(today, -1); // last game day the 11:48 check covered
+  const scopeLogs = logs.filter((l) => scopeIds.has(l.member_id)); // newest first
 
   // ---- Tiles
   const cutoff30 = addDays(today, -30);
@@ -209,105 +293,139 @@ export async function buildMeSummary(
     lifetime_raids: 0,
     lifetime_gold: 0,
     days_met: 0,
-    days_logged: focusLogs.length,
+    days_logged: 0,
     gold_30d: 0,
     raids_30d: 0,
     assault_kills: 0,
     assault_experience: 0,
     assault_runs: 0,
   };
-  for (const l of focusLogs) {
+  const loggedDays = new Set<string>();
+  const metDays = new Set<string>();
+  for (const l of scopeLogs) {
     tiles.lifetime_raids += l.raids ?? 0;
     tiles.lifetime_gold += gross(l);
-    if (l.met_requirement) tiles.days_met++;
+    loggedDays.add(l.log_date);
+    if (l.met_requirement) metDays.add(l.log_date);
     if (l.log_date > cutoff30) {
       tiles.gold_30d += gross(l);
       tiles.raids_30d += l.raids ?? 0;
     }
   }
+  tiles.days_logged = loggedDays.size;
+  tiles.days_met = metDays.size;
 
-  // ---- Requirement (current game day / ISO week)
-  let requirement: MeSummary['requirement'] = null;
-  if (focusChar.in_dream_guild && focusChar.guild_id) {
-    const inGuild = focusLogs.filter((l) => l.guild_id === focusChar.guild_id);
-    const todayLog = inGuild.find((l) => l.log_date === today);
-    const resets = new Date(addDays(today, 1) + 'T00:00:00Z');
-    resets.setUTCMinutes(DAY_BOUNDARY_OFFSET_MINUTES);
-    const { data: bank } = await supabase
-      .from('member_gold_bank')
-      .select('balance')
-      .eq('member_id', focusChar.member_id)
-      .eq('guild_id', focusChar.guild_id)
-      .maybeSingle();
-    if (period === 'weekly') {
-      const wk = getISOWeekKey(today);
-      const weekLogs = inGuild.filter((l) => getISOWeekKey(l.log_date) === wk);
-      const contributed = weekLogs.reduce((s, l) => s + gross(l, depositsOnly), 0);
-      requirement = {
-        period,
-        game_day: today,
-        resets_at: resets.toISOString(),
-        required: weeklyReq,
-        contributed,
-        raids: weekLogs.reduce((s, l) => s + (l.raids ?? 0), 0),
-        met: contributed >= weeklyReq,
-        bank_balance: 0,
-        overflow_enabled: false,
-        deposits_only: depositsOnly,
-        week_end: getWeekSunday(wk),
-      };
+  // ---- Daily check: one row per character in a Dream guild (same rules as the officer report)
+  const now = new Date();
+  const reportDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1)).toISOString().slice(0, 10);
+  const rows: CheckRow[] = [];
+  for (const c of characters) {
+    if (!c.in_dream_guild || !c.guild_id) continue;
+    const cfg = cfgs.get(c.guild_id);
+    if (!cfg) continue;
+    const gid = c.guild_id;
+    const sameGuild = characters.filter((x) => x.in_dream_guild && x.guild_id === gid);
+    const groupIds = new Set(sameGuild.map((x) => x.member_id));
+    const exempt = sameGuild.some((x) => x.position === 'LEADER' || x.position === 'DEPUTY');
+    const groupLogs = logs.filter((l) => groupIds.has(l.member_id) && l.guild_id === gid && l.log_date <= reportDay);
+    const own = logs.filter((l) => l.member_id === c.member_id && l.guild_id === gid);
+
+    let lastMet: string | null = null;
+    if (cfg.period === 'weekly') {
+      const per = new Map<string, Record<string, number>>();
+      for (const l of groupLogs) {
+        const w = per.get(l.member_id) ?? {};
+        const k = getISOWeekKey(l.log_date);
+        w[k] = (w[k] ?? 0) + gross(l, cfg.depositsOnly);
+        per.set(l.member_id, w);
+      }
+      per.forEach((w) => {
+        const sun = findLastMetWeek(w, cfg.weeklyReq)?.toISOString().slice(0, 10) ?? null;
+        if (sun && (!lastMet || sun > lastMet)) lastMet = sun;
+      });
     } else {
-      requirement = {
-        period,
-        game_day: today,
-        resets_at: resets.toISOString(),
-        required: dailyReq,
-        contributed: todayLog ? gross(todayLog) : 0,
-        raids: todayLog?.raids ?? 0,
-        met: !!todayLog?.met_requirement,
-        bank_balance: Number(bank?.balance ?? 0),
-        overflow_enabled: overflowEnabled,
-        deposits_only: false,
-      };
+      for (const l of groupLogs) if (l.met_requirement && (!lastMet || l.log_date > lastMet)) lastMet = l.log_date;
+    }
+    const firstSeen = memberMap.get(c.member_id)?.first_seen as string | null | undefined;
+    const sinceJoin = firstSeen ? Math.max(0, daysBetween(firstSeen, reportDay)) : 999;
+    const days = lastMet ? Math.min(Math.max(0, daysBetween(lastMet, reportDay)), sinceJoin) : Math.min(sinceJoin, 999);
+
+    const bank = (bankRows ?? []).find((b) => b.member_id === c.member_id && b.guild_id === gid);
+    if (cfg.period === 'weekly') {
+      const wk = getISOWeekKey(checkedDay);
+      const total = own.filter((l) => getISOWeekKey(l.log_date) === wk && l.log_date <= checkedDay).reduce((s, l) => s + gross(l, cfg.depositsOnly), 0);
+      rows.push({
+        member_id: c.member_id,
+        ign: c.ign,
+        guild_nickname: c.guild_nickname,
+        period: 'weekly',
+        required: cfg.weeklyReq,
+        contributed: total,
+        met: total >= cfg.weeklyReq,
+        bank_balance: null,
+        days_inactive: days,
+        warning_level: exempt ? 'safe' : getWarningInfo(days, 'weekly').warning_level,
+        exempt,
+        week_end: getWeekSunday(wk),
+      });
+    } else {
+      const day = own.find((l) => l.log_date === checkedDay);
+      rows.push({
+        member_id: c.member_id,
+        ign: c.ign,
+        guild_nickname: c.guild_nickname,
+        period: 'daily',
+        required: cfg.dailyReq,
+        contributed: day ? gross(day) : 0,
+        met: cfg.dailyReq <= 0 || !!day?.met_requirement,
+        bank_balance: cfg.overflow ? Number(bank?.balance ?? 0) : null,
+        days_inactive: days,
+        warning_level: exempt ? 'safe' : getWarningInfo(days, 'daily').warning_level,
+        exempt,
+      });
     }
   }
+  const statusRows = selected ? rows.filter((r) => r.member_id === selected.member_id) : rows;
+  const worst = statusRows.reduce<CheckRow | null>((w, r) => (!w || sev[r.warning_level] > sev[w.warning_level] ? r : w), null);
+  const status = {
+    warning_level: worst?.warning_level ?? ('safe' as WarningLevel),
+    exempt: statusRows.length > 0 && statusRows.every((r) => r.exempt),
+  };
 
-  // ---- Streaks (any guild; the character's history)
+  // ---- Streak (scope; account = any character met)
   let streak: MeSummary['streak'];
   if (period === 'weekly') {
+    const weeklyReq = focusCfg?.weeklyReq ?? 35000;
     const weekly = new Map<string, number>();
-    for (const l of focusLogs) {
+    for (const l of scopeLogs) {
       const k = getISOWeekKey(l.log_date);
-      weekly.set(k, (weekly.get(k) ?? 0) + gross(l, depositsOnly));
+      weekly.set(k, (weekly.get(k) ?? 0) + gross(l, focusCfg?.depositsOnly));
     }
     const metWeeks = new Set(Array.from(weekly.entries()).filter(([, v]) => v >= weeklyReq).map(([k]) => k));
-    // Walk back from this week; an unfinished current week doesn't break the streak.
     let cur = 0;
     let d = today;
-    if (!metWeeks.has(getISOWeekKey(d))) d = addDays(d, -7);
+    if (!metWeeks.has(getISOWeekKey(d))) d = addDays(d, -7); // unfinished week doesn't break it
     while (metWeeks.has(getISOWeekKey(d))) {
       cur++;
       d = addDays(d, -7);
     }
-    const sorted = Array.from(metWeeks).sort();
     let best = 0;
     let run = 0;
     let prev: string | null = null;
-    for (const k of sorted) {
+    for (const k of Array.from(metWeeks).sort()) {
       run = prev && getISOWeekKey(addDays(getWeekSunday(prev), 1)) === k ? run + 1 : 1;
       best = Math.max(best, run);
       prev = k;
     }
     streak = { current: cur, best: Math.max(best, cur), unit: 'week' };
   } else {
-    const met = new Set(focusLogs.filter((l) => l.met_requirement).map((l) => l.log_date));
     let cur = 0;
-    let d = met.has(today) ? today : addDays(today, -1); // today still in progress
-    while (met.has(d)) {
+    let d = metDays.has(today) ? today : checkedDay;
+    while (metDays.has(d)) {
       cur++;
       d = addDays(d, -1);
     }
-    const sorted = Array.from(met).sort();
+    const sorted = Array.from(metDays).sort();
     let best = 0;
     let run = 0;
     for (let i = 0; i < sorted.length; i++) {
@@ -317,64 +435,22 @@ export async function buildMeSummary(
     streak = { current: cur, best: Math.max(best, cur), unit: 'day' };
   }
 
-  // ---- Inactivity (same rules as the officer report; pooled over same-guild alts)
-  let inactivity: MeSummary['inactivity'] = null;
-  if (focusChar.in_dream_guild && focusChar.guild_id) {
-    const gid = focusChar.guild_id;
-    const sameGuild = characters.filter((c) => c.in_dream_guild && c.guild_id === gid);
-    const ids = new Set(sameGuild.map((c) => c.member_id));
-    const exempt = sameGuild.some((c) => c.position === 'LEADER' || c.position === 'DEPUTY');
-    const now = new Date();
-    const checkDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1))
-      .toISOString()
-      .slice(0, 10);
-    const guildLogs = logs.filter((l) => ids.has(l.member_id) && l.guild_id === gid && l.log_date <= checkDay);
-
-    let lastMet: string | null = null;
-    if (period === 'weekly') {
-      const perMember = new Map<string, Record<string, number>>();
-      for (const l of guildLogs) {
-        const w = perMember.get(l.member_id) ?? {};
-        const k = getISOWeekKey(l.log_date);
-        w[k] = (w[k] ?? 0) + gross(l, depositsOnly);
-        perMember.set(l.member_id, w);
-      }
-      perMember.forEach((w) => {
-        const sun = findLastMetWeek(w, weeklyReq)?.toISOString().slice(0, 10) ?? null;
-        if (sun && (!lastMet || sun > lastMet)) lastMet = sun;
-      });
-    } else {
-      for (const l of guildLogs) {
-        if (l.met_requirement && (!lastMet || l.log_date > lastMet)) lastMet = l.log_date;
-      }
-    }
-    const firstSeen = focusMember?.first_seen as string | null | undefined;
-    const sinceJoin = firstSeen ? Math.max(0, daysBetween(firstSeen, checkDay)) : 999;
-    const days = lastMet ? Math.min(Math.max(0, daysBetween(lastMet, checkDay)), sinceJoin) : Math.min(sinceJoin, 999);
-    inactivity = {
-      days_inactive: days,
-      warning_level: exempt ? 'safe' : getWarningInfo(days, period).warning_level,
-      exempt,
-      last_met: lastMet,
-    };
+  // ---- Heatmap: last 53 weeks, best day across scope
+  const dayLevel = new Map<string, 0 | 1 | 2 | 3>();
+  for (const l of scopeLogs) {
+    const g = gross(l);
+    const req = (l.guild_id && cfgs.get(l.guild_id)?.dailyReq) || dailyReq;
+    const lvl: 0 | 1 | 2 | 3 = l.met_requirement ? (g >= req * 2 ? 3 : 2) : g > 0 || (l.raids ?? 0) > 0 ? 1 : 0;
+    if (lvl > (dayLevel.get(l.log_date) ?? 0)) dayLevel.set(l.log_date, lvl);
   }
-
-  // ---- Heatmap: last 53 weeks for the focus character, any guild
-  const byDate = new Map(focusLogs.map((l) => [l.log_date, l]));
   const heatmap: MeSummary['heatmap'] = [];
   for (let i = 370; i >= 0; i--) {
     const date = addDays(today, -i);
-    const l = byDate.get(date);
-    let level: 0 | 1 | 2 | 3 = 0;
-    if (l) {
-      const g = gross(l);
-      if (l.met_requirement) level = g >= dailyReq * 2 ? 3 : 2;
-      else if (g > 0 || (l.raids ?? 0) > 0) level = 1;
-    }
-    heatmap.push({ date, level });
+    heatmap.push({ date, level: dayLevel.get(date) ?? 0 });
   }
 
-  // ---- Guild journey (from logs; member_guild_history is not maintained)
+  // ---- Guild journey (focus character; member_guild_history is not maintained)
+  const focusLogs = logs.filter((l) => l.member_id === focusChar.member_id);
   const journeyMap = new Map<string, { from: string; to: string; days: number }>();
   for (const l of focusLogs) {
     if (!l.guild_id) continue;
@@ -386,9 +462,9 @@ export async function buildMeSummary(
       j.days++;
     }
   }
+  const focusMember = memberMap.get(focusChar.member_id);
   if (focusChar.in_dream_guild && focusChar.guild_id && !journeyMap.has(focusChar.guild_id)) {
-    const fs = (focusMember?.first_seen as string | null) ?? today;
-    journeyMap.set(focusChar.guild_id, { from: fs, to: today, days: 0 });
+    journeyMap.set(focusChar.guild_id, { from: (focusMember?.first_seen as string | null) ?? today, to: today, days: 0 });
   }
   const journey = Array.from(journeyMap.entries())
     .map(([gid, j]) => {
@@ -405,51 +481,57 @@ export async function buildMeSummary(
     })
     .sort((a, b) => a.from.localeCompare(b.from));
 
-  // ---- Move-up nudge
+  // ---- Raids + move-up nudge (focus character, by combat level)
+  const cl = combatLevels.get(focusChar.member_id) ?? null;
+  const curGuild = focusChar.in_dream_guild && focusChar.guild_id ? guildMap.get(focusChar.guild_id) : undefined;
+  const raids = {
+    guild: curGuild ? guildRaids(focusCfg?.settings, curGuild.min_level) : [],
+    best: cl ? bestRaidFor(cl) : null,
+    combat_level: cl,
+  };
+
   let nudge: MeSummary['nudge'] = null;
-  const level = focusChar.total_level ?? 0;
-  const curMin = focusChar.in_dream_guild && focusChar.guild_id ? guildMap.get(focusChar.guild_id)?.min_level ?? 0 : -1;
-  const higher = guilds
-    .filter((g) => g.is_active !== false && g.min_level != null && g.min_level > curMin)
-    .sort((a, b) => (a.min_level ?? 0) - (b.min_level ?? 0));
-  const eligible = higher.filter((g) => level >= (g.min_level ?? 0));
-  if (eligible.length) {
-    const g = eligible[eligible.length - 1];
-    nudge = { kind: 'eligible', guild_name: g.name, guild_nickname: g.nickname, min_level: g.min_level ?? 0, levels_needed: 0 };
-  } else if (higher.length) {
-    const g = higher[0];
-    nudge = {
-      kind: 'next',
-      guild_name: g.name,
-      guild_nickname: g.nickname,
-      min_level: g.min_level ?? 0,
-      levels_needed: (g.min_level ?? 0) - level,
-    };
+  if (curGuild?.id === ASSAULT_TOP_GUILD) {
+    nudge = null; // top of the network
+  } else if (curGuild?.id === ASSAULT_ENTRY_GUILD) {
+    const di = guildMap.get(ASSAULT_TOP_GUILD);
+    if (di) nudge = { kind: 'assault', guild_name: di.name, guild_nickname: di.nickname, min_level: di.min_level ?? 0, levels_needed: 0 };
+  } else if (cl != null) {
+    // Raid ladder: active non-assault guilds, ranked by min combat level.
+    const curMin = curGuild?.min_level ?? -1;
+    const higher = guilds
+      .filter((g) => g.is_active !== false && !g.is_assault && g.min_level != null && g.min_level > curMin)
+      .sort((a, b) => (a.min_level ?? 0) - (b.min_level ?? 0) || (a.display_order ?? 0) - (b.display_order ?? 0));
+    const eligible = higher.filter((g) => cl >= (g.min_level ?? 0));
+    if (eligible.length) {
+      const topMin = eligible[eligible.length - 1].min_level;
+      const g = eligible.filter((x) => x.min_level === topMin)[0];
+      nudge = { kind: 'eligible', guild_name: g.name, guild_nickname: g.nickname, min_level: g.min_level ?? 0, levels_needed: 0 };
+    } else if (higher.length) {
+      const g = higher[0];
+      nudge = { kind: 'next', guild_name: g.name, guild_nickname: g.nickname, min_level: g.min_level ?? 0, levels_needed: (g.min_level ?? 0) - cl };
+    }
   }
 
-  // ---- Assault (focus character, by IdleMMO character id or hashed id)
-  const charId = focusMember?.character_id as number | null | undefined;
-  const hashed = focusMember?.hashed_id as string | null | undefined;
-  type Contrib = { kills: number; experience: number; run: { zone_name: string; starts_at: string; season_number: number | null } | null };
-  let contribs: Contrib[] = [];
-  if (charId || hashed) {
-    const q = supabase
-      .from('assault_contributions')
-      .select('kills, experience, run:assault_runs(zone_name, starts_at, season_number)')
-      .limit(1000);
-    const { data } = charId
-      ? await q.eq('character_id', charId)
-      : await q.eq('character_hashed_id', hashed as string);
-    contribs = (data ?? []) as unknown as Contrib[];
-  }
+  // ---- Assault (scope characters, by IdleMMO character id)
+  const scopeMembers = Array.from(scopeIds).map((id) => memberMap.get(id)).filter(Boolean);
+  const charIds = scopeMembers.map((m) => m!.character_id as number | null).filter((x): x is number => !!x);
+  const hashedNoId = scopeMembers.filter((m) => !m!.character_id && m!.hashed_id).map((m) => m!.hashed_id as string);
+  type Contrib = { kills: number; experience: number; character_name: string; run: { zone_name: string; starts_at: string } | null };
+  const contribs: Contrib[] = [];
+  const sel = 'kills, experience, character_name, run:assault_runs(zone_name, starts_at)';
+  const [byId, byHash] = await Promise.all([
+    charIds.length ? supabase.from('assault_contributions').select(sel).in('character_id', charIds).limit(2000) : { data: [] },
+    hashedNoId.length ? supabase.from('assault_contributions').select(sel).in('character_hashed_id', hashedNoId).limit(2000) : { data: [] },
+  ]);
+  contribs.push(...((byId.data ?? []) as unknown as Contrib[]), ...((byHash.data ?? []) as unknown as Contrib[]));
   for (const c of contribs) {
     tiles.assault_kills += Number(c.kills ?? 0);
     tiles.assault_experience += Number(c.experience ?? 0);
   }
   tiles.assault_runs = contribs.length;
 
-  // ---- Warnings (whole bundle)
-  const ignOf = new Map(characters.map((c) => [c.member_id, c.ign]));
+  // ---- Warnings (whole account)
   const warnings = (warningRows ?? []).map((w) => ({
     id: w.id as string,
     ign: ignOf.get(w.member_id as string) ?? '?',
@@ -460,22 +542,24 @@ export async function buildMeSummary(
     created_at: w.created_at as string,
   }));
 
-  // ---- Activity feed
+  // ---- Activity feed (scope)
+  const multi = scopeIds.size > 1;
   const feed: FeedItem[] = [];
-  for (const l of focusLogs.slice(0, 14)) {
+  for (const l of scopeLogs.slice(0, 20)) {
     const g = gross(l);
     const parts = [`${g.toLocaleString('en-US')} gold`];
     if (l.raids) parts.push(`${l.raids} raid${l.raids === 1 ? '' : 's'}`);
     if (l.bank_used) parts.push(`${Number(l.bank_used).toLocaleString('en-US')} from bank`);
+    const unchecked = l.log_date > checkedDay;
     feed.push({
       at: l.log_date,
       kind: 'day',
-      title: l.met_requirement ? 'Requirement met' : l.log_date === today ? 'Today so far' : 'Requirement missed',
+      title: `${multi ? `${ignOf.get(l.member_id)}: ` : ''}${unchecked ? 'Not checked yet' : l.met_requirement ? 'Requirement met' : 'Requirement missed'}`,
       detail: `${parts.join(' · ')}${l.guild_id ? ` · ${guildMap.get(l.guild_id)?.nickname ?? ''}` : ''}`,
-      tone: l.met_requirement ? 'good' : l.log_date === today ? 'info' : 'warn',
+      tone: unchecked ? 'info' : l.met_requirement ? 'good' : 'warn',
     });
   }
-  for (const w of warnings.slice(0, 10)) {
+  for (const w of warnings.filter((w) => !selected || w.ign === selected.ign).slice(0, 10)) {
     feed.push({
       at: w.created_at,
       kind: 'warning',
@@ -484,50 +568,40 @@ export async function buildMeSummary(
       tone: 'bad',
     });
   }
-  for (const j of journey) {
-    feed.push({ at: j.from, kind: 'join', title: `Joined ${j.name}`, tone: 'info' });
-  }
+  for (const j of journey) feed.push({ at: j.from, kind: 'join', title: `${focusChar.ign} joined ${j.name}`, tone: 'info' });
   for (const c of contribs) {
     if (!c.run) continue;
     feed.push({
       at: c.run.starts_at,
       kind: 'assault',
-      title: `Assault: ${c.run.zone_name}`,
+      title: `${multi ? `${c.character_name}: ` : ''}Assault on ${c.run.zone_name}`,
       detail: `${Number(c.kills).toLocaleString('en-US')} kills · ${Number(c.experience).toLocaleString('en-US')} exp`,
       tone: 'info',
     });
   }
   feed.sort((a, b) => b.at.localeCompare(a.at));
 
+  const card = (c: AccountCharacter): CharacterCard => ({
+    ...c,
+    last_seen: (memberMap.get(c.member_id)?.last_seen as string | null) ?? null,
+    combat_level: combatLevels.get(c.member_id) ?? null,
+    is_focus: !!selected && c.member_id === selected.member_id,
+  });
+
   return {
     claimed: true,
-    focus: {
-      member_id: focusChar.member_id,
-      ign: focusChar.ign,
-      avatar_url: focusChar.avatar_url,
-      class: focusChar.class,
-      total_level: focusChar.total_level,
-      position: focusChar.position,
-      guild_id: focusChar.guild_id,
-      guild_name: focusChar.guild_name,
-      guild_nickname: focusChar.guild_nickname,
-      in_dream_guild: focusChar.in_dream_guild,
-      first_seen: (focusMember?.first_seen as string | null) ?? null,
-      last_seen: (focusMember?.last_seen as string | null) ?? null,
-    },
+    scope,
+    focus: { ...card(focusChar), first_seen: (focusMember?.first_seen as string | null) ?? null },
     tiles,
-    requirement,
+    check: { checked_day: checkedDay, next_check_at: nextCheckAt(now), rows },
+    status,
     streak,
-    inactivity,
     heatmap,
     feed: feed.slice(0, 25),
     journey,
+    raids,
     nudge,
-    alts: characters.map((c) => ({
-      ...c,
-      last_seen: (memberMap.get(c.member_id)?.last_seen as string | null) ?? null,
-      is_focus: c.member_id === focusChar.member_id,
-    })),
+    alts: characters.map(card),
     warnings,
   };
 }

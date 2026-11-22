@@ -29,12 +29,22 @@ Agreed 2026-11-22. Update the status column as steps land.
 | 2 | Cleanup audit (H1, H4). Part 1 done: dead APIs removed, old docs/SQL archived, `database/README.md`, world-locations daily workflow. Page merges happen in steps 3 (admin hub) and 4 (guild hub `/guild` with tabs Overview, Members, Activity, Inactivity (officer+), Leaderboard; role matrix member/officer/deputy/leader/super admin, enforced in the API too; old URLs redirect). `/setup` → `/account`, `/guilds` picker killed. `refresh-meta` gets a button in Admin → Assault. pg_cron/GitHub overlap for assault scheduler/collector checked: intentional and safe | part 1 done |
 | 3 | Admin hub (H3): `/admin` as tabs: Claims & Access, Guilds, Members & Alts, Warnings, Assault, Discord, System (Rewards added in Phase 3). Panels live in `src/components/admin/`; old URLs (`/admin/claims`, `/admin/alts`, `/admin/bumps`, `/admin/raid-reminders`, `/assault/admin`, `/discord-mapping`, `/data-management`, `/price-cache`) redirect via `next.config.js`. Tab visibility uses the highest role across all guilds; APIs still enforce their own checks. `refresh-meta` button in Assault → Potions. `/warnings` stays as a member-facing page | done |
 | 4 | `/me` dashboard (B1–B10): hero, stat tiles, today's requirement, streak, activity feed, heatmap, guild journey, move-up nudge, alts, warnings. One API `/api/me/summary` built on `daily_logs` (raids, gold_donated, met_requirement), `member_guild_history`, `warnings`, assault tables. Logic in `src/lib/me-summary.ts`; `?member_id=` switches to any character in the bundle. Guild journey comes from `daily_logs.guild_id` because `member_guild_history` is empty (not maintained). Inactivity mirrors `/api/reports/inactivity`. Nav: "Me" link + "My dashboard" in user menu | done |
+| 4b | `/me` rework after first review: defaults to the whole account (all characters pooled; click a character to drill in). "Today's requirement" replaced by a **Daily check** card (activity is only checked once a day at 11:48 UTC, so it shows the last checked game day per character + countdown to the next check, never live progress). Move-up nudge uses **combat level** (new `members.combat_level`, migration `database/add-member-combat-level.sql`, filled lazily from the character info API, max once a day) because guild `min_level` is a CL, not total level. Ladder = active non-assault guilds; Dream Engineers shows "want hardcore assaults? ask to move to Dream Invaders" instead; DI shows nothing. Raids card from `src/lib/raids.ts`. Visual polish deferred to step 6 | done (run migration) |
 | 5 | Guild pages `/guilds/[tag]` (F3), logged-out landing page (G1), "which guild fits me" picker (G2) | |
 | 6 | Nav regroup Me / Community / Staff (H2) + full branding refresh (H5) | |
 | 7 | Discord sync layer: `discord_live_messages` (key, channel_id, message_ids[], content_hash), edit in place, admin tab to bind/republish. First live messages: guild directory (#guild-info), raid schedule (#raid-pings), daily kick board (#daily-check), per-guild inactivity report edited in place, DI waitlist, links hub | |
 | 8 | Discord commands: `/claim` (links Discord ID, auto-approves when `members.discord_id` matches, A5), `/me`, `/guild <tag>`, `/away <days>` (holiday system, uses #holiday-log, skips inactivity), welcome "Claim your character" button in #introductions. Role sync: in-game guild/position → Discord roles, add + remove | |
 
 A6 (verify via profile bio code) only if the IdleMMO API exposes the bio.
+
+## Raid tiers
+
+Static game data in `src/lib/raids.ts` (name, location, minutes, marks, min CL): Barnyard Abyss 1, Whisperwood Seige 12,
+Crystal Echoes 25, Frostbite Summit 40, Dunekeeper's Last Stand 60, Skybound Eden 70, Orbit of the Forgotten 80,
+The Silent Watchers 92. Guild `min_level` uses the same CL scale. Each guild runs one raid, some lower guilds several:
+set per guild in Admin → Guilds (`guild_config.settings.raids`); unset = the raid whose CL equals the guild's min level.
+Used by /me now; reuse in step 5 (guild pages, "which guild fits me" picker matches on CL + raid), step 7 (live raid
+schedule message) and F5 (calendar). `raid_reminders` could get a `raid_key` column later to tie pings to a raid.
 
 ## Phase 2: gamification and community
 

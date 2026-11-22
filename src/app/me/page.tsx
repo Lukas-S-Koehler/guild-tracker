@@ -115,20 +115,18 @@ function Heatmap({ days }: { days: MeSummary['heatmap'] }) {
 }
 
 export default function MePage() {
-  const { user, loading, currentCharacter } = useAuth();
-  const [focusId, setFocusId] = useState<string | null>(null);
+  const { user, loading } = useAuth();
+  const [focusId, setFocusId] = useState<string | null>(null); // null = whole account
   const [data, setData] = useState<MeSummaryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  const wanted = focusId ?? currentCharacter?.member_id ?? null;
 
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     setBusy(true);
     setError(null);
-    fetch(`/api/me/summary${wanted ? `?member_id=${wanted}` : ''}`, { cache: 'no-store' })
+    fetch(`/api/me/summary${focusId ? `?member_id=${focusId}` : ''}`, { cache: 'no-store' })
       .then(async (r) => {
         const j = await r.json();
         if (cancelled) return;
@@ -140,10 +138,9 @@ export default function MePage() {
     return () => {
       cancelled = true;
     };
-  }, [user, wanted]);
+  }, [user, focusId]);
 
-  const req = data && data.claimed ? data.requirement : null;
-  const countdown = useCountdown(req?.period === 'weekly' && req.week_end ? undefined : req?.resets_at);
+  const countdown = useCountdown(data && data.claimed ? data.check.next_check_at : undefined);
 
   if (loading || (user && !data && !error)) return <Loader2 className="h-6 w-6 animate-spin mx-auto mt-16" />;
   if (!user) {
@@ -162,7 +159,7 @@ export default function MePage() {
       <div className="max-w-xl mx-auto py-16 text-center space-y-3">
         <Sparkles className="h-8 w-8 mx-auto text-sky-400" />
         {data.pending ? (
-          <p>Your claim on <b>{data.pending.ign}</b> is waiting for an officer. Your dashboard unlocks once it's approved.</p>
+          <p>Your claim on <b>{data.pending.ign}</b> is waiting for an officer. Your dashboard unlocks once it&apos;s approved.</p>
         ) : (
           <p>Claim your IdleMMO character to unlock your personal dashboard.</p>
         )}
@@ -171,9 +168,10 @@ export default function MePage() {
     );
   }
 
-  const { focus, tiles, streak, inactivity, nudge } = data;
-  const pct = req ? Math.min(100, Math.round((req.contributed / Math.max(1, req.required)) * 100)) : 0;
+  const { focus, tiles, streak, status, nudge, check, raids, scope } = data;
   const metPct = tiles.days_logged ? Math.round((tiles.days_met / tiles.days_logged) * 100) : 0;
+  const isAccount = scope === 'account';
+  const checkRows = isAccount ? check.rows : check.rows.filter((r) => r.member_id === focus.member_id);
 
   return (
     <div className={`max-w-6xl mx-auto space-y-4 ${busy ? 'opacity-70 transition-opacity' : ''}`}>
@@ -192,7 +190,8 @@ export default function MePage() {
             <div className="min-w-0 flex-1">
               <h1 className="text-2xl sm:text-3xl font-bold text-white truncate">{focus.ign}</h1>
               <div className="flex flex-wrap items-center gap-2 mt-1 text-sm text-sky-100/80">
-                <span>Level {fmt(focus.total_level ?? 0)}</span>
+                {focus.combat_level != null && <span>CL {fmt(focus.combat_level)}</span>}
+                <span>{focus.combat_level != null ? '· ' : ''}Total level {fmt(focus.total_level ?? 0)}</span>
                 {focus.class && <span>· {title(focus.class)}</span>}
                 {focus.in_dream_guild ? (
                   <span>· {focus.guild_name}{focus.position ? ` (${title(focus.position)})` : ''}</span>
@@ -200,13 +199,26 @@ export default function MePage() {
                   <Badge variant="outline" className="border-amber-500/50 text-amber-400">Not in a Dream guild</Badge>
                 )}
               </div>
-              {focus.first_seen && <div className="text-xs text-sky-100/60 mt-1">Tracked since {prettyDate(focus.first_seen)}</div>}
+              <div className="text-xs text-sky-100/60 mt-1">
+                {isAccount
+                  ? `Whole account · ${data.alts.length} character${data.alts.length === 1 ? '' : 's'}`
+                  : focus.first_seen
+                    ? `Tracked since ${prettyDate(focus.first_seen)}`
+                    : 'Single character view'}
+              </div>
             </div>
-            {inactivity && (
-              <Badge variant="outline" className={WARN_STYLE[inactivity.warning_level]}>
-                {inactivity.exempt ? 'Exempt (leadership)' : WARN_LABEL[inactivity.warning_level]}
-              </Badge>
-            )}
+            <div className="flex flex-col items-end gap-2">
+              {checkRows.length > 0 && (
+                <Badge variant="outline" className={WARN_STYLE[status.warning_level]}>
+                  {status.exempt ? 'Exempt (leadership)' : WARN_LABEL[status.warning_level]}
+                </Badge>
+              )}
+              {!isAccount && (
+                <Button size="sm" variant="secondary" onClick={() => setFocusId(null)}>
+                  Back to whole account
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </Card>
@@ -220,43 +232,61 @@ export default function MePage() {
       </div>
 
       <div className="grid md:grid-cols-3 gap-4">
-        {/* B3 Today's requirement */}
+        {/* B3 Daily check */}
         <Card className="md:col-span-2">
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center gap-2">
               <Target className="h-4 w-4 text-sky-400" />
-              {req?.period === 'weekly' ? "This week's requirement" : "Today's requirement"}
+              Daily check
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            {!req ? (
-              <p className="text-sm text-muted-foreground">No requirement: {focus.ign} isn't in a Dream guild right now.</p>
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Activity is checked once a day at 11:48 UTC. Next check in <b>{countdown}</b>. Results below are for the game day of{' '}
+              {prettyDate(check.checked_day)}.
+            </p>
+            {checkRows.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No requirement: no character here is in a Dream guild right now.</p>
             ) : (
-              <div className="space-y-3">
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-2xl font-bold tabular-nums">
-                    {fmt(req.contributed)} <span className="text-base font-normal text-muted-foreground">/ {fmt(req.required)} gold</span>
-                  </span>
-                  {req.met ? (
-                    <Badge variant="outline" className={WARN_STYLE.safe}>Met</Badge>
-                  ) : (
-                    <Badge variant="outline" className={WARN_STYLE.warn1}>{fmt(Math.max(0, req.required - req.contributed))} to go</Badge>
-                  )}
-                </div>
-                <div className="h-3 rounded-full bg-muted overflow-hidden">
-                  <div className={`h-full ${req.met ? 'bg-green-500' : 'bg-sky-500'}`} style={{ width: `${req.met ? 100 : pct}%` }} />
-                </div>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                  {req.period === 'weekly' ? (
-                    <span>Week ends {prettyDate(req.week_end!)}{req.deposits_only ? ' · guild hall deposits only' : ''}</span>
-                  ) : (
-                    <span>Game day resets in {countdown} (11:50 UTC)</span>
-                  )}
-                  <span>{fmt(req.raids)} raid{req.raids === 1 ? '' : 's'}</span>
-                  {req.overflow_enabled && <span>Overflow bank: {fmt(req.bank_balance)} gold</span>}
-                </div>
-                <p className="text-xs text-muted-foreground">Updates each time the activity log syncs, so recent donations can take a little while to show.</p>
-              </div>
+              <ul className="divide-y divide-border">
+                {checkRows.map((r) => {
+                  const pct = Math.min(100, Math.round((r.contributed / Math.max(1, r.required)) * 100));
+                  return (
+                    <li key={r.member_id} className="py-2 space-y-1.5">
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <span className="font-medium">{r.ign}</span>
+                        {r.guild_nickname && <span className="text-muted-foreground">{r.guild_nickname}</span>}
+                        <span className="text-xs text-muted-foreground">{r.period === 'weekly' ? 'weekly' : 'daily'}</span>
+                        <span className="flex-1" />
+                        {r.exempt ? (
+                          <Badge variant="outline" className={WARN_STYLE.safe}>Exempt</Badge>
+                        ) : (
+                          <>
+                            <Badge variant="outline" className={r.met ? WARN_STYLE.safe : WARN_STYLE.warn1}>
+                              {r.met ? 'Met' : r.period === 'weekly' ? `${fmt(Math.max(0, r.required - r.contributed))} to go` : 'Missed'}
+                            </Badge>
+                            {r.warning_level !== 'safe' && (
+                              <Badge variant="outline" className={WARN_STYLE[r.warning_level]}>{WARN_LABEL[r.warning_level]}</Badge>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      <div className="h-2 rounded-full bg-muted overflow-hidden">
+                        <div className={`h-full ${r.met ? 'bg-green-500' : 'bg-sky-500'}`} style={{ width: `${r.met ? 100 : pct}%` }} />
+                      </div>
+                      <div className="flex flex-wrap gap-x-4 text-xs text-muted-foreground">
+                        <span>
+                          {fmt(r.contributed)} / {fmt(r.required)} gold{r.period === 'weekly' && r.week_end ? ` this week (ends ${prettyDate(r.week_end)})` : ''}
+                        </span>
+                        {r.bank_balance != null && <span>Overflow bank: {fmt(r.bank_balance)}</span>}
+                        {!r.exempt && r.days_inactive > 0 && (
+                          <span>{r.days_inactive >= 999 ? 'Never met' : `${r.days_inactive} day${r.days_inactive === 1 ? '' : 's'} since last met`}</span>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </CardContent>
         </Card>
@@ -275,14 +305,73 @@ export default function MePage() {
               <span className="text-base font-normal text-muted-foreground"> {streak.unit}{streak.current === 1 ? '' : 's'}</span>
             </div>
             <div className="text-sm text-muted-foreground">Best: {streak.best} {streak.unit}{streak.best === 1 ? '' : 's'}</div>
-            {inactivity && !inactivity.exempt && inactivity.days_inactive > 0 && (
-              <div className="text-xs text-muted-foreground">
-                {inactivity.days_inactive} day{inactivity.days_inactive === 1 ? '' : 's'} since requirement last met
-                {inactivity.last_met ? ` (${prettyDate(inactivity.last_met)})` : ''}
-              </div>
-            )}
+            <div className="text-xs text-muted-foreground">
+              {isAccount ? 'Counts a day when any of your characters met the requirement.' : `Days ${focus.ign} met the requirement in a row.`}
+            </div>
           </CardContent>
         </Card>
+      </div>
+
+      {/* Raids + B8 move-up */}
+      <div className="grid md:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Swords className="h-4 w-4 text-sky-400" />
+              Raids{isAccount ? ` · ${focus.ign}` : ''}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            {raids.guild.length > 0 ? (
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">{focus.guild_nickname ?? focus.guild_name} runs</div>
+                {raids.guild.map((r) => (
+                  <div key={r.key} className="flex flex-wrap items-baseline gap-x-2">
+                    <span className="font-medium">{r.name}</span>
+                    <span className="text-xs text-muted-foreground">{r.location} · CL {r.min_cl}+ · {r.minutes} min · {r.marks} marks</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-muted-foreground">{focus.in_dream_guild ? 'No raid set for this guild yet.' : 'Not in a Dream guild.'}</p>
+            )}
+            {raids.combat_level == null ? (
+              <p className="text-xs text-muted-foreground">Combat level not synced yet.</p>
+            ) : raids.best ? (
+              <p className="text-xs text-muted-foreground">
+                At CL {raids.combat_level} you can join raids up to <b className="text-foreground">{raids.best.name}</b> (CL {raids.best.min_cl}).
+              </p>
+            ) : null}
+          </CardContent>
+        </Card>
+
+        {nudge ? (
+          <Card className={nudge.kind !== 'next' ? 'border-sky-500/50' : ''}>
+            <CardContent className="p-4 flex items-center gap-3 h-full">
+              <ArrowUpCircle className={`h-6 w-6 shrink-0 ${nudge.kind !== 'next' ? 'text-sky-400' : 'text-muted-foreground'}`} />
+              {nudge.kind === 'assault' ? (
+                <p className="text-sm">
+                  Want to do hardcore assaults? Ask an officer about moving to <b>{nudge.guild_name}</b>.
+                </p>
+              ) : nudge.kind === 'eligible' ? (
+                <p className="text-sm">
+                  You meet the CL {fmt(nudge.min_level)} requirement for <b>{nudge.guild_name}</b>. Ask an officer about moving up.
+                </p>
+              ) : (
+                <div className="flex-1 space-y-1">
+                  <p className="text-sm">
+                    <b>{fmt(nudge.levels_needed)}</b> combat level{nudge.levels_needed === 1 ? '' : 's'} until <b>{nudge.guild_name}</b> (CL {fmt(nudge.min_level)}).
+                  </p>
+                  <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                    <div className="h-full bg-sky-500" style={{ width: `${Math.min(100, ((raids.combat_level ?? 0) / Math.max(1, nudge.min_level)) * 100)}%` }} />
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="hidden md:block" />
+        )}
       </div>
 
       {/* B6 Heatmap */}
@@ -297,29 +386,6 @@ export default function MePage() {
           <Heatmap days={data.heatmap} />
         </CardContent>
       </Card>
-
-      {/* B8 Move-up nudge */}
-      {nudge && (
-        <Card className={nudge.kind === 'eligible' ? 'border-sky-500/50' : ''}>
-          <CardContent className="p-4 flex items-center gap-3">
-            <ArrowUpCircle className={`h-6 w-6 shrink-0 ${nudge.kind === 'eligible' ? 'text-sky-400' : 'text-muted-foreground'}`} />
-            {nudge.kind === 'eligible' ? (
-              <p className="text-sm">
-                You meet the level {fmt(nudge.min_level)} minimum for <b>{nudge.guild_name}</b>. Ask an officer about moving up.
-              </p>
-            ) : (
-              <div className="flex-1 space-y-1">
-                <p className="text-sm">
-                  <b>{fmt(nudge.levels_needed)}</b> level{nudge.levels_needed === 1 ? '' : 's'} until <b>{nudge.guild_name}</b> (min {fmt(nudge.min_level)}).
-                </p>
-                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                  <div className="h-full bg-sky-500" style={{ width: `${Math.min(100, ((focus.total_level ?? 0) / nudge.min_level) * 100)}%` }} />
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
 
       <div className="grid md:grid-cols-2 gap-4">
         {/* B5 Activity feed */}
@@ -353,12 +419,53 @@ export default function MePage() {
         </Card>
 
         <div className="space-y-4">
+          {/* B9 Characters */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Users className="h-4 w-4 text-sky-400" />
+                Your characters
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1">
+              <button
+                onClick={() => setFocusId(null)}
+                className={`w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted ${isAccount ? 'bg-muted font-medium' : ''}`}
+              >
+                Whole account
+              </button>
+              {data.alts.map((c) => (
+                <button
+                  key={c.member_id}
+                  onClick={() => setFocusId(c.member_id)}
+                  className={`w-full flex items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted ${c.is_focus ? 'bg-muted' : ''}`}
+                >
+                  {c.avatar_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={c.avatar_url} alt="" className="h-7 w-7 rounded-full object-cover" />
+                  ) : (
+                    <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center text-xs">{c.ign.charAt(0)}</div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium truncate">
+                      {c.ign} {c.claimed && <span className="text-[10px] text-sky-400 ml-1">MAIN</span>}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {c.combat_level != null ? `CL ${c.combat_level} · ` : ''}Lv {fmt(c.total_level ?? 0)} · {c.in_dream_guild ? c.guild_nickname ?? c.guild_name : 'outside Dream'}
+                      {c.last_seen ? ` · seen ${prettyDate(c.last_seen)}` : ''}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </CardContent>
+          </Card>
+
           {/* B7 Guild journey */}
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
                 <MapIcon className="h-4 w-4 text-sky-400" />
-                Guild journey
+                Guild journey · {focus.ign}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -381,42 +488,6 @@ export default function MePage() {
               )}
             </CardContent>
           </Card>
-
-          {/* B9 Alts */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Users className="h-4 w-4 text-sky-400" />
-                Your characters
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1">
-              {data.alts.map((c) => (
-                <button
-                  key={c.member_id}
-                  onClick={() => setFocusId(c.member_id)}
-                  className={`w-full flex items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted ${c.is_focus ? 'bg-muted' : ''}`}
-                >
-                  {c.avatar_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={c.avatar_url} alt="" className="h-7 w-7 rounded-full object-cover" />
-                  ) : (
-                    <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center text-xs">{c.ign.charAt(0)}</div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium truncate">
-                      {c.ign} {c.claimed && <span className="text-[10px] text-sky-400 ml-1">MAIN</span>}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      Lv {fmt(c.total_level ?? 0)} · {c.in_dream_guild ? c.guild_nickname ?? c.guild_name : 'outside Dream'}
-                      {c.last_seen ? ` · seen ${prettyDate(c.last_seen)}` : ''}
-                    </div>
-                  </div>
-                </button>
-              ))}
-              <p className="text-xs text-muted-foreground pt-1">Click a character to view its dashboard.</p>
-            </CardContent>
-          </Card>
         </div>
       </div>
 
@@ -435,7 +506,9 @@ export default function MePage() {
             <ul className="divide-y divide-border">
               {data.warnings.map((w) => (
                 <li key={w.id} className="py-2 flex items-center gap-3 text-sm">
-                  <Badge variant="outline" className={WARN_STYLE[w.warning_level] ?? ''}>{w.warning_level === 'kick' ? 'Kick' : WARN_LABEL[w.warning_level] ?? w.warning_level}</Badge>
+                  <Badge variant="outline" className={WARN_STYLE[w.warning_level] ?? ''}>
+                    {w.warning_level === 'kick' ? 'Kick' : WARN_LABEL[w.warning_level] ?? w.warning_level}
+                  </Badge>
                   <span className="font-medium">{w.ign}</span>
                   {w.guild_nickname && <span className="text-muted-foreground">{w.guild_nickname}</span>}
                   <span className="text-muted-foreground truncate flex-1">{w.reason}</span>

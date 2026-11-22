@@ -22,6 +22,7 @@ then the `add-*.sql` feature migrations.
   `assault-rework-2026-11`, `world-locations`
 - Combat: `add-combat-enemies`, `combat-tool`, `combat-tool-v2`
 - Accounts: `account-claims` → `claims-one-per-user`
+- Members: `add-member-combat-level` (lazy-filled on /me)
 
 ## Scheduled jobs
 | Job | Trigger | Schedule |

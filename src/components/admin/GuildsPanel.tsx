@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, UserPlus, Trash2, Shield, Crown, Users, AlertCircle, Check, ChevronDown, ChevronRight, Settings, RefreshCw } from 'lucide-react';
 import { useApiClient } from '@/lib/api-client';
 import { useAuth } from '@/contexts/AuthContext';
+import { RAIDS, guildRaids } from '@/lib/raids';
 
 interface GuildMember {
   user_id: string;
@@ -47,6 +48,8 @@ interface GuildSettings {
   overflow_enabled: boolean;
   overflow_limit: number;
   disable_pings: boolean;
+  /** Raid keys from src/lib/raids.ts. Empty = default (raid matching min level). */
+  raids: string[];
 }
 
 interface Building {
@@ -73,6 +76,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
     overflow_enabled: true,
     overflow_limit: 10000,
     disable_pings: false,
+    raids: [],
   });
   const [minLevel, setMinLevel] = useState<number>(currentMinLevel);
   const [isActive, setIsActive] = useState<boolean>(currentIsActive);
@@ -109,6 +113,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             overflow_enabled: data.settings?.overflow_enabled ?? true,
             overflow_limit: data.settings?.overflow_limit ?? 10000,
             disable_pings: data.settings?.disable_pings ?? false,
+            raids: Array.isArray(data.settings?.raids) ? data.settings.raids : [],
           });
         }
 
@@ -152,6 +157,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             overflow_enabled: settings.overflow_enabled,
             overflow_limit: settings.overflow_limit,
             disable_pings: settings.disable_pings,
+            raids: settings.raids,
           },
         }, { guildId }),
         api.patch('/api/admin/guild-meta', { guild_id: guildId, min_level: minLevel, is_active: isActive, is_assault: isAssault }, { guildId }),
@@ -267,6 +273,33 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             onChange={e => setMinLevel(parseInt(e.target.value) || 0)}
             className="mt-1 w-40"
           />
+          <p className="text-xs text-muted-foreground mt-0.5">Combat level (CL), same scale as raid requirements</p>
+        </div>
+
+        <div>
+          <Label className="text-xs text-muted-foreground">Raids this guild runs</Label>
+          <div className="mt-1 grid sm:grid-cols-2 gap-x-4 gap-y-1">
+            {RAIDS.map(r => (
+              <label key={r.key} className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="rounded"
+                  checked={settings.raids.includes(r.key)}
+                  onChange={e => setSettings(prev => ({
+                    ...prev,
+                    raids: e.target.checked ? [...prev.raids, r.key] : prev.raids.filter(k => k !== r.key),
+                  }))}
+                />
+                <span>{r.name}</span>
+                <span className="text-xs text-muted-foreground">CL {r.min_cl}</span>
+              </label>
+            ))}
+          </div>
+          {settings.raids.length === 0 && (
+            <p className="text-xs text-muted-foreground mt-0.5">
+              None ticked: defaults to {guildRaids(null, minLevel)[0]?.name ?? 'nothing (no raid matches the min level)'}
+            </p>
+          )}
         </div>
 
         <div>
