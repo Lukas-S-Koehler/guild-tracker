@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react';
+import { createContext, useContext, useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { User } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase';
 
@@ -30,10 +30,53 @@ interface AuthContextType {
   isSuperAdmin: boolean;
   isGuest: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signUp: (email: string, password: string, displayName?: string) => Promise<{ error: Error | null }>;
+  signUp: (email: string, password: string, displayName?: string) => Promise<{ error: Error | null; signedIn?: boolean }>;
   signOut: () => Promise<void>;
   hasRole: (requiredRole: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER') => boolean;
   isLeaderOf: (guildName: string) => boolean;
+  /** Signed in, but no guild access yet (no approved character). Sees the guest view. */
+  isAwaitingAssignment: boolean;
+  /** The user's characters: approved claims + their alts. */
+  myCharacters: AccountCharacter[];
+  /** Guild ids any of the user's characters are currently in. */
+  myGuildIds: Set<string>;
+  refreshAccount: () => Promise<void>;
+  /** Character the user is "playing as". Its guild is the current guild. */
+  currentCharacter: AccountCharacter | null;
+  setCurrentCharacter: (c: AccountCharacter) => void;
+}
+
+export interface AccountCharacter {
+  member_id: string;
+  ign: string;
+  hashed_id: string | null;
+  avatar_url: string | null;
+  class: string | null;
+  total_level: number | null;
+  position: string | null;
+  guild_id: string | null;
+  guild_name: string | null;
+  guild_nickname: string | null;
+  in_dream_guild: boolean;
+  claimed: boolean;
+}
+
+async function fetchGuestGuilds(): Promise<GuildMembership[]> {
+  try {
+    const res = await fetch('/api/guilds');
+    if (!res.ok) return [];
+    const allGuilds = await res.json();
+    if (!Array.isArray(allGuilds)) return [];
+    return allGuilds.map((g: any) => ({
+      guild_id: g.id,
+      guild_name: g.nickname || g.name,
+      role: 'MEMBER' as const,
+      joined_at: '',
+      is_active: g.is_active ?? true,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -44,6 +87,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [currentGuild, setCurrentGuildState] = useState<GuildMembership | null>(null);
   const [loading, setLoading] = useState(true);
   const [isLoadingGuilds, setIsLoadingGuilds] = useState(false);
+  const [isAwaitingAssignment, setIsAwaitingAssignment] = useState(false);
+  const [myCharacters, setMyCharacters] = useState<AccountCharacter[]>([]);
+
+  const loadAccount = useCallback(async () => {
+    try {
+      const res = await fetch('/api/account/characters', { cache: 'no-store' });
+      if (!res.ok) return setMyCharacters([]);
+      const data = await res.json();
+      setMyCharacters(Array.isArray(data.characters) ? data.characters : []);
+    } catch {
+      setMyCharacters([]);
+    }
+  }, []);
 
   // Use ref instead of state to avoid closure issues in event handler
   const hasLoadedInitialGuilds = useRef(false);
@@ -85,6 +141,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let mounted = true;
     let loadingGuildsRef = false; // Use ref to track loading state
 
+    function applyGuilds(list: GuildMembership[], awaiting: boolean) {
+      setGuilds(list);
+      setIsAwaitingAssignment(awaiting);
+      const savedGuildId = localStorage.getItem('currentGuildId');
+      const savedGuild = list.find(g => g.guild_id === savedGuildId);
+      setCurrentGuildState(savedGuild || list[0] || null);
+    }
+
+    // Signed-in user: real memberships, or the guest view while waiting for assignment.
+    async function applyMemberships(data: GuildMembership[]) {
+      const sorted = sortGuildsByRole(data);
+      if (sorted.length > 0) {
+        hasLoadedInitialGuilds.current = true;
+        if (mounted) applyGuilds(sorted, false);
+      } else {
+        const guestGuilds = await fetchGuestGuilds();
+        if (mounted) applyGuilds(guestGuilds, true);
+      }
+      loadAccount();
+    }
+
     async function loadUser() {
       try {
         const { data: { user: currentUser } } = await supabase.auth.getUser();
@@ -94,27 +171,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (!currentUser) {
           // Guest mode — load guilds list so guests have a default guild
-          try {
-            const res = await fetch('/api/guilds');
-            if (res.ok) {
-              const allGuilds = await res.json();
-              if (mounted && Array.isArray(allGuilds) && allGuilds.length > 0) {
-                const guestGuilds: GuildMembership[] = allGuilds.map((g: any) => ({
-                  guild_id: g.id,
-                  guild_name: g.nickname || g.name,
-                  role: 'MEMBER' as const,
-                  joined_at: '',
-                  is_active: g.is_active ?? true,
-                }));
-                setGuilds(guestGuilds);
-                const savedGuildId = localStorage.getItem('currentGuildId');
-                const savedGuild = guestGuilds.find(g => g.guild_id === savedGuildId);
-                setCurrentGuildState(savedGuild || guestGuilds[0]);
-              }
-            }
-          } catch {
-            // ignore — guest with no guild context
-          }
+          const guestGuilds = await fetchGuestGuilds();
+          if (mounted) applyGuilds(guestGuilds, false);
         }
 
         if (currentUser && !loadingGuildsRef) {
@@ -126,16 +184,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const res = await fetch('/api/auth/memberships');
             if (!mounted) return;
             const data: GuildMembership[] = res.ok ? await res.json() : [];
-            const sorted = sortGuildsByRole(data);
-            setGuilds(sorted);
-            if (sorted.length > 0) {
-              hasLoadedInitialGuilds.current = true;
-              const savedGuildId = localStorage.getItem('currentGuildId');
-              const savedGuild = sorted.find(g => g.guild_id === savedGuildId);
-              setCurrentGuildState(savedGuild || sorted[0]);
-            } else {
-              setCurrentGuildState(null);
-            }
+            await applyMemberships(data);
           } catch (fetchError) {
             console.error('[AuthContext] Error fetching guilds:', fetchError);
             if (mounted) setGuilds([]);
@@ -176,39 +225,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(null);
         setGuilds([]);
         setCurrentGuildState(null);
+        setIsAwaitingAssignment(false);
+        setMyCharacters([]);
         localStorage.removeItem('currentGuildId');
       } else if (event === 'SIGNED_IN' && session?.user) {
         // ONLY process SIGNED_IN, not INITIAL_SESSION (already handled in loadUser)
         console.log('[AuthContext] User signed in, fetching guilds');
         setUser(session.user);
 
-        // Fetch guilds when user signs in
+        // Fetch guilds when user signs in. Deferred out of the auth callback:
+        // Supabase holds a lock while callbacks run, so awaiting a request here can race
+        // the session cookie being written (the server then sees no session until refresh).
         if (!loadingGuildsRef && mounted) {
           loadingGuildsRef = true;
           setIsLoadingGuilds(true);
-
-          try {
-            console.log('[AuthContext] Fetching guilds for user:', session.user.id);
-            const res = await fetch('/api/auth/memberships');
-            if (!mounted) return;
-            const data: GuildMembership[] = res.ok ? await res.json() : [];
-            const sorted = sortGuildsByRole(data);
-            setGuilds(sorted);
-            if (sorted.length > 0) {
-              hasLoadedInitialGuilds.current = true;
-              const savedGuildId = localStorage.getItem('currentGuildId');
-              const savedGuild = sorted.find(g => g.guild_id === savedGuildId);
-              setCurrentGuildState(savedGuild || sorted[0]);
-            } else {
-              setCurrentGuildState(null);
+          setTimeout(async () => {
+            try {
+              console.log('[AuthContext] Fetching guilds for user:', session.user.id);
+              const res = await fetch('/api/auth/memberships', { cache: 'no-store' });
+              if (!mounted) return;
+              const data: GuildMembership[] = res.ok ? await res.json() : [];
+              await applyMemberships(data);
+            } catch (fetchError) {
+              console.error('[AuthContext] Error fetching guilds:', fetchError);
+              if (mounted) setGuilds([]);
+            } finally {
+              setIsLoadingGuilds(false);
+              loadingGuildsRef = false;
             }
-          } catch (fetchError) {
-            console.error('[AuthContext] Error fetching guilds:', fetchError);
-            if (mounted) setGuilds([]);
-          } finally {
-            setIsLoadingGuilds(false);
-            loadingGuildsRef = false;
-          }
+          }, 0);
         }
       }
       // Ignore TOKEN_REFRESHED, USER_UPDATED, etc. to prevent loops
@@ -235,7 +280,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signUp = async (email: string, password: string, displayName?: string) => {
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -244,19 +289,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
     });
-    return { error: error as Error | null };
+    // session is set when email confirmation is off — the user is already signed in.
+    return { error: error as Error | null, signedIn: !!data?.session };
   };
 
   const signOut = async () => {
     await supabase.auth.signOut();
     setGuilds([]);
     setCurrentGuildState(null);
+    setIsAwaitingAssignment(false);
+    setMyCharacters([]);
     localStorage.removeItem('currentGuildId');
   };
 
   const hasRole = (requiredRole: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER') => {
-    // Guests have MEMBER-level read access only
-    if (!user) return requiredRole === 'MEMBER';
+    // Guests (and signed-in users awaiting assignment) have MEMBER-level read access only
+    if (!user || isAwaitingAssignment) return requiredRole === 'MEMBER';
     if (!currentGuild) return false;
 
     const roleHierarchy = { MEMBER: 0, OFFICER: 1, DEPUTY: 2, LEADER: 3 };
@@ -273,6 +321,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isSuperAdmin = user?.email === SUPER_ADMIN_EMAIL;
   const isGuest = !user;
 
+  // ── Current character ──
+  const [currentCharacterId, setCurrentCharacterId] = useState<string | null>(null);
+  const usableCharacters = useMemo(
+    () => myCharacters.filter((c) => c.in_dream_guild && c.guild_id && guilds.some((g) => g.guild_id === c.guild_id)),
+    [myCharacters, guilds]
+  );
+
+  // Pick a sensible character once characters/guilds load (saved choice → one in current guild → claimed main).
+  useEffect(() => {
+    if (isAwaitingAssignment || usableCharacters.length === 0) {
+      setCurrentCharacterId(null);
+      return;
+    }
+    setCurrentCharacterId((cur) => {
+      if (cur && usableCharacters.some((c) => c.member_id === cur)) return cur;
+      const saved = typeof window !== 'undefined' ? localStorage.getItem('currentCharacterId') : null;
+      const pick =
+        usableCharacters.find((c) => c.member_id === saved) ??
+        usableCharacters.find((c) => c.guild_id === currentGuild?.guild_id && c.claimed) ??
+        usableCharacters.find((c) => c.guild_id === currentGuild?.guild_id) ??
+        null;
+      return pick?.member_id ?? null;
+    });
+  }, [usableCharacters, isAwaitingAssignment, currentGuild?.guild_id]);
+
+  const currentCharacter = useMemo(() => {
+    const c = usableCharacters.find((x) => x.member_id === currentCharacterId) ?? null;
+    // Only "playing as" a character while its guild is the selected guild.
+    return c && c.guild_id === currentGuild?.guild_id ? c : null;
+  }, [usableCharacters, currentCharacterId, currentGuild?.guild_id]);
+
+  const setCurrentCharacter = (c: AccountCharacter) => {
+    setCurrentCharacterId(c.member_id);
+    localStorage.setItem('currentCharacterId', c.member_id);
+    const g = guilds.find((x) => x.guild_id === c.guild_id);
+    if (g) setCurrentGuild(g);
+  };
+  const myGuildIds = useMemo(
+    () => new Set(myCharacters.filter((c) => c.in_dream_guild && c.guild_id).map((c) => c.guild_id as string)),
+    [myCharacters]
+  );
+
   const value = {
     user,
     loading: loading || isLoadingGuilds,
@@ -286,6 +376,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signOut,
     hasRole,
     isLeaderOf,
+    isAwaitingAssignment,
+    myCharacters,
+    myGuildIds,
+    refreshAccount: loadAccount,
+    currentCharacter,
+    setCurrentCharacter,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 
 export default function SignupPage() {
   const [email, setEmail] = useState('');
@@ -47,10 +47,14 @@ export default function SignupPage() {
     }
 
     try {
-      const { error: signUpError } = await signUp(email, password, displayName);
+      const { error: signUpError, signedIn } = await signUp(email, password, displayName);
 
       if (signUpError) {
         setError(signUpError.message);
+      } else if (signedIn) {
+        // Already signed in (no email confirmation) — go straight in; /account shows the claim flow.
+        router.push('/account');
+        router.refresh();
       } else {
         router.push('/login');
       }
@@ -62,7 +66,14 @@ export default function SignupPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
+    <div className="relative min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
+      <Link
+        href="/"
+        className="absolute left-4 top-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back to site
+      </Link>
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl font-bold text-center">Create Account</CardTitle>

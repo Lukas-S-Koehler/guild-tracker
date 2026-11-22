@@ -363,6 +363,76 @@ export class IdleMMOApi {
   async getEnemiesList(): Promise<EnemiesListResponse> {
     return this.fetch<EnemiesListResponse>(`${IDLEMMO_BASE_URL}/v1/combat/enemies/list`);
   }
+
+  /** Public: stat levels, class, equipped pet (species name, level, evolution), location. */
+  async getCharacterInformation(hashedCharId: string): Promise<CharacterInformation> {
+    const data = await this.fetch<{ character: CharacterInformation }>(
+      `${IDLEMMO_BASE_URL}/v1/character/${hashedCharId}/information`
+    );
+    return data.character;
+  }
+
+  /** Public: active effects incl. per-enemy slayer_rank damage %. No gear combat stats. */
+  async getCharacterEffects(hashedCharId: string): Promise<CharacterEffect[]> {
+    const data = await this.fetch<{ effects: CharacterEffect[] }>(
+      `${IDLEMMO_BASE_URL}/v1/character/${hashedCharId}/effects`
+    );
+    return data.effects ?? [];
+  }
+
+  /** Owner-only: returns [] unless the API key belongs to the character's account. */
+  async getCharacterPets(hashedCharId: string): Promise<CharacterPet[]> {
+    const data = await this.fetch<{ pets: CharacterPet[] }>(
+      `${IDLEMMO_BASE_URL}/v1/character/${hashedCharId}/pets`
+    );
+    return data.pets ?? [];
+  }
+}
+
+export interface CharacterInformation {
+  id: number;
+  hashed_id: string;
+  name: string;
+  class: string | null;
+  image_url: string | null;
+  skills: Record<string, { experience: number; level: number }>;
+  stats: Record<string, { experience: number; level: number }>;
+  total_level: number;
+  location: { id: number; name: string } | null;
+  equipped_pet: {
+    id: number;
+    pet_id: number;
+    name: string;
+    custom_name: string | null;
+    image_url: string | null;
+    level: number;
+    quality: string;
+    evolution?: { state: number; max: number };
+  } | null;
+  guild: { id: number; tag: string; position: string } | null;
+}
+
+export interface CharacterEffect {
+  source: string;
+  target: string;
+  attribute: string;
+  value: number;
+  value_type: string;
+  location_id: number | null;
+  enemy_id: number | null;
+  expire_at: string | null;
+}
+
+export interface CharacterPet {
+  id: number;
+  pet_id: number;
+  name: string;
+  custom_name: string | null;
+  image_url: string | null;
+  level: number;
+  quality: string;
+  equipped: boolean;
+  evolution?: { state: number; max: number };
 }
 
 export interface EnemyLootDrop {

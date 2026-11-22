@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
+import { recomputeAllClaimedUsers } from '@/lib/account-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -130,5 +131,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ success: true, results });
+  // Guild moves, promotions and leaves → update derived website access.
+  let access: { users: number; changed: number } | { error: string };
+  try {
+    access = await recomputeAllClaimedUsers(supabase);
+  } catch (err) {
+    access = { error: String(err) };
+  }
+
+  return NextResponse.json({ success: true, results, access });
 }

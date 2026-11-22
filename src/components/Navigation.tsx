@@ -17,12 +17,21 @@ import { ChevronDown, User, LogOut, Users, Shield, Crown } from 'lucide-react';
 
 export default function Navigation() {
   const pathname = usePathname();
-  const { user, currentGuild, guilds, signOut, hasRole, isSuperAdmin, isGuest, setCurrentGuild } = useAuth();
+  const { user, currentGuild, guilds, signOut, hasRole, isSuperAdmin, isGuest, setCurrentGuild, isAwaitingAssignment, myGuildIds, myCharacters, currentCharacter, setCurrentCharacter } = useAuth();
+
+  // Characters you can "play as": on your account, in a Dream guild you have access to.
+  const switchableCharacters = isGuest || isAwaitingAssignment
+    ? []
+    : myCharacters.filter((c) => c.in_dream_guild && c.guild_id && guilds.some((g) => g.guild_id === c.guild_id));
+  // Guild access not covered by a character (manual overrides, super admin, guests).
+  const otherGuilds = guilds.filter((g) => !switchableCharacters.some((c) => c.guild_id === g.guild_id));
 
   // Don't show navigation on auth pages
   if (pathname === '/login' || pathname === '/signup' || pathname === '/guilds') {
     return null;
   }
+
+  const prettyRole = (r: string) => r.charAt(0) + r.slice(1).toLowerCase();
 
   const getRoleIcon = (role: string) => {
     switch (role) {
@@ -51,6 +60,7 @@ export default function Navigation() {
     { href: '/overview', label: 'Overview' },
     { href: '/leaderboard', label: 'Leaderboard' },
     { href: '/assault', label: 'Assault' },
+    { href: '/combat', label: 'Combat', requiresRole: 'MEMBER' },
     { href: '/guide', label: 'Guide' },
     { href: '/data-management', label: 'Manage Data', requiresSuperAdmin: true },
     { href: '/admin', label: 'Admin', requiresRole: 'LEADER' },
@@ -93,43 +103,87 @@ export default function Navigation() {
             {/* Guild Indicator & User Menu */}
             {currentGuild ? (
               <div className="flex min-w-0 items-center gap-2">
-                {/* Guild selector */}
+                {/* Guild / character selector */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="gap-2 max-w-[11rem] sm:max-w-none">
-                      <span className="font-medium truncate">{currentGuild.guild_name}</span>
-                      {!isGuest && (
-                        <Badge variant="outline" className={`${getRoleBadgeColor(currentGuild.role)} text-xs`}>
+                    <Button variant="outline" size="sm" className="gap-2 max-w-[14rem] sm:max-w-none">
+                      {currentCharacter ? (
+                        <>
+                          {currentCharacter.avatar_url && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={currentCharacter.avatar_url} alt="" className="h-4 w-4 rounded" />
+                          )}
+                          <span className="font-medium truncate">{currentCharacter.ign}</span>
+                          <span className="text-muted-foreground text-xs">{currentCharacter.guild_nickname ?? currentGuild.guild_name}</span>
+                        </>
+                      ) : (
+                        <span className="font-medium truncate">{currentGuild.guild_name}</span>
+                      )}
+                      {!isGuest && !isAwaitingAssignment && (
+                        <Badge variant="outline" className={`${getRoleBadgeColor(currentGuild.role)} text-xs gap-1`}>
                           {getRoleIcon(currentGuild.role)}
+                          <span className="hidden sm:inline">{prettyRole(currentGuild.role)}</span>
                         </Badge>
                       )}
-                      {guilds.length > 1 && <ChevronDown className="h-3 w-3" />}
+                      <ChevronDown className="h-3 w-3" />
                     </Button>
                   </DropdownMenuTrigger>
-                  {guilds.length > 1 && (
-                    <DropdownMenuContent align="end" className="w-56">
-                      <DropdownMenuLabel>{isGuest ? 'Select Guild' : 'My Guilds'}</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      {guilds.map((guild) => (
-                        <DropdownMenuItem
-                          key={guild.guild_id}
-                          className={guild.guild_id === currentGuild.guild_id ? 'bg-accent' : ''}
-                          onClick={isGuest ? () => setCurrentGuild(guild) : undefined}
-                          disabled={!isGuest}
-                        >
-                          <div className="flex items-center justify-between w-full">
-                            <span>{guild.guild_name}</span>
-                            {!isGuest && (
-                              <Badge variant="outline" className={getRoleBadgeColor(guild.role)}>
-                                <span className="mr-1">{getRoleIcon(guild.role)}</span>
-                                {guild.role}
-                              </Badge>
-                            )}
-                          </div>
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  )}
+                  <DropdownMenuContent align="end" className="w-72 max-h-[70vh] overflow-y-auto">
+                    {switchableCharacters.length > 0 && (
+                      <>
+                        <DropdownMenuLabel>My characters</DropdownMenuLabel>
+                        {switchableCharacters.map((c) => {
+                          const g = guilds.find((x) => x.guild_id === c.guild_id)!;
+                          const active = currentCharacter?.member_id === c.member_id;
+                          return (
+                            <DropdownMenuItem key={c.member_id} className={active ? 'bg-accent' : ''} onClick={() => setCurrentCharacter(c)}>
+                              <div className="flex items-center gap-2 w-full">
+                                {c.avatar_url && (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img src={c.avatar_url} alt="" className="h-5 w-5 rounded" />
+                                )}
+                                <span className="truncate">{c.ign}</span>
+                                {!c.claimed && <span className="text-[10px] text-muted-foreground">alt</span>}
+                                <span className="text-xs text-muted-foreground ml-auto">{c.guild_nickname}</span>
+                                <Badge variant="outline" className={`${getRoleBadgeColor(g.role)} gap-1`}>
+                                  {getRoleIcon(g.role)}
+                                  {prettyRole(c.position ?? g.role)}
+                                </Badge>
+                              </div>
+                            </DropdownMenuItem>
+                          );
+                        })}
+                      </>
+                    )}
+                    {otherGuilds.length > 0 && (
+                      <>
+                        {switchableCharacters.length > 0 && <DropdownMenuSeparator />}
+                        <DropdownMenuLabel>
+                          {isGuest || isAwaitingAssignment ? 'Select guild' : switchableCharacters.length > 0 ? 'Other guild access' : 'My guilds'}
+                        </DropdownMenuLabel>
+                        {otherGuilds.map((guild) => (
+                          <DropdownMenuItem
+                            key={guild.guild_id}
+                            className={!currentCharacter && guild.guild_id === currentGuild.guild_id ? 'bg-accent' : ''}
+                            onClick={() => setCurrentGuild(guild)}
+                          >
+                            <div className="flex items-center justify-between w-full">
+                              <span className="flex items-center gap-1.5">
+                                {myGuildIds.has(guild.guild_id) && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
+                                {guild.guild_name}
+                              </span>
+                              {!isGuest && !isAwaitingAssignment && (
+                                <Badge variant="outline" className={getRoleBadgeColor(guild.role)}>
+                                  <span className="mr-1">{getRoleIcon(guild.role)}</span>
+                                  {prettyRole(guild.role)}
+                                </Badge>
+                              )}
+                            </div>
+                          </DropdownMenuItem>
+                        ))}
+                      </>
+                    )}
+                  </DropdownMenuContent>
                 </DropdownMenu>
 
                 {/* User menu or Sign In */}
@@ -149,15 +203,28 @@ export default function Navigation() {
                       <DropdownMenuLabel>
                         <div className="flex flex-col gap-1">
                           <span className="text-sm">{user?.email}</span>
-                          <Badge
-                            variant="outline"
-                            className={`w-fit ${getRoleBadgeColor(currentGuild.role)}`}
-                          >
-                            <span className="mr-1">{getRoleIcon(currentGuild.role)}</span>
-                            {currentGuild.role}
-                          </Badge>
+                          {isAwaitingAssignment ? (
+                            <Badge variant="outline" className="w-fit">Awaiting assignment</Badge>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className={`w-fit ${getRoleBadgeColor(currentGuild.role)}`}
+                            >
+                              <span className="mr-1">{getRoleIcon(currentGuild.role)}</span>
+                              {currentGuild.role}
+                            </Badge>
+                          )}
                         </div>
                       </DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem asChild>
+                        <Link href="/account">My characters</Link>
+                      </DropdownMenuItem>
+                      {(isSuperAdmin || guilds.some((g) => !isAwaitingAssignment && g.role !== 'MEMBER')) && (
+                        <DropdownMenuItem asChild>
+                          <Link href="/admin/claims">Character claims</Link>
+                        </DropdownMenuItem>
+                      )}
                       <DropdownMenuSeparator />
                       <DropdownMenuItem onClick={() => signOut()}>
                         <LogOut className="h-4 w-4 mr-2" />

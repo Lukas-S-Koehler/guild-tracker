@@ -12,7 +12,7 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children, requiredRole, requiredGuildLeader }: ProtectedRouteProps) {
-  const { user, loading, currentGuild, guilds, hasRole, isLeaderOf, isSuperAdmin, signOut } = useAuth();
+  const { user, loading, currentGuild, guilds, hasRole, isLeaderOf, isSuperAdmin, signOut, isAwaitingAssignment } = useAuth();
   const router = useRouter();
   const [isRedirecting, setIsRedirecting] = useState(false);
 
@@ -31,6 +31,15 @@ export default function ProtectedRoute({ children, requiredRole, requiredGuildLe
 
     // Super admin bypasses all role/guild checks
     if (isSuperAdmin) return;
+
+    // Signed in but not assigned yet — same access as a guest
+    if (isAwaitingAssignment) {
+      if (requiredRole !== 'MEMBER' || requiredGuildLeader) {
+        setIsRedirecting(true);
+        router.push('/account');
+      }
+      return;
+    }
 
     // User has no guilds at all - show a message instead of redirecting
     if (guilds.length === 0) {
@@ -56,7 +65,7 @@ export default function ProtectedRoute({ children, requiredRole, requiredGuildLe
       setIsRedirecting(true);
       router.push('/');
     }
-  }, [user, loading, currentGuild, guilds, requiredRole, requiredGuildLeader, hasRole, isLeaderOf, isSuperAdmin, router]);
+  }, [user, loading, currentGuild, guilds, requiredRole, requiredGuildLeader, hasRole, isLeaderOf, isSuperAdmin, isAwaitingAssignment, router]);
 
   // Show loading state
   if (loading || isRedirecting) {
@@ -67,8 +76,8 @@ export default function ProtectedRoute({ children, requiredRole, requiredGuildLe
     );
   }
 
-  // Guest mode — allow MEMBER routes
-  if (!user && requiredRole === 'MEMBER' && !requiredGuildLeader && currentGuild) {
+  // Guest mode (or awaiting assignment) — allow MEMBER routes
+  if ((!user || isAwaitingAssignment) && requiredRole === 'MEMBER' && !requiredGuildLeader && currentGuild) {
     return <>{children}</>;
   }
 
@@ -87,13 +96,11 @@ export default function ProtectedRoute({ children, requiredRole, requiredGuildLe
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <div className="max-w-md text-center space-y-4">
-          <h1 className="text-2xl font-bold">No Guilds Found</h1>
+          <h1 className="text-2xl font-bold">Not assigned yet</h1>
           <p className="text-muted-foreground">
-            You&apos;re not a member of any guilds yet. Contact your guild leader to get added to a guild.
+            Claim your IdleMMO character and a guild admin will approve it. Your guild access follows your characters automatically.
           </p>
-          <p className="text-sm text-muted-foreground">
-            Guild leaders can add you using your email: <span className="font-mono">{user.email}</span>
-          </p>
+          <a href="/account" className="text-primary hover:underline block">Claim your character →</a>
           <button
             onClick={async () => {
               await signOut();

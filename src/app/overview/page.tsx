@@ -279,7 +279,9 @@ function MemberRow({
   overflowLimit,
   groupPosition,
   groupColorIdx,
+  isMine = false,
 }: {
+  isMine?: boolean;
   member: OverviewMember;
   columns: string[];
   period: 'daily' | 'weekly';
@@ -302,7 +304,7 @@ function MemberRow({
 
   return (
     <>
-      <tr className={`border-b hover:bg-muted/30 transition-colors ${groupRowClass}`}>
+      <tr className={`border-b hover:bg-muted/30 transition-colors ${groupRowClass} ${isMine ? 'bg-primary/10' : ''}`}>
         {/* Member name */}
         <td className="px-3 py-2 min-w-[160px] max-w-[220px]">
           <div className="flex items-center gap-1.5">
@@ -311,6 +313,9 @@ function MemberRow({
               <img src={member.avatar_url} alt="" className="h-5 w-5 rounded-full shrink-0" />
             )}
             <span className="font-medium text-sm truncate">{member.ign}</span>
+            {isMine && (
+              <span className="shrink-0 text-[10px] font-medium px-1 py-0.5 rounded bg-primary/20 text-primary border border-primary/30">you</span>
+            )}
             {isNew && (
               <span
                 className="shrink-0 text-[10px] font-medium px-1 py-0.5 rounded bg-sky-500/20 text-sky-400 border border-sky-500/30"
@@ -409,8 +414,9 @@ interface GuildOption {
 }
 
 function OverviewPageContent() {
-  const { guilds, currentGuild, isSuperAdmin, hasRole } = useAuth();
+  const { guilds, currentGuild, isSuperAdmin, hasRole, myCharacters, myGuildIds } = useAuth();
   const api = useApiClient();
+  const myMemberIds = useMemo(() => new Set(myCharacters.map((c) => c.member_id)), [myCharacters]);
 
   const [allGuilds, setAllGuilds] = useState<GuildOption[]>([]);
   const [selectedGuildId, setSelectedGuildId] = useState<string>('');
@@ -532,7 +538,10 @@ function OverviewPageContent() {
               variant={selectedGuildId === g.id ? 'default' : 'outline'}
               size="sm"
               onClick={() => setSelectedGuildId(g.id)}
+              className={myGuildIds.has(g.id) && selectedGuildId !== g.id ? 'border-primary/60' : ''}
+              title={myGuildIds.has(g.id) ? 'One of your characters is in this guild' : undefined}
             >
+              {myGuildIds.has(g.id) && <span className="h-1.5 w-1.5 rounded-full bg-primary mr-1.5" />}
               {g.nickname || g.name}
             </Button>
           ))}
@@ -608,7 +617,7 @@ function OverviewPageContent() {
                 </thead>
                 <tbody>
                   {groupedMembers.map(({ member, position, groupColorIdx }) => (
-                    <MemberRow key={member.id} member={member} columns={columns} period={period} guildId={selectedGuildId} overflowEnabled={overflowEnabled} overflowLimit={data?.config.overflow_limit ?? 10000} groupPosition={position} groupColorIdx={groupColorIdx} />
+                    <MemberRow key={member.id} isMine={myMemberIds.has(member.id)} member={member} columns={columns} period={period} guildId={selectedGuildId} overflowEnabled={overflowEnabled} overflowLimit={data?.config.overflow_limit ?? 10000} groupPosition={position} groupColorIdx={groupColorIdx} />
                   ))}
                 </tbody>
               </table>
