@@ -1,0 +1,28 @@
+name: World Locations Sync
+
+on:
+  schedule:
+    # Runs at 11:02 UTC daily — before combat enemies sync, which reads world_locations
+    - cron: '2 11 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync-locations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Sync world locations
+        run: |
+          echo "Syncing world locations (images + weather)..."
+          response=$(curl -s -L -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/world-locations-sync" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | head -n -1)
+          echo "Response: $body"
+          echo "HTTP status: $http_code"
+          if [ "$http_code" != "200" ]; then
+            echo "ERROR: World locations sync failed with status $http_code"
+            exit 1
+          fi
