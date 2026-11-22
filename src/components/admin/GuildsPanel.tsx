@@ -276,6 +276,9 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
           <p className="text-xs text-muted-foreground mt-0.5">Combat level (CL), same scale as raid requirements</p>
         </div>
 
+        {isAssault ? (
+          <p className="text-xs text-muted-foreground">Assault guild: no scheduled raids (members are CL 100+).</p>
+        ) : (
         <div>
           <Label className="text-xs text-muted-foreground">Raids this guild runs</Label>
           <div className="mt-1 grid sm:grid-cols-2 gap-x-4 gap-y-1">
@@ -301,6 +304,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             </p>
           )}
         </div>
+        )}
 
         <div>
           <label className="flex items-center gap-2 cursor-pointer">

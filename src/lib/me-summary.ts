@@ -36,6 +36,8 @@ const CL_REFRESH_MS = DAY_MS;
 const CHECK_UTC = { h: 11, m: 48 };
 const ASSAULT_TOP_GUILD = '138'; // Dream Invaders: hardcore assaults
 const ASSAULT_ENTRY_GUILD = '1184'; // Dream Engineers
+/** Assault guilds (DE, DI) don't run raids; they take CL 100+. */
+const ASSAULT_MIN_CL = 100;
 
 interface LogRow {
   member_id: string;
@@ -77,7 +79,8 @@ export interface FeedItem {
 }
 
 export interface Nudge {
-  kind: 'eligible' | 'next' | 'assault';
+  /** assault = DE → DI (hardcore assaults); assault_entry = top raid tier with CL 100+ → DE. */
+  kind: 'eligible' | 'next' | 'assault' | 'assault_entry';
   guild_name: string;
   min_level: number;
   levels_needed: number;
@@ -99,6 +102,8 @@ export interface GuildGroup {
   period: RequirementPeriod;
   required: number;
   deposits_only: boolean;
+  is_assault: boolean;
+  /** Always empty for assault guilds. */
   raids: Raid[];
   members: {
     member_id: string;
@@ -212,7 +217,12 @@ async function loadCombatLevels(
     .in('id', chars.map((c) => c.member_id));
   if (error) return out; // column not migrated yet
   const rows = new Map((data ?? []).map((r) => [r.id as string, r]));
-  const anyKey = Array.from(cfgs.values()).find((c) => c.apiKey)?.apiKey ?? null;
+  let anyKey = Array.from(cfgs.values()).find((c) => c.apiKey)?.apiKey ?? null;
+  if (!anyKey) {
+    // No active Dream guild on this account: any guild's key can read public character info.
+    const { data: k } = await supabase.from('guild_config').select('api_key').not('api_key', 'is', null).limit(1).maybeSingle();
+    anyKey = (k?.api_key as string | null) ?? null;
+  }
 
   await Promise.all(
     chars.map(async (c) => {
@@ -433,7 +443,8 @@ export async function buildMeSummary(
       period: cfg.period,
       required: cfg.period === 'weekly' ? cfg.weeklyReq : cfg.dailyReq,
       deposits_only: cfg.depositsOnly,
-      raids: guildRaids(cfg.settings, g.min_level),
+      is_assault: !!g.is_assault,
+      raids: g.is_assault ? [] : guildRaids(cfg.settings, g.min_level),
       members,
       met: noReq || members.some((m) => m.met),
       days_inactive: days,
@@ -554,6 +565,11 @@ export async function buildMeSummary(
       return { kind: 'eligible', guild_name: g.name, min_level: g.min_level ?? 0, levels_needed: 0 };
     }
     if (higher.length) return { kind: 'next', guild_name: higher[0].name, min_level: higher[0].min_level ?? 0, levels_needed: (higher[0].min_level ?? 0) - cl };
+    // Top of the raid ladder: past here it's assaults, not a higher raid.
+    const de = guildMap.get(ASSAULT_ENTRY_GUILD);
+    if (de && de.is_active !== false) {
+      return { kind: 'assault_entry', guild_name: de.name, min_level: ASSAULT_MIN_CL, levels_needed: Math.max(0, ASSAULT_MIN_CL - cl) };
+    }
     return null;
   };
   const card = (c: AccountCharacter): CharacterCard => {

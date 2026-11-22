@@ -130,6 +130,10 @@ function NudgeLine({ c }: { c: MeSummary['characters'][number] }) {
   if (!n) return null;
   if (n.kind === 'assault')
     return <span>Want hardcore assaults? Ask an officer about moving to <b className="text-foreground">{n.guild_name}</b>{n.levels_needed > 0 ? ` (CL ${n.min_level}, ${n.levels_needed} to go)` : ''}.</span>;
+  if (n.kind === 'assault_entry')
+    return n.levels_needed > 0
+      ? <span>Top raid tier. {n.levels_needed} CL until assaults open up in <b className="text-foreground">{n.guild_name}</b> (CL {n.min_level}+).</span>
+      : <span>Want to try assaults? At CL {n.min_level}+ you can ask an officer about <b className="text-foreground">{n.guild_name}</b>.</span>;
   if (n.kind === 'eligible')
     return <span>Meets the CL {n.min_level} requirement for <b className="text-foreground">{n.guild_name}</b>. Ask an officer about moving up.</span>;
   return <span>{n.levels_needed} CL until <b className="text-foreground">{n.guild_name}</b> (CL {n.min_level}).</span>;
@@ -380,8 +384,10 @@ export default function MePage() {
         <CardContent className="space-y-3 text-sm">
           {groups.map((g) => (
             <div key={g.guild_id} className="text-xs text-muted-foreground">
-              <b className="text-foreground">{g.guild_nickname ?? g.guild_name}</b> runs{' '}
-              {g.raids.length ? g.raids.map((r) => `${r.name} (CL ${r.min_cl}, ${r.minutes} min, ${r.marks} marks)`).join(', ') : 'no raid set yet'}
+              <b className="text-foreground">{g.guild_nickname ?? g.guild_name}</b>{' '}
+              {g.is_assault
+                ? 'is an assault guild (CL 100+), no scheduled raids'
+                : `runs ${g.raids.length ? g.raids.map((r) => `${r.name} (CL ${r.min_cl}, ${r.minutes} min, ${r.marks} marks)`).join(', ') : 'no raid set yet'}`}
             </div>
           ))}
           <ul className="space-y-2">

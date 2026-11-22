@@ -1,7 +1,8 @@
 /**
  * IdleMMO scheduled raids. Static game data; min_cl = combat level needed to join.
  *
- * Each guild runs one raid (some lower guilds run several). Which raids a guild runs
+ * Each raid guild runs one raid (some lower guilds run several). Assault guilds
+ * (guilds.is_assault: DE, DI) run no raids; they take CL 100+. Which raids a guild runs
  * lives in guild_config.settings.raids (array of keys). When unset, the default is
  * the raid whose CL requirement matches the guild's min_level.
  */
