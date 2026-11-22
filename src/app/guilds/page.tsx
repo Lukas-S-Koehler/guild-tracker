@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { createAdminClient } from '@/lib/supabase-server';
 import { loadGuildDirectory } from '@/lib/guild-directory';
 import GuildCard from '@/components/guilds/GuildCard';
-import GuildFitPicker from '@/components/guilds/GuildFitPicker';
+import PickerSection from '@/components/guilds/PickerSection';
 import ChooseCurrentGuild from '@/components/guilds/ChooseCurrentGuild';
 
 export const dynamic = 'force-dynamic';
@@ -27,7 +27,7 @@ export default async function GuildsPage() {
         </p>
       </div>
 
-      <div id="fit" className="scroll-mt-20"><GuildFitPicker guilds={active} /></div>
+      <div id="fit" className="scroll-mt-20"><PickerSection guilds={active} /></div>
 
       <section className="space-y-3">
         <h2 className="text-xl font-semibold">Raid guilds</h2>
