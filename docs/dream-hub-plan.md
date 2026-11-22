@@ -8,7 +8,8 @@ Agreed 2026-11-22. Update the status column as steps land.
 
 - **Claims:** one website user claims ONE IdleMMO account. The claim covers the whole alt bundle
   (`member_alts` closure, up to 5 characters). A pending claim already locks the bundle for others.
-  To claim another account, release the current one first. Admins can force-release (revoke).
+  IdleMMO is strictly one account per person, so the account page locks once a claim exists: the claim search
+  is hidden and release is only offered as "claimed the wrong account by mistake?". Admins can force-release (revoke).
 - **Identity:** the claimed main is shown top right (avatar, IGN, level, guild, position); alts in the dropdown.
 - **Profiles:** members-only for now.
 - **Currency:** Dream Crystals. Staff hand out reward items in game and mark them fulfilled.
@@ -24,7 +25,7 @@ Agreed 2026-11-22. Update the status column as steps land.
 
 | # | Step | Status |
 |---|------|--------|
-| 1 | Claim rules (A1–A4): one claim per user, bundle locks, release, main in nav. Migration `database/claims-one-per-user.sql` | done (migration must be run) |
+| 1 | Claim rules (A1–A4): one claim per user, bundle locks, release, main in nav. Migration `database/claims-one-per-user.sql` | done |
 | 2 | Cleanup audit (H1, H4). Part 1 done: dead APIs removed, old docs/SQL archived, `database/README.md`, world-locations daily workflow. Page merges happen in steps 3 (admin hub) and 4 (guild hub `/guild` with tabs Overview, Members, Activity, Inactivity (officer+), Leaderboard; role matrix member/officer/deputy/leader/super admin, enforced in the API too; old URLs redirect). `/setup` → `/account`, `/guilds` picker killed. `refresh-meta` gets a button in Admin → Assault. pg_cron/GitHub overlap for assault scheduler/collector checked: intentional and safe | part 1 done |
 | 3 | Admin hub (H3): `/admin` as tabs: Claims & Access, Guilds, Members & Alts, Warnings, Assault, Discord, System (Rewards added in Phase 3). Panels live in `src/components/admin/`; old URLs (`/admin/claims`, `/admin/alts`, `/admin/bumps`, `/admin/raid-reminders`, `/assault/admin`, `/discord-mapping`, `/data-management`, `/price-cache`) redirect via `next.config.js`. Tab visibility uses the highest role across all guilds; APIs still enforce their own checks. `refresh-meta` button in Assault → Potions. `/warnings` stays as a member-facing page | done |
 | 4 | `/me` dashboard (B1–B10): hero, stat tiles, today's requirement, streak, activity feed, heatmap, guild journey, move-up nudge, alts, warnings. One API `/api/me/summary` built on `daily_logs` (raids, gold_donated, met_requirement), `member_guild_history`, `warnings`, assault tables | |

@@ -85,8 +85,10 @@ export default function AccountPage() {
   }
 
   async function remove(c: Claim) {
-    const verb = c.status === 'approved' ? 'Release' : 'Cancel request for';
-    if (!confirm(`${verb} ${c.member?.ign}? ${c.status === 'approved' ? 'You lose access that came from this account and its alts, and someone else can claim it.' : ''}`)) return;
+    const text = c.status === 'approved'
+      ? `Release ${c.member?.ign}? Only do this if you claimed an account that isn't yours. You lose all access that came from it and its alts, and you'll need to claim and get approved again.`
+      : `Cancel your request for ${c.member?.ign}?`;
+    if (!confirm(text)) return;
     await fetch(`/api/account/claims?id=${c.id}`, { method: 'DELETE' });
     await load();
     refreshAccount();
@@ -125,7 +127,9 @@ export default function AccountPage() {
         </CardHeader>
         <CardContent>
           {characters.length === 0 ? (
-            <p className="text-sm text-muted-foreground">None yet. Claim your main below — alts come with it once it&apos;s approved.</p>
+            <p className="text-sm text-muted-foreground">
+              {activeClaim ? 'None yet. Your characters show up here once your claim is approved.' : 'None yet. Claim your main below — alts come with it once it’s approved.'}
+            </p>
           ) : (
             <div className="grid gap-2 sm:grid-cols-2">
               {characters.map((c) => (
@@ -147,7 +151,6 @@ export default function AccountPage() {
               {approved.map((c) => (
                 <span key={c.id} className="inline-flex items-center gap-1 border rounded px-2 py-0.5">
                   Claimed: {c.member?.ign}
-                  <button title="Release" onClick={() => remove(c)} className="text-muted-foreground hover:text-red-500"><X className="h-3 w-3" /></button>
                 </span>
               ))}
             </div>
@@ -172,21 +175,27 @@ export default function AccountPage() {
         </Card>
       )}
 
+      {approved.length > 0 && (
+        <p className="text-xs text-muted-foreground px-1">
+          IdleMMO allows one account per person, so your claim stays locked to it. Claimed the wrong account by mistake?{' '}
+          {approved.map((c) => (
+            <button key={c.id} onClick={() => remove(c)} className="underline hover:text-red-500">
+              Release {c.member?.ign}
+            </button>
+          ))}
+        </p>
+      )}
+
+      {!activeClaim && (
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Claim a character</CardTitle>
           <CardDescription>
-            Search any character currently in a Dream guild. You claim one IdleMMO account: all its characters (up to 5) come
-            with it automatically.
+            Search your main character (it must be in a Dream guild). IdleMMO allows one account per person, so you claim it once:
+            all its characters (up to 5) come with it automatically.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          {activeClaim && (
-            <p className="text-sm text-amber-400">
-              You already {activeClaim.status === 'pending' ? 'have a pending claim on' : 'claimed'} <b>{activeClaim.member?.ign}</b>.
-              Release it above to claim a different account.
-            </p>
-          )}
           <Input placeholder="Search IGN…" value={q} onChange={(e) => setQ(e.target.value)} className="max-w-xs h-9" />
           {msg && <p className={`text-sm ${msg.tone === 'ok' ? 'text-green-500' : 'text-red-500'}`}>{msg.text}</p>}
           {searching && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -205,8 +214,6 @@ export default function AccountPage() {
                     <Badge variant="outline" className="opacity-60">{r.taken_status ?? 'claimed'}</Badge>
                   ) : requested ? (
                     <Badge variant="outline">requested</Badge>
-                  ) : activeClaim ? (
-                    <Badge variant="outline" className="opacity-60">available</Badge>
                   ) : (
                     <Button size="sm" variant="outline" className="h-7" onClick={() => claim(r)}>Claim</Button>
                   )}
@@ -216,6 +223,7 @@ export default function AccountPage() {
           </div>
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }
