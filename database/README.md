@@ -27,8 +27,8 @@ then the `add-*.sql` feature migrations.
 | Job | Trigger | Schedule |
 |-----|---------|----------|
 | `/api/cron/raid-reminders` | Supabase pg_cron `raid-reminders-tick` (`raid-reminders.sql`) | every minute |
-| `/api/cron/assault-scheduler` | pg_cron `assault-scheduler-tick` (`assault-planner.sql`) **and** GitHub `assault-scheduler.yml` | 1 min / 5 min — check for double runs |
-| `/api/cron/assault-collector` | pg_cron `assault-collector-tick` (`assault-conquest.sql`) **and** GitHub `assault-collector.yml` | 5 min — check for double runs |
+| `/api/cron/assault-scheduler` | pg_cron `assault-scheduler-tick` (`assault-planner.sql`) **and** GitHub `assault-scheduler.yml` | 1 min / 5 min — GitHub is an intentional backup, endpoint is idempotent |
+| `/api/cron/assault-collector` | pg_cron `assault-collector-tick` (`assault-conquest.sql`) **and** GitHub `assault-collector.yml` | 5 min — overlap is harmless (upserts, quiet finalize, no posts) |
 | `/api/cron/world-locations-sync` | GitHub `world-locations-sync.yml` | 11:02 UTC daily |
 | `/api/cron/combat-enemies-sync` | GitHub | 11:08 UTC daily |
 | `/api/cron/price-cache-sync` | GitHub | 11:18 UTC daily |
@@ -37,4 +37,4 @@ then the `add-*.sql` feature migrations.
 | `/api/cron/guild-hall` | GitHub | 15:50 UTC daily |
 | `/api/cron/monthly-bump-king` | GitHub | 00:05 UTC on the 1st |
 
-Check active pg_cron jobs with `select jobname, schedule, active from cron.job;`
+Active pg_cron jobs (checked 2026-11-22): raid-reminders-tick, assault-scheduler-tick, assault-collector-tick. Check with `select jobname, schedule, active from cron.job;`
