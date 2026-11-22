@@ -6,17 +6,21 @@ import { buildMeSummary } from '@/lib/me-summary';
 export const dynamic = 'force-dynamic';
 
 /**
- * GET /api/me/summary?member_id=
- * Personal dashboard for the signed-in user. member_id picks a character from
- * the user's own account bundle (ignored if it isn't theirs); default = claimed main.
+ * GET /api/me/summary[?guild_id=|?member_id=]
+ * Personal dashboard for the signed-in user. Default = whole account.
+ * guild_id = the user's characters in that Dream guild (one group, same rules as the
+ * inactivity report); member_id = that character's group, or just the character when
+ * it isn't in a Dream guild. Ids not on the user's account are ignored.
  */
 export async function GET(req: NextRequest) {
   const user = await requireUser(req);
   if (isResponse(user)) return user;
 
-  const memberId = new URL(req.url).searchParams.get('member_id');
+  const params = new URL(req.url).searchParams;
+  const memberId = params.get('member_id');
+  const guildId = params.get('guild_id');
   try {
-    const summary = await buildMeSummary(user.id, memberId, createAdminClient());
+    const summary = await buildMeSummary(user.id, { memberId, guildId }, createAdminClient());
     return NextResponse.json(summary);
   } catch (e) {
     console.error('[me/summary]', e);
