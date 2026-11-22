@@ -58,7 +58,8 @@ export default function Navigation() {
   // Officer+ in any guild (not just the selected one) gets the admin hub; tabs gate themselves.
   const isStaff = isSuperAdmin || (!isAwaitingAssignment && guilds.some((g) => g.role !== 'MEMBER'));
 
-  const navLinks: { href: string; label: string; requiresRole?: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER'; requiresStaff?: boolean }[] = [
+  const navLinks: { href: string; label: string; requiresRole?: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER'; requiresStaff?: boolean; requiresUser?: boolean }[] = [
+    { href: '/me', label: 'Me', requiresUser: true },
     { href: '/', label: 'Dashboard' },
     { href: '/overview', label: 'Overview' },
     { href: '/leaderboard', label: 'Leaderboard' },
@@ -82,6 +83,7 @@ export default function Navigation() {
               <div className="order-last flex w-full min-w-0 max-w-full items-center gap-1 overflow-x-auto whitespace-nowrap text-sm lg:order-none lg:w-auto lg:overflow-visible">
                 {navLinks.map((link) => {
                   if (link.requiresStaff && !isStaff) return null;
+                  if (link.requiresUser && (!user || isGuest)) return null;
                   if (!isSuperAdmin && link.requiresRole && !hasRole(link.requiresRole)) return null;
 
                   const isActive = pathname === link.href;
@@ -222,6 +224,9 @@ export default function Navigation() {
                         </div>
                       </DropdownMenuLabel>
                       <DropdownMenuSeparator />
+                      <DropdownMenuItem asChild>
+                        <Link href="/me">My dashboard</Link>
+                      </DropdownMenuItem>
                       <DropdownMenuItem asChild>
                         <Link href="/account">My characters</Link>
                       </DropdownMenuItem>
