@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
-import { recomputeUserGuildAccess, reviewableGuildIds } from '@/lib/account-service';
+import { findBundleLocks, getActiveClaim, recomputeUserGuildAccess, reviewableGuildIds } from '@/lib/account-service';
 import { requireUser, isResponse, displayNameOf } from '@/lib/user-auth';
 
 export const dynamic = 'force-dynamic';
@@ -76,14 +76,14 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === 'approve') {
-    const { data: owner } = await supabase
-      .from('user_characters')
-      .select('id')
-      .eq('member_id', claim.member_id)
-      .eq('status', 'approved')
-      .neq('id', claim.id)
-      .maybeSingle();
-    if (owner) return NextResponse.json({ error: 'Character is already approved for another account — revoke that first' }, { status: 409 });
+    const { locks } = await findBundleLocks(claim.member_id, supabase);
+    if (locks.some((l) => l.claim_id !== claim.id)) {
+      return NextResponse.json({ error: 'This account (or one of its alts) already has another active claim — revoke that first' }, { status: 409 });
+    }
+    const active = await getActiveClaim(claim.user_id, supabase);
+    if (active && active.id !== claim.id) {
+      return NextResponse.json({ error: `This user already has an active claim on ${active.ign} — revoke that first` }, { status: 409 });
+    }
   }
 
   const status = action === 'approve' ? 'approved' : 'rejected';

@@ -114,6 +114,9 @@ export default function Navigation() {
                             <img src={currentCharacter.avatar_url} alt="" className="h-4 w-4 rounded" />
                           )}
                           <span className="font-medium truncate">{currentCharacter.ign}</span>
+                          {currentCharacter.total_level != null && (
+                            <span className="hidden sm:inline text-xs text-amber-400">Lv {currentCharacter.total_level}</span>
+                          )}
                           <span className="text-muted-foreground text-xs">{currentCharacter.guild_nickname ?? currentGuild.guild_name}</span>
                         </>
                       ) : (

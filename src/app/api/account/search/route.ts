@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { requireUser, isResponse } from '@/lib/user-auth';
+import { getAllClaimLocks } from '@/lib/account-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,23 +26,27 @@ export async function GET(req: NextRequest) {
       .limit(30),
   ]);
   const guildMap = new Map((guilds ?? []).map((g) => [g.id as string, g]));
-  const ids = (members ?? []).map((m) => m.id);
-  const { data: owned } = ids.length
-    ? await supabase.from('user_characters').select('member_id, user_id').eq('status', 'approved').in('member_id', ids)
-    : { data: [] };
-  const ownerOf = new Map((owned ?? []).map((o) => [o.member_id as string, o.user_id as string]));
+  // Locks cover pending + approved claims, expanded over each claim's alt bundle.
+  const locks = await getAllClaimLocks(supabase);
+  const hasActiveClaim = Array.from(locks.values()).some((l) => l.user_id === user.id);
 
   const results = (members ?? [])
     .filter((m) => guildMap.has(m.current_guild_id))
-    .map((m) => ({
-      member_id: m.id,
-      ign: m.ign,
-      avatar_url: m.avatar_url,
-      total_level: m.total_level,
-      guild_nickname: guildMap.get(m.current_guild_id)?.nickname ?? null,
-      guild_name: guildMap.get(m.current_guild_id)?.name ?? null,
-      taken: ownerOf.has(m.id) && ownerOf.get(m.id) !== user.id,
-      mine: ownerOf.get(m.id) === user.id,
-    }));
-  return NextResponse.json({ results });
+    .map((m) => {
+      const lock = locks.get(m.id);
+      const mine = lock?.user_id === user.id;
+      return {
+        member_id: m.id,
+        ign: m.ign,
+        avatar_url: m.avatar_url,
+        total_level: m.total_level,
+        guild_nickname: guildMap.get(m.current_guild_id)?.nickname ?? null,
+        guild_name: guildMap.get(m.current_guild_id)?.name ?? null,
+        /** 'claimed' | 'pending' when locked by someone else */
+        taken: !!lock && !mine,
+        taken_status: lock && !mine ? (lock.status === 'approved' ? 'claimed' : 'pending') : null,
+        mine,
+      };
+    });
+  return NextResponse.json({ results, has_active_claim: hasActiveClaim });
 }

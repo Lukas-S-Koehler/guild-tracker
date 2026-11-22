@@ -25,6 +25,7 @@ interface SearchResult {
   guild_nickname: string | null;
   guild_name: string | null;
   taken: boolean;
+  taken_status: 'claimed' | 'pending' | null;
   mine: boolean;
 }
 
@@ -84,8 +85,8 @@ export default function AccountPage() {
   }
 
   async function remove(c: Claim) {
-    const verb = c.status === 'approved' ? 'Unlink' : 'Cancel request for';
-    if (!confirm(`${verb} ${c.member?.ign}? ${c.status === 'approved' ? 'You lose access that came from this character and its alts.' : ''}`)) return;
+    const verb = c.status === 'approved' ? 'Release' : 'Cancel request for';
+    if (!confirm(`${verb} ${c.member?.ign}? ${c.status === 'approved' ? 'You lose access that came from this account and its alts, and someone else can claim it.' : ''}`)) return;
     await fetch(`/api/account/claims?id=${c.id}`, { method: 'DELETE' });
     await load();
     refreshAccount();
@@ -104,6 +105,8 @@ export default function AccountPage() {
 
   const pending = claims.filter((c) => c.status !== 'approved');
   const approved = claims.filter((c) => c.status === 'approved');
+  // One IdleMMO account per website user: a pending or approved claim blocks new ones.
+  const activeClaim = claims.find((c) => c.status === 'pending' || c.status === 'approved');
 
   return (
     <div className="max-w-4xl mx-auto space-y-4">
@@ -144,7 +147,7 @@ export default function AccountPage() {
               {approved.map((c) => (
                 <span key={c.id} className="inline-flex items-center gap-1 border rounded px-2 py-0.5">
                   Claimed: {c.member?.ign}
-                  <button title="Unlink" onClick={() => remove(c)} className="text-muted-foreground hover:text-red-500"><X className="h-3 w-3" /></button>
+                  <button title="Release" onClick={() => remove(c)} className="text-muted-foreground hover:text-red-500"><X className="h-3 w-3" /></button>
                 </span>
               ))}
             </div>
@@ -172,9 +175,18 @@ export default function AccountPage() {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Claim a character</CardTitle>
-          <CardDescription>Search any character currently in a Dream guild. One claim per account is enough — alts are linked automatically.</CardDescription>
+          <CardDescription>
+            Search any character currently in a Dream guild. You claim one IdleMMO account: all its characters (up to 5) come
+            with it automatically.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          {activeClaim && (
+            <p className="text-sm text-amber-400">
+              You already {activeClaim.status === 'pending' ? 'have a pending claim on' : 'claimed'} <b>{activeClaim.member?.ign}</b>.
+              Release it above to claim a different account.
+            </p>
+          )}
           <Input placeholder="Search IGN…" value={q} onChange={(e) => setQ(e.target.value)} className="max-w-xs h-9" />
           {msg && <p className={`text-sm ${msg.tone === 'ok' ? 'text-green-500' : 'text-red-500'}`}>{msg.text}</p>}
           {searching && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -190,9 +202,11 @@ export default function AccountPage() {
                   {onAccount ? (
                     <Badge variant="outline">yours</Badge>
                   ) : r.taken ? (
-                    <Badge variant="outline" className="opacity-60">claimed</Badge>
+                    <Badge variant="outline" className="opacity-60">{r.taken_status ?? 'claimed'}</Badge>
                   ) : requested ? (
                     <Badge variant="outline">requested</Badge>
+                  ) : activeClaim ? (
+                    <Badge variant="outline" className="opacity-60">available</Badge>
                   ) : (
                     <Button size="sm" variant="outline" className="h-7" onClick={() => claim(r)}>Claim</Button>
                   )}

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
-import { getAccountCharacters, recomputeUserGuildAccess } from '@/lib/account-service';
+import { findBundleLocks, getActiveClaim, recomputeUserGuildAccess } from '@/lib/account-service';
 import { requireUser, isResponse } from '@/lib/user-auth';
 
 export const dynamic = 'force-dynamic';
@@ -28,18 +28,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Only characters currently in a Dream guild can be claimed' }, { status: 400 });
   }
 
-  const mine = await getAccountCharacters(user.id, supabase);
-  if (mine.some((c) => c.member_id === member.id)) {
-    return NextResponse.json({ error: `${member.ign} is already on your account (as a claim or alt)` }, { status: 400 });
+  // One account per user: release the current claim before claiming another.
+  const active = await getActiveClaim(user.id, supabase);
+  if (active) {
+    const what = active.status === 'pending' ? 'a pending claim on' : 'already claimed';
+    return NextResponse.json(
+      { error: `You have ${what} ${active.ign}. Release it on your account page before claiming a different account.` },
+      { status: 409 }
+    );
   }
 
-  const { data: owner } = await supabase
-    .from('user_characters')
-    .select('user_id')
-    .eq('member_id', member.id)
-    .eq('status', 'approved')
-    .maybeSingle();
-  if (owner) return NextResponse.json({ error: `${member.ign} is already claimed by another account. Ask an admin if that's wrong.` }, { status: 409 });
+  // The whole alt bundle is locked by any pending/approved claim on any of its characters.
+  const { locks } = await findBundleLocks(member.id, supabase);
+  if (locks.length) {
+    const pending = locks.every((l) => l.status === 'pending');
+    return NextResponse.json(
+      {
+        error: pending
+          ? `${member.ign}'s account already has a pending claim. Ask an officer if that isn't you.`
+          : `${member.ign}'s account is already claimed. Ask an officer if that's wrong.`,
+      },
+      { status: 409 }
+    );
+  }
 
   const { data, error } = await supabase
     .from('user_characters')
@@ -49,11 +60,15 @@ export async function POST(req: NextRequest) {
     )
     .select('id, status')
     .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    // Unique index race: someone else grabbed it between the check and the write.
+    if (error.code === '23505') return NextResponse.json({ error: 'That account was just claimed by someone else' }, { status: 409 });
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
   return NextResponse.json({ claim: data });
 }
 
-/** DELETE /api/account/claims?id= — cancel a request or unlink an approved character. */
+/** DELETE /api/account/claims?id= — cancel a pending request or release the claimed account. */
 export async function DELETE(req: NextRequest) {
   const user = await requireUser(req);
   if (isResponse(user)) return user;

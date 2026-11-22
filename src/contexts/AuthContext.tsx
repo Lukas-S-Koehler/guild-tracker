@@ -328,22 +328,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [myCharacters, guilds]
   );
 
-  // Pick a sensible character once characters/guilds load (saved choice → one in current guild → claimed main).
+  // Pick a character once characters/guilds load: saved choice → the claimed main → one in the current guild.
+  // The claimed main is the account's identity, so on a fresh session we jump to its guild.
   useEffect(() => {
     if (isAwaitingAssignment || usableCharacters.length === 0) {
       setCurrentCharacterId(null);
       return;
     }
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('currentCharacterId') : null;
+    const savedChar = usableCharacters.find((c) => c.member_id === saved);
+    const main = usableCharacters.find((c) => c.claimed);
+    if (!savedChar && main && main.guild_id !== currentGuild?.guild_id) {
+      const g = guilds.find((x) => x.guild_id === main.guild_id);
+      if (g) {
+        localStorage.setItem('currentCharacterId', main.member_id);
+        setCurrentCharacterId(main.member_id);
+        setCurrentGuild(g);
+        return;
+      }
+    }
     setCurrentCharacterId((cur) => {
       if (cur && usableCharacters.some((c) => c.member_id === cur)) return cur;
-      const saved = typeof window !== 'undefined' ? localStorage.getItem('currentCharacterId') : null;
       const pick =
-        usableCharacters.find((c) => c.member_id === saved) ??
-        usableCharacters.find((c) => c.guild_id === currentGuild?.guild_id && c.claimed) ??
+        savedChar ??
+        (main && main.guild_id === currentGuild?.guild_id ? main : undefined) ??
         usableCharacters.find((c) => c.guild_id === currentGuild?.guild_id) ??
         null;
       return pick?.member_id ?? null;
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [usableCharacters, isAwaitingAssignment, currentGuild?.guild_id]);
 
   const currentCharacter = useMemo(() => {

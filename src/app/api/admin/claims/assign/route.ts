@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
-import { recomputeUserGuildAccess, reviewableGuildIds } from '@/lib/account-service';
+import { findBundleLocks, getActiveClaim, recomputeUserGuildAccess, reviewableGuildIds } from '@/lib/account-service';
 import { requireUser, isResponse } from '@/lib/user-auth';
 
 export const dynamic = 'force-dynamic';
@@ -36,14 +36,13 @@ export async function POST(req: NextRequest) {
   if (found.length > 1) return NextResponse.json({ error: 'Several accounts match that username — use email' }, { status: 400 });
   const targetId = found[0].id as string;
 
-  const { data: owner } = await supabase
-    .from('user_characters')
-    .select('user_id')
-    .eq('member_id', member.id)
-    .eq('status', 'approved')
-    .maybeSingle();
-  if (owner && owner.user_id !== targetId) {
-    return NextResponse.json({ error: `${member.ign} is approved for another account — revoke that first` }, { status: 409 });
+  const { locks } = await findBundleLocks(member.id, supabase);
+  if (locks.some((l) => l.user_id !== targetId)) {
+    return NextResponse.json({ error: `${member.ign}'s account already has an active claim by someone else — revoke that first` }, { status: 409 });
+  }
+  const active = await getActiveClaim(targetId, supabase);
+  if (active && active.member_id !== member.id) {
+    return NextResponse.json({ error: `That user already has an active claim on ${active.ign} — revoke it first` }, { status: 409 });
   }
 
   const { error } = await supabase.from('user_characters').upsert(
@@ -56,7 +55,10 @@ export async function POST(req: NextRequest) {
     },
     { onConflict: 'user_id,member_id' }
   );
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    if (error.code === '23505') return NextResponse.json({ error: 'Conflicts with another active claim' }, { status: 409 });
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
 
   const access = await recomputeUserGuildAccess(targetId, supabase);
   return NextResponse.json({ ok: true, access });

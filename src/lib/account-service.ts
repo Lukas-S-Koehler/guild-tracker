@@ -89,6 +89,62 @@ export async function getAccountCharacters(
     .sort((a, b) => Number(b.claimed) - Number(a.claimed) || (b.total_level ?? 0) - (a.total_level ?? 0));
 }
 
+export type ClaimLock = { claim_id: string; user_id: string; status: 'pending' | 'approved'; claimed_member_id: string };
+
+/**
+ * Active (pending/approved) claims touching any character in the same account
+ * bundle as `memberId`. One claim covers the whole bundle, so a hit on any alt
+ * means the character is taken.
+ */
+export async function findBundleLocks(memberId: string, supabase: SupabaseClient = createAdminClient()) {
+  const bundle = Array.from(await getAccountMemberIds(supabase, [memberId]));
+  const { data } = await supabase
+    .from('user_characters')
+    .select('id, user_id, status, member_id')
+    .in('member_id', bundle)
+    .in('status', ['pending', 'approved']);
+  const locks: ClaimLock[] = (data ?? []).map((r) => ({
+    claim_id: r.id,
+    user_id: r.user_id,
+    status: r.status,
+    claimed_member_id: r.member_id,
+  }));
+  return { bundle, locks };
+}
+
+/** Map of every locked character (claims expanded over their alt bundles). */
+export async function getAllClaimLocks(supabase: SupabaseClient = createAdminClient()) {
+  const { data } = await supabase
+    .from('user_characters')
+    .select('id, user_id, status, member_id')
+    .in('status', ['pending', 'approved']);
+  const locks = new Map<string, ClaimLock>();
+  await Promise.all(
+    (data ?? []).map(async (r) => {
+      const ids = await getAccountMemberIds(supabase, [r.member_id]);
+      const lock: ClaimLock = { claim_id: r.id, user_id: r.user_id, status: r.status, claimed_member_id: r.member_id };
+      ids.forEach((id) => {
+        // approved wins over pending if bundles ever overlap
+        const cur = locks.get(id);
+        if (!cur || (cur.status === 'pending' && lock.status === 'approved')) locks.set(id, lock);
+      });
+    })
+  );
+  return locks;
+}
+
+/** The user's single active claim, if any. */
+export async function getActiveClaim(userId: string, supabase: SupabaseClient = createAdminClient()) {
+  const { data } = await supabase
+    .from('user_characters')
+    .select('id, member_id, status, member:members(ign)')
+    .eq('user_id', userId)
+    .in('status', ['pending', 'approved'])
+    .maybeSingle();
+  if (!data) return null;
+  return { ...data, ign: (data.member as unknown as { ign: string } | null)?.ign ?? 'a character' };
+}
+
 /** Rewrite the user's derived guild_leaders rows from their characters' current guilds. */
 export async function recomputeUserGuildAccess(userId: string, supabase: SupabaseClient = createAdminClient()) {
   const chars = await getAccountCharacters(userId, supabase);
