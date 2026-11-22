@@ -20,7 +20,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getAccountCharacters, type AccountCharacter } from '@/lib/account-service';
 import { DAY_BOUNDARY_OFFSET_MINUTES } from '@/lib/activity-processor';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
-import { ASSAULT_ENTRY_GUILD_ID, ASSAULT_MIN_CL, ASSAULT_TOP_GUILD_ID, bestRaidFor, guildRaids, type Raid } from '@/lib/raids';
+import { ASSAULT_ENTRY_GUILD_ID, ASSAULT_TOP_MIN_CL, ASSAULT_TOP_GUILD_ID, bestRaidFor, guildRaids, type Raid } from '@/lib/raids';
 import {
   findLastMetWeek,
   getISOWeekKey,
@@ -551,7 +551,7 @@ export async function buildMeSummary(
     if (gid === ASSAULT_ENTRY_GUILD) {
       const di = guildMap.get(ASSAULT_TOP_GUILD);
       if (!di) return null;
-      return { kind: 'assault', guild_name: di.name, min_level: di.min_level ?? 0, levels_needed: Math.max(0, (di.min_level ?? 0) - (cl ?? 0)) };
+      return { kind: 'assault', guild_name: di.name, min_level: ASSAULT_TOP_MIN_CL, levels_needed: Math.max(0, ASSAULT_TOP_MIN_CL - (cl ?? 0)) };
     }
     if (cl == null) return null;
     const curMin = gid ? guildMap.get(gid)?.min_level ?? -1 : -1;
@@ -566,7 +566,7 @@ export async function buildMeSummary(
     // Top of the raid ladder: past here it's assaults, not a higher raid.
     const de = guildMap.get(ASSAULT_ENTRY_GUILD);
     if (de && de.is_active !== false) {
-      return { kind: 'assault_entry', guild_name: de.name, min_level: ASSAULT_MIN_CL, levels_needed: Math.max(0, ASSAULT_MIN_CL - cl) };
+      return { kind: 'assault_entry', guild_name: de.name, min_level: 1, levels_needed: 0 };
     }
     return null;
   };

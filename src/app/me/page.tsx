@@ -1,5 +1,6 @@
 'use client';
 
+import { ASSAULT_ENTRY_GUILD_ID } from '@/lib/raids';
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,6 +22,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import type { MeSummary, MeSummaryResult } from '@/lib/me-summary';
+import RankingsCard from '@/components/me/RankingsCard';
 
 const fmt = (n: number) => n.toLocaleString('en-US');
 const compact = (n: number) =>
@@ -129,11 +131,11 @@ function NudgeLine({ c }: { c: MeSummary['characters'][number] }) {
   const n = c.nudge;
   if (!n) return null;
   if (n.kind === 'assault')
-    return <span>Want hardcore assaults? Ask an officer about moving to <b className="text-foreground">{n.guild_name}</b>{n.levels_needed > 0 ? ` (CL ${n.min_level}, ${n.levels_needed} to go)` : ''}.</span>;
-  if (n.kind === 'assault_entry')
     return n.levels_needed > 0
-      ? <span>Top raid tier. {n.levels_needed} CL until assaults open up in <b className="text-foreground">{n.guild_name}</b> (CL {n.min_level}+).</span>
-      : <span>Want to try assaults? At CL {n.min_level}+ you can ask an officer about <b className="text-foreground">{n.guild_name}</b>.</span>;
+      ? <span>Hardcore assaults in <b className="text-foreground">{n.guild_name}</b> open at CL {n.min_level} ({n.levels_needed} to go).</span>
+      : <span>Want hardcore assaults? You meet CL {n.min_level} for <b className="text-foreground">{n.guild_name}</b>. Ask an officer.</span>;
+  if (n.kind === 'assault_entry')
+    return <span>Top raid tier. Want assaults instead? <b className="text-foreground">{n.guild_name}</b> is open to every level.</span>;
   if (n.kind === 'eligible')
     return <span>Meets the CL {n.min_level} requirement for <b className="text-foreground">{n.guild_name}</b>. Ask an officer about moving up.</span>;
   return <span>{n.levels_needed} CL until <b className="text-foreground">{n.guild_name}</b> (CL {n.min_level}).</span>;
@@ -209,7 +211,7 @@ export default function MePage() {
     <div className={`max-w-6xl mx-auto space-y-4 ${busy ? 'opacity-70 transition-opacity' : ''}`}>
       {/* B1 Hero */}
       <Card className="overflow-hidden">
-        <div className="bg-gradient-to-r from-sky-950 via-slate-900 to-slate-950 p-5 sm:p-6">
+        <div className="bg-gradient-to-r from-crystal-deep/70 via-card to-background p-5 sm:p-6">
           <div className="flex flex-wrap items-center gap-4">
             {hero ? (
               <Avatar url={hero.avatar_url} name={hero.ign} size="h-16 w-16 border-2 border-sky-400/60" />
@@ -373,6 +375,8 @@ export default function MePage() {
         </Card>
       </div>
 
+      <RankingsCard />
+
       {/* Raids + moving up, per character (moving guild is per character, by combat level) */}
       <Card>
         <CardHeader className="pb-2">
@@ -386,8 +390,8 @@ export default function MePage() {
             <div key={g.guild_id} className="text-xs text-muted-foreground">
               <b className="text-foreground">{g.guild_nickname ?? g.guild_name}</b>{' '}
               {g.is_assault
-                ? 'is an assault guild (CL 100+), no scheduled raids'
-                : `runs ${g.raids.length ? g.raids.map((r) => `${r.name} (CL ${r.min_cl}, ${r.minutes} min, ${r.marks} marks)`).join(', ') : 'no raid set yet'}`}
+                ? (g.guild_id === ASSAULT_ENTRY_GUILD_ID ? 'is the Energizing Pools guild, no scheduled raids' : 'is an assault guild, no scheduled raids')
+                : `runs ${g.raids.length ? g.raids.map((r) => `CL ${r.min_cl} raids (${r.name}, ${r.minutes} min, ${r.marks} marks)`).join(', ') : 'no raid set yet'}`}
             </div>
           ))}
           <ul className="space-y-2">
@@ -402,7 +406,7 @@ export default function MePage() {
                     </span>
                   </div>
                   <div className="text-xs text-muted-foreground space-x-1">
-                    {c.best_raid && <span>Can join up to {c.best_raid.name}.</span>}
+                    {c.best_raid && <span>Can join up to CL {c.best_raid.min_cl} raids.</span>}
                     <NudgeLine c={c} />
                   </div>
                 </div>

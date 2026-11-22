@@ -2,7 +2,8 @@
 
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Loader2, Shield, UserCheck, Castle, Users, AlertTriangle, Swords, MessageSquare, Server, FlaskConical, Check, AlertCircle } from 'lucide-react';
+import Link from 'next/link';
+import { Loader2, Shield, UserCheck, Castle, Users, AlertTriangle, Swords, MessageSquare, Server, FlaskConical, Check, AlertCircle, LayoutGrid, FileWarning, ScrollText, ListChecks, type LucideIcon } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -17,6 +18,7 @@ import AssaultAdminPanel from '@/components/admin/AssaultAdminPanel';
 import DiscordMappingPanel from '@/components/admin/DiscordMappingPanel';
 import RaidRemindersPanel from '@/components/admin/RaidRemindersPanel';
 import BumpsPanel from '@/components/admin/BumpsPanel';
+import AdvertisingPanel from '@/components/admin/AdvertisingPanel';
 import DataManagementPanel from '@/components/admin/DataManagementPanel';
 import PriceCachePanel from '@/components/admin/PriceCachePanel';
 import { AltSyncTools, DiscordSwitches } from '@/components/admin/SuperAdminTools';
@@ -78,6 +80,15 @@ function RefreshPotionMetaCard() {
   );
 }
 
+// Guild tool pages that live outside the hub; staff reach them from here (not from the top nav).
+const GUILD_TOOLS: { href: string; label: string; desc: string; icon: LucideIcon }[] = [
+  { href: '/network', label: 'Network dashboard', desc: "Today's numbers, all guilds", icon: LayoutGrid },
+  { href: '/reports', label: 'Inactivity report', desc: 'Copy or send to Discord', icon: FileWarning },
+  { href: '/members', label: 'Members roster', desc: 'Synced from IdleMMO', icon: Users },
+  { href: '/activity', label: 'Daily log', desc: 'Raw donations and deposits', icon: ScrollText },
+  { href: '/challenges', label: 'Challenges', desc: 'Challenge cost calculator', icon: ListChecks },
+];
+
 const TABS: HubTab[] = [
   {
     id: 'claims', label: 'Claims & Access', icon: UserCheck, access: 'OFFICER',
@@ -108,9 +119,11 @@ const TABS: HubTab[] = [
   {
     id: 'discord', label: 'Discord', icon: MessageSquare, access: 'OFFICER',
     subs: [
+      // Promotion first: copyable ads (live data) next to the bump tracker.
+      { id: 'ads', label: 'Advertising', access: 'OFFICER', render: () => <AdvertisingPanel /> },
+      { id: 'bumps', label: 'Bump tracker', access: 'SUPER', render: () => <BumpsPanel /> },
       { id: 'mapping', label: 'Member mapping', access: 'OFFICER', render: () => <DiscordMappingPanel /> },
       { id: 'raids', label: 'Raid reminders', access: 'SUPER', render: () => <RaidRemindersPanel /> },
-      { id: 'bumps', label: 'Bump tracker', access: 'SUPER', render: () => <BumpsPanel /> },
       { id: 'switches', label: 'Switches', access: 'SUPER', render: () => <DiscordSwitches /> },
     ],
   },
@@ -162,6 +175,22 @@ function AdminHub() {
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-2"><Shield className="h-6 w-6 text-primary" /> Admin</h1>
         <p className="text-sm text-muted-foreground">Staff tools for the Dream guilds</p>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+        {GUILD_TOOLS.map(t => (
+          <Link
+            key={t.href}
+            href={t.href}
+            className="card-surface group flex items-start gap-2.5 rounded-lg border bg-card p-3 transition-colors hover:border-crystal/40 hover:bg-crystal/5"
+          >
+            <t.icon className="h-4 w-4 mt-0.5 shrink-0 text-crystal" />
+            <span className="min-w-0">
+              <span className="block text-sm font-medium">{t.label}</span>
+              <span className="block text-xs text-muted-foreground truncate">{t.desc}</span>
+            </span>
+          </Link>
+        ))}
       </div>
 
       <Tabs value={tabId} onValueChange={t => go(t)}>

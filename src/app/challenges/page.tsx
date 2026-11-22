@@ -1,5 +1,7 @@
 'use client';
 
+import ProtectedRoute from '@/components/ProtectedRoute';
+
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
@@ -24,7 +26,7 @@ interface ChallengeItem {
   isExpensive: boolean;
 }
 
-export default function ChallengeInputPage() {
+function ChallengeInputPageContent() {
   const [rawInput, setRawInput] = useState('');
   const [processing, setProcessing] = useState(false);
   const [items, setItems] = useState<ChallengeItem[] | null>(null);
@@ -353,5 +355,14 @@ Copper Ore21h`}
         </Card>
       )}
     </div>
+  );
+}
+
+// Challenge cost planning is leader/officer work.
+export default function ChallengeInputPage() {
+  return (
+    <ProtectedRoute requiredRole="OFFICER">
+      <ChallengeInputPageContent />
+    </ProtectedRoute>
   );
 }

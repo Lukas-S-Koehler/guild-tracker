@@ -1,5 +1,7 @@
 'use client';
 
+import ProtectedRoute from '@/components/ProtectedRoute';
+
 import { Fragment, useState, type ReactNode } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -134,7 +136,7 @@ function CopyDiscord({ section }: { section: GuideSection }) {
   );
 }
 
-export default function GuidePage() {
+function GuidePageContent() {
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <div>
@@ -181,5 +183,13 @@ export default function GuidePage() {
         </Card>
       ))}
     </div>
+  );
+}
+
+export default function GuidePage() {
+  return (
+    <ProtectedRoute requiredRole="MEMBER">
+      <GuidePageContent />
+    </ProtectedRoute>
   );
 }

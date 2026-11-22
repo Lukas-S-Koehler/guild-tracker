@@ -2,7 +2,7 @@
  * IdleMMO scheduled raids. Static game data; min_cl = combat level needed to join.
  *
  * Each raid guild runs one raid (some lower guilds run several). Assault guilds
- * (guilds.is_assault: DE, DI) run no raids; they take CL 100+. Which raids a guild runs
+ * (guilds.is_assault: DE, DI) run no raids: DE is open to every level, DI takes CL 88+. Which raids a guild runs
  * lives in guild_config.settings.raids (array of keys). When unset, the default is
  * the raid whose CL requirement matches the guild's min_level.
  */
@@ -42,9 +42,14 @@ export function guildRaids(settings: { raids?: unknown } | null | undefined, min
   return match ? [match] : [];
 }
 
-/** Dream Engineers: assault entry guild (no level gate in game; we point CL 100 / top of ladder here). */
+/** Raids are known by their CL in the community ("CL 92 raids"); the in-game name is secondary. */
+export function raidLabel(r: Pick<Raid, 'min_cl'>): string {
+  return `CL ${r.min_cl} raid`;
+}
+
+/** Dream Engineers: assault guild open to every level (no raids). Anyone can pick it instead of a raid guild. */
 export const ASSAULT_ENTRY_GUILD_ID = '1184';
-/** Dream Invaders: hardcore assaults, reached by moving up from DE, not by level. */
+/** Dream Invaders: hardcore assaults (no raids), CL 88+. */
 export const ASSAULT_TOP_GUILD_ID = '138';
-/** Assault guilds (DE, DI) don't run raids; they nominally take CL 100+. */
-export const ASSAULT_MIN_CL = 100;
+/** Combat level Dream Invaders asks for. */
+export const ASSAULT_TOP_MIN_CL = 88;

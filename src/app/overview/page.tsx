@@ -506,7 +506,7 @@ function OverviewPageContent() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-6">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold">🗓️ Guild Overview</h1>
+          <h1 className="text-2xl font-bold">🗓️ Guild Activity</h1>
           <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
             <p className="text-muted-foreground text-sm sm:text-base">
             7-{period === 'weekly' ? 'week' : 'day'} activity overview for all members

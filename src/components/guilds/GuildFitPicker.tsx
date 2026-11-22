@@ -2,32 +2,32 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { Loader2, Search, Sparkles, AlertTriangle, ArrowUpRight } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Loader2, Search, ArrowRight, Swords, Shield } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { fitGuilds, type FitGuild, type Playstyle } from '@/lib/guild-fit';
+import { fitGuilds, type FitGuild } from '@/lib/guild-fit';
+import { requirementLabel } from '@/components/guilds/GuildCard';
 
-const PLAYSTYLES: { key: Playstyle; label: string; hint: string }[] = [
-  { key: 'raids', label: 'Raids', hint: 'Scheduled guild raids for marks' },
-  { key: 'assaults', label: 'Assaults', hint: 'Conquests, waves, territory' },
-  { key: 'any', label: 'Not sure', hint: 'Show me both' },
-];
+const guildHref = (g: FitGuild) => `/guilds/${g.tag.toLowerCase()}`;
+/** "CL 1 / 12 / 25 raids": the raids a guild runs, by CL (the community name for them). */
+const raidsText = (g: FitGuild, tierCl: number) =>
+  `CL ${(g.raids.length ? g.raids.map((r) => r.min_cl) : [tierCl]).join(' / ')} raids`;
 
+function GuildLink({ g }: { g: FitGuild }) {
+  return <Link href={guildHref(g)} className="font-medium text-foreground hover:underline">{g.name}</Link>;
+}
+
+/** CL in, your guild out. Raid tier by CL (fallback one tier down when full), plus the assault options. */
 export default function GuildFitPicker({ guilds }: { guilds: FitGuild[] }) {
   const { user, myCharacters } = useAuth();
-  const [ign, setIgn] = useState('');
   const [clText, setClText] = useState('');
-  const [playstyle, setPlaystyle] = useState<Playstyle>('any');
-  const [budgetText, setBudgetText] = useState('');
+  const [ign, setIgn] = useState('');
+  const [showLookup, setShowLookup] = useState(false);
   const [lookup, setLookup] = useState<{ loading: boolean; msg: string | null }>({ loading: false, msg: null });
 
-  const cl = Math.max(0, Math.min(150, parseInt(clText, 10)));
-  const budget = budgetText.trim() === '' ? null : Math.max(0, parseInt(budgetText.replace(/[^\d]/g, ''), 10) || 0);
-  const answer = useMemo(() => (Number.isFinite(cl) && cl > 0 ? fitGuilds(guilds, cl, playstyle, budget) : null), [guilds, cl, playstyle, budget]);
+  const cl = parseInt(clText, 10);
+  const answer = useMemo(() => (Number.isFinite(cl) && cl > 0 ? fitGuilds(guilds, Math.min(cl, 150)) : null), [guilds, cl]);
 
   async function lookUp(name: string) {
     const n = name.trim();
@@ -38,11 +38,11 @@ export default function GuildFitPicker({ guilds }: { guilds: FitGuild[] }) {
       const res = await fetch(`/api/guilds/fit-lookup?ign=${encodeURIComponent(n)}`);
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || 'Lookup failed');
-      if (!d.found) setLookup({ loading: false, msg: `We don't track "${n}" yet. Enter your combat level below.` });
-      else if (d.combat_level == null) setLookup({ loading: false, msg: `Found ${d.ign}, but no combat level yet. Enter it below.` });
+      if (!d.found) setLookup({ loading: false, msg: `We don't track "${n}" yet. Type your CL instead.` });
+      else if (d.combat_level == null) setLookup({ loading: false, msg: `Found ${d.ign}, but no CL yet. Type it instead.` });
       else {
         setClText(String(d.combat_level));
-        setLookup({ loading: false, msg: `${d.ign}: CL ${d.combat_level}${d.guild ? ` · currently in ${d.guild.name}` : ''}` });
+        setLookup({ loading: false, msg: `${d.ign}: CL ${d.combat_level}${d.guild ? `, currently in ${d.guild.name}` : ''}` });
       }
     } catch (e) {
       setLookup({ loading: false, msg: e instanceof Error ? e.message : 'Lookup failed' });
@@ -50,102 +50,101 @@ export default function GuildFitPicker({ guilds }: { guilds: FitGuild[] }) {
   }
 
   return (
-    <Card className="border-sky-500/30">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2"><Sparkles className="h-5 w-5 text-sky-400" />Which guild fits me?</CardTitle>
-        <CardDescription>
-          Guild entry and raids go by <strong>combat level</strong> (not total level). Find yours on your IdleMMO character page.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-5">
-        <div className="grid gap-4 md:grid-cols-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="fit-ign">Character name (optional)</Label>
-            <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); lookUp(ign); }}>
-              <Input id="fit-ign" value={ign} onChange={(e) => setIgn(e.target.value)} placeholder="Your IGN" maxLength={40} />
-              <Button type="submit" variant="outline" size="icon" disabled={lookup.loading || !ign.trim()} aria-label="Look up combat level">
-                {lookup.loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-              </Button>
-            </form>
-            {user && myCharacters.length > 0 && (
-              <div className="flex flex-wrap gap-1 pt-1">
-                {myCharacters.map((c) => (
-                  <button key={c.member_id} type="button" onClick={() => lookUp(c.ign)} className="text-xs rounded border px-2 py-0.5 hover:bg-accent">
-                    {c.ign}
-                  </button>
-                ))}
-              </div>
-            )}
-            {lookup.msg && <p className="text-xs text-muted-foreground">{lookup.msg}</p>}
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="fit-cl">Combat level</Label>
-            <Input id="fit-cl" inputMode="numeric" value={clText} onChange={(e) => setClText(e.target.value.replace(/[^\d]/g, '').slice(0, 3))} placeholder="e.g. 64" />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="fit-budget">Gold you can donate per day (optional)</Label>
-            <Input id="fit-budget" inputMode="numeric" value={budgetText} onChange={(e) => setBudgetText(e.target.value.replace(/[^\d]/g, '').slice(0, 9))} placeholder="e.g. 5000" />
-          </div>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label>What do you want to play?</Label>
-          <div className="grid grid-cols-3 gap-2">
-            {PLAYSTYLES.map((p) => (
-              <button
-                key={p.key}
-                type="button"
-                onClick={() => setPlaystyle(p.key)}
-                aria-pressed={playstyle === p.key}
-                className={`rounded-md border p-2 text-left transition-colors ${playstyle === p.key ? 'border-sky-500 bg-sky-500/10' : 'hover:bg-accent/40'}`}
-              >
-                <span className="block text-sm font-medium">{p.label}</span>
-                <span className="hidden sm:block text-xs text-muted-foreground">{p.hint}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {!answer ? (
-          <p className="text-sm text-muted-foreground">Enter your combat level to see your matches.</p>
-        ) : (
-          <div className="space-y-3">
-            {answer.best_raid && (
-              <p className="text-sm text-muted-foreground">
-                At CL {cl} the highest raid you can join is <strong className="text-foreground">{answer.best_raid.name}</strong> ({answer.best_raid.location}, {answer.best_raid.marks} marks).
-              </p>
-            )}
-            {answer.picks.length === 0 ? (
-              <p className="text-sm">No guild matches yet. Try &quot;Not sure&quot; or a different budget.</p>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                {answer.picks.map((p, i) => (
-                  <Link key={p.guild.id} href={`/guilds/${p.guild.tag.toLowerCase()}`} className="block group">
-                    <div className={`h-full rounded-lg border p-3 space-y-2 transition-colors group-hover:bg-accent/30 ${i === 0 ? 'border-sky-500/60 bg-sky-500/5' : ''}`}>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-semibold">{p.guild.name}</span>
-                        {i === 0 ? <Badge className="bg-sky-500/20 text-sky-300 border-sky-500/50" variant="outline">Best fit</Badge> : <ArrowUpRight className="h-4 w-4 text-muted-foreground" />}
-                      </div>
-                      <ul className="text-xs text-muted-foreground space-y-1">
-                        {p.reasons.map((r) => <li key={r}>• {r}</li>)}
-                        {p.warnings.map((w) => (
-                          <li key={w} className="flex gap-1 text-amber-400"><AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />{w}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            )}
-            {answer.next_goal && playstyle !== 'assaults' && (
-              <p className="text-sm text-muted-foreground">
-                Next goal: <Link className="underline" href={`/guilds/${answer.next_goal.guild.tag.toLowerCase()}`}>{answer.next_goal.guild.name}</Link> at CL {answer.next_goal.guild.min_level} ({answer.next_goal.levels_needed} to go).
-              </p>
-            )}
-            {answer.assault_note && playstyle !== 'raids' && <p className="text-xs text-muted-foreground">{answer.assault_note}</p>}
-          </div>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <label htmlFor="fit-cl" className="text-sm font-medium">Your combat level</label>
+        <Input
+          id="fit-cl"
+          inputMode="numeric"
+          value={clText}
+          onChange={(e) => setClText(e.target.value.replace(/[^\d]/g, '').slice(0, 3))}
+          placeholder="e.g. 64"
+          className="w-28 text-lg font-semibold"
+        />
+        {!showLookup && (
+          <button type="button" onClick={() => setShowLookup(true)} className="text-xs text-muted-foreground hover:text-foreground underline-offset-4 hover:underline">
+            or look it up by name
+          </button>
         )}
-      </CardContent>
-    </Card>
+      </div>
+
+      {showLookup && (
+        <div className="space-y-1.5">
+          <form className="flex max-w-sm gap-2" onSubmit={(e) => { e.preventDefault(); lookUp(ign); }}>
+            <Input value={ign} onChange={(e) => setIgn(e.target.value)} placeholder="Character name" maxLength={40} />
+            <Button type="submit" variant="outline" size="icon" disabled={lookup.loading || !ign.trim()} aria-label="Look up combat level">
+              {lookup.loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+            </Button>
+          </form>
+          {user && myCharacters.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {myCharacters.map((c) => (
+                <button key={c.member_id} type="button" onClick={() => lookUp(c.ign)} className="text-xs rounded border px-2 py-0.5 hover:bg-accent">{c.ign}</button>
+              ))}
+            </div>
+          )}
+          {lookup.msg && <p className="text-xs text-muted-foreground">{lookup.msg}</p>}
+        </div>
+      )}
+
+      {!answer ? (
+        <p className="text-sm text-muted-foreground">Combat level (CL), not total level. It&apos;s on your IdleMMO character page.</p>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-2">
+          {/* Raids */}
+          <div className="rounded-lg border border-crystal/40 bg-crystal/5 p-4 space-y-2">
+            <p className="flex items-center gap-2 text-xs uppercase tracking-wider text-crystal"><Swords className="h-3.5 w-3.5" />Raids</p>
+            {answer.tier ? (
+              <>
+                <p className="text-lg">
+                  {answer.tier.guilds.map((g, i) => (
+                    <span key={g.id}>{i > 0 && ' or '}<GuildLink g={g} /></span>
+                  ))}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {raidsText(answer.tier.guilds[0], answer.tier.cl)} · {requirementLabel(answer.tier.guilds[0])}
+                </p>
+                {answer.fallback && (
+                  <p className="text-xs text-muted-foreground">
+                    Full? Go one down: {answer.fallback.guilds.map((g, i) => <span key={g.id}>{i > 0 && ' / '}<GuildLink g={g} /></span>)} (CL {answer.fallback.cl} raids).
+                  </p>
+                )}
+                {answer.next && (
+                  <p className="text-xs text-muted-foreground">
+                    Next: CL {answer.next.cl} raids in {answer.next.guilds.map((g, i) => <span key={g.id}>{i > 0 && ' / '}<GuildLink g={g} /></span>)}, {answer.next.levels_needed} CL to go.
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">No raid guild is open at this level right now.</p>
+            )}
+          </div>
+
+          {/* Assaults */}
+          {(answer.de || answer.di) && (
+            <div className="rounded-lg border p-4 space-y-2">
+              <p className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground"><Shield className="h-3.5 w-3.5" />Or no raids: pools &amp; assaults</p>
+              {answer.de && (
+                <p className="text-sm"><GuildLink g={answer.de} />: Energizing Pools guild (MF and EXP boost), open to every level. Casual assaults too.</p>
+              )}
+              {answer.di && (
+                <p className="text-sm">
+                  <GuildLink g={answer.di} />:{' '}
+                  {answer.di_open ? 'hardcore assaults, you qualify (CL 88+).' : <span className="text-muted-foreground">hardcore assaults at CL 88+, {answer.di_levels_needed} to go.</span>}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {answer?.tier && (
+        <p className="text-sm">
+          <Link href={guildHref(answer.tier.guilds[0])} className="inline-flex items-center gap-1 text-crystal hover:underline">
+            See {answer.tier.guilds[0].name} <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </p>
+      )}
+    </div>
   );
 }

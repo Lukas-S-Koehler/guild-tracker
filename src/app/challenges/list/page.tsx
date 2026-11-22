@@ -1,5 +1,7 @@
 'use client';
 
+import ProtectedRoute from '@/components/ProtectedRoute';
+
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
@@ -30,7 +32,7 @@ interface SavedChallenge {
   created_at?: string;
 }
 
-export default function ChallengesListPage() {
+function ChallengesListPageContent() {
   const [challenges, setChallenges] = useState<SavedChallenge[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -136,5 +138,14 @@ export default function ChallengesListPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+// Challenge cost planning is leader/officer work.
+export default function ChallengesListPage() {
+  return (
+    <ProtectedRoute requiredRole="OFFICER">
+      <ChallengesListPageContent />
+    </ProtectedRoute>
   );
 }

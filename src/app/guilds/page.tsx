@@ -7,7 +7,7 @@ import ChooseCurrentGuild from '@/components/guilds/ChooseCurrentGuild';
 
 export const dynamic = 'force-dynamic';
 export const metadata: Metadata = {
-  title: 'Dream Guilds · Guild directory',
+  title: 'Guild directory',
   description: 'Every Dream guild in IdleMMO: level, raids, requirements and leadership. Find the one that fits you.',
 };
 
@@ -23,7 +23,7 @@ export default async function GuildsPage() {
       <div>
         <h1 className="text-3xl font-bold">Dream Guilds</h1>
         <p className="text-muted-foreground mt-1">
-          {active.length} active guilds. Climb the raid ladder by combat level, or join the assault guilds for conquests.
+          {active.length} active guilds. Raid guilds go by combat level (CL); the pool and assault guilds run no raids.
         </p>
       </div>
 
@@ -38,8 +38,8 @@ export default async function GuildsPage() {
 
       {assault.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-xl font-semibold">Assault guilds</h2>
-          <p className="text-sm text-muted-foreground">No raids: conquests, waves and territory boosts. Dream Invaders is the hardcore step up from Dream Engineers.</p>
+          <h2 className="text-xl font-semibold">Pool &amp; assault guilds</h2>
+          <p className="text-sm text-muted-foreground">No raids. Dream Engineers is the Energizing Pools guild (every level, casual assaults); Dream Invaders is hardcore assaults at CL 88+.</p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {assault.map((g) => <GuildCard key={g.id} guild={g} />)}
           </div>

@@ -11,6 +11,8 @@ const nextConfig = {
       { source: '/discord-mapping', destination: '/admin?tab=discord&sub=mapping', permanent: false },
       { source: '/data-management', destination: '/admin?tab=system&sub=data', permanent: false },
       { source: '/price-cache', destination: '/admin?tab=system&sub=prices', permanent: false },
+      // Warning history is the same panel as Admin → Warnings.
+      { source: '/warnings', destination: '/admin?tab=warnings', permanent: false },
     ];
   },
 }

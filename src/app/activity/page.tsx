@@ -163,7 +163,7 @@ function ActivityPageContent() {
     <div className="max-w-5xl mx-auto space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Guild Activity</h1>
+          <h1 className="text-2xl font-bold">Daily Log</h1>
           <p className="text-muted-foreground">
             Automated daily activity — fetched via IdleMMO API
           </p>

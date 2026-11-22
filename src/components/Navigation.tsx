@@ -13,7 +13,18 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
-import { ChevronDown, User, LogOut, Users, Shield, Crown } from 'lucide-react';
+import {
+  ChevronDown, User, LogOut, Users, Shield, Crown, Gauge, Castle, Activity, Trophy, Swords, Globe, BarChart3, Medal,
+  BookOpen, MapPin, CheckSquare, FlaskConical, Calculator,
+  KeyRound, UserCircle, type LucideIcon,
+} from 'lucide-react';
+import { DreamWordmark } from '@/components/brand/DreamMark';
+
+type NavItem = { href: string; label: string; desc?: string; icon: LucideIcon };
+type NavSection = { title?: string; items: NavItem[] };
+type NavEntry =
+  | { kind: 'link'; href: string; label: string; icon: LucideIcon; show: boolean; also?: string[] }
+  | { kind: 'menu'; key: string; label: string; icon: LucideIcon; show: boolean; matchPrefix?: string; sections: NavSection[] };
 
 export default function Navigation() {
   const pathname = usePathname();
@@ -55,51 +66,128 @@ export default function Navigation() {
     }
   };
 
-  // Officer+ in any guild (not just the selected one) gets the admin hub; tabs gate themselves.
-  const isStaff = isSuperAdmin || (!isAwaitingAssignment && guilds.some((g) => g.role !== 'MEMBER'));
+  // Highest role across all guilds, same rule as the admin hub: an officer of any guild is staff
+  // even while another guild is selected. Each page/API still enforces its own checks.
+  const LEVEL: Record<string, number> = { MEMBER: 0, OFFICER: 1, DEPUTY: 2, LEADER: 3 };
+  const maxLevel = isAwaitingAssignment ? -1 : guilds.reduce((m, g) => Math.max(m, LEVEL[g.role] ?? 0), -1);
+  const atLeast = (r: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER' | 'SUPER') =>
+    isSuperAdmin || (r !== 'SUPER' && maxLevel >= LEVEL[r]);
+  const isStaff = atLeast('OFFICER');
+  const signedIn = !!user && !isGuest;
+  const member = signedIn && (isSuperAdmin || hasRole('MEMBER'));
 
-  const navLinks: { href: string; label: string; requiresRole?: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER'; requiresStaff?: boolean; requiresUser?: boolean }[] = [
-    { href: '/me', label: 'Me', requiresUser: true },
-    { href: '/', label: user ? 'Dashboard' : 'Home' },
-    { href: '/guilds', label: 'Guilds' },
-    { href: '/overview', label: 'Overview' },
-    { href: '/leaderboard', label: 'Leaderboard' },
-    { href: '/assault', label: 'Assault' },
-    { href: '/combat', label: 'Combat', requiresRole: 'MEMBER' },
-    { href: '/guide', label: 'Guide' },
-    { href: '/admin', label: 'Admin', requiresStaff: true },
+  // Top bar: plain links for the pages members use daily, a dropdown only where a page
+  // family needs one (Assault's sub-pages, staff tools). Avatar menu holds account things.
+  const entries: NavEntry[] = [
+    { kind: 'link', href: '/me', label: 'Me', icon: Gauge, show: signedIn },
+    { kind: 'link', href: '/guilds', label: 'Guilds', icon: Castle, show: true },
+    { kind: 'link', href: '/overview', label: 'Activity', icon: Activity, show: member },
+    { kind: 'link', href: '/leaderboard', label: 'Leaderboard', icon: Trophy, show: member },
+    {
+      kind: 'menu', key: 'assault', label: 'Assault', icon: Swords, show: member, matchPrefix: '/assault',
+      sections: [
+        {
+          title: 'Live',
+          items: [
+            { href: '/assault', label: 'Assault hub', desc: 'Next launch, guild status', icon: Swords },
+            { href: '/assault/conquest', label: 'Conquest', desc: 'Every location, every guild', icon: Globe },
+            { href: '/assault/stats', label: 'Season stats', desc: 'Standing and waves this season', icon: BarChart3 },
+          ],
+        },
+        {
+          title: 'Rankings',
+          items: [
+            { href: '/assault/leaderboard', label: 'Leaderboard', desc: 'Member assault rankings', icon: Medal },
+            { href: '/assault/hall-of-fame', label: 'Hall of fame', desc: 'Best finishes, all-time top', icon: Crown },
+          ],
+        },
+        {
+          title: 'Prep',
+          items: [
+            { href: '/assault/guide', label: 'Guide', desc: 'Zones, 5Ps, hits-to-kill, gear', icon: BookOpen },
+            { href: '/assault/locations', label: 'Locations', desc: 'Enemies, drops, gold per hour', icon: MapPin },
+            { href: '/assault/checklist', label: 'Checklist', desc: 'Track your prep each launch', icon: CheckSquare },
+            { href: '/assault/potions', label: 'Potions', desc: 'Stacks, costs, restacks', icon: FlaskConical },
+          ],
+        },
+      ],
+    },
+    { kind: 'link', href: '/combat', label: 'Combat', icon: Calculator, show: member },
+    { kind: 'link', href: '/guide', label: 'Guide', icon: BookOpen, show: member },
+    // Staff get one entry: the admin hub. Guild tools (dashboard, reports, roster ...) are linked from inside it.
+    { kind: 'link', href: '/admin', label: 'Admin', icon: Shield, show: isStaff, also: ['/network', '/reports', '/members', '/activity', '/challenges'] },
   ];
 
+  const isActive = (href: string) => pathname === href || (href !== '/' && pathname.startsWith(href + '/'));
+  // Exact match for links whose sub-pages live in the same menu (e.g. /assault vs /assault/stats).
+  const isExact = (href: string) => pathname === href;
+  const visibleEntries = entries.filter((e) => e.show);
+
   return (
-    <header className="border-b sticky top-0 z-50 w-full max-w-[100vw] overflow-x-clip bg-background/95 backdrop-blur">
+    <header className="border-b border-crystal/10 sticky top-0 z-50 w-full max-w-[100vw] overflow-x-clip bg-background/80 backdrop-blur-md">
       <div className="container mx-auto px-4 max-w-full">
         <nav className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2 lg:min-h-14 lg:flex-nowrap lg:py-0">
-          <Link href="/" className="font-bold text-lg whitespace-nowrap shrink-0">
-            ⚔️ Guild Tracker
+          <Link href={!signedIn ? '/' : isStaff ? '/admin' : '/me'} className="shrink-0" aria-label="Dream Guilds home">
+            <DreamWordmark />
           </Link>
 
           <div className="contents lg:flex lg:items-center lg:gap-4">
-            {/* Navigation Links */}
-            {currentGuild && (
-              <div className="order-last flex w-full min-w-0 max-w-full items-center gap-1 overflow-x-auto whitespace-nowrap text-sm lg:order-none lg:w-auto lg:overflow-visible">
-                {navLinks.map((link) => {
-                  if (link.requiresStaff && !isStaff) return null;
-                  if (link.requiresUser && (!user || isGuest)) return null;
-                  if (!isSuperAdmin && link.requiresRole && !hasRole(link.requiresRole)) return null;
+            {/* Main navigation */}
+            {visibleEntries.length > 0 && (
+              <div className="order-last flex w-full min-w-0 max-w-full items-center gap-0.5 overflow-x-auto whitespace-nowrap text-sm lg:order-none lg:w-auto lg:overflow-visible">
+                {visibleEntries.map((entry) => {
+                  const base = 'shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring';
+                  const on = 'bg-crystal/10 text-crystal-light font-medium';
+                  const off = 'text-muted-foreground hover:text-foreground hover:bg-muted';
 
-                  const isActive = pathname === link.href || (link.href !== '/' && pathname.startsWith(link.href + '/'));
+                  if (entry.kind === 'link') {
+                    return (
+                      <Link key={entry.href} href={entry.href} className={`${base} ${isActive(entry.href) || entry.also?.some(isActive) ? on : off}`}>
+                        <entry.icon className="h-4 w-4" />
+                        {entry.label}
+                      </Link>
+                    );
+                  }
+
+                  const menuActive = entry.matchPrefix
+                    ? isActive(entry.matchPrefix)
+                    : entry.sections.some((sec) => sec.items.some((i) => isExact(i.href)));
                   return (
-                    <Link
-                      key={link.href}
-                      href={link.href}
-                      className={`shrink-0 px-3 py-2 rounded-md transition-colors ${
-                        isActive
-                          ? 'bg-muted font-medium'
-                          : 'hover:bg-muted'
-                      }`}
-                    >
-                      {link.label}
-                    </Link>
+                    <DropdownMenu key={entry.key}>
+                      <DropdownMenuTrigger asChild>
+                        <button className={`${base} ${menuActive ? on : off}`}>
+                          <entry.icon className="h-4 w-4" />
+                          {entry.label}
+                          <ChevronDown className="h-3 w-3 opacity-60" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="w-64 max-h-[75vh] overflow-y-auto p-1.5">
+                        {entry.sections.map((sec, si) => (
+                          <div key={si}>
+                            {si > 0 && <DropdownMenuSeparator />}
+                            {sec.title && (
+                              <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
+                                {sec.title}
+                              </DropdownMenuLabel>
+                            )}
+                            {sec.items.map((item) => {
+                              const active = isExact(item.href);
+                              return (
+                                <DropdownMenuItem key={item.href} asChild className={active ? 'bg-crystal/10' : ''}>
+                                  <Link href={item.href} className="flex items-start gap-3 py-1.5 cursor-pointer">
+                                    <item.icon className={`h-4 w-4 mt-0.5 shrink-0 ${active ? 'text-crystal' : 'text-muted-foreground'}`} />
+                                    <span className="min-w-0">
+                                      <span className={`block ${active ? 'text-crystal-light font-medium' : ''}`}>{item.label}</span>
+                                      {item.desc && <span className="block text-xs text-muted-foreground truncate">{item.desc}</span>}
+                                    </span>
+                                  </Link>
+                                </DropdownMenuItem>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   );
                 })}
               </div>
@@ -226,14 +314,17 @@ export default function Navigation() {
                       </DropdownMenuLabel>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem asChild>
-                        <Link href="/me">My dashboard</Link>
+                        <Link href="/account" className="cursor-pointer">
+                          <UserCircle className="h-4 w-4 mr-2" />
+                          My characters
+                        </Link>
                       </DropdownMenuItem>
-                      <DropdownMenuItem asChild>
-                        <Link href="/account">My characters</Link>
-                      </DropdownMenuItem>
-                      {isStaff && (
+                      {isSuperAdmin && (
                         <DropdownMenuItem asChild>
-                          <Link href="/admin?tab=claims">Character claims</Link>
+                          <Link href="/setup" className="cursor-pointer">
+                            <KeyRound className="h-4 w-4 mr-2" />
+                            API key
+                          </Link>
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuSeparator />

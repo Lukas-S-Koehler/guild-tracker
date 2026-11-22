@@ -103,6 +103,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Use ref instead of state to avoid closure issues in event handler
   const hasLoadedInitialGuilds = useRef(false);
+  // Which user's memberships are loaded (or loading). Lets SIGNED_IN skip only a repeat of the
+  // same user; a sign-out followed by a sign-in (no reload) must load again.
+  const loadedUserId = useRef<string | null>(null);
+  // Set inside the auth effect; signIn() calls it so the UI switches without waiting on the event.
+  const handleSignedInRef = useRef<((u: User) => void) | null>(null);
 
   // Create Supabase client once, outside of useEffect
   const supabase = useMemo(() => createClient(), []);
@@ -168,6 +173,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (!mounted) return;
         setUser(currentUser);
+        if (currentUser) loadedUserId.current = currentUser.id;
 
         if (!currentUser) {
           // Guest mode — load guilds list so guests have a default guild
@@ -201,6 +207,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
+    // A user signed in (event or signIn()): show them as signed in now, then load memberships.
+    function handleSignedIn(u: User) {
+      if (loadedUserId.current === u.id) return; // initial load or a repeat event
+      loadedUserId.current = u.id;
+      console.log('[AuthContext] User signed in, fetching guilds');
+      setUser(u);
+      if (!mounted) return;
+      loadingGuildsRef = true;
+      setIsLoadingGuilds(true);
+      // Deferred out of the auth callback: Supabase holds a lock while callbacks run, so awaiting
+      // a request here can race the session cookie being written (server sees no session).
+      setTimeout(async () => {
+        try {
+          const res = await fetch('/api/auth/memberships', { cache: 'no-store' });
+          if (!mounted) return;
+          const data: GuildMembership[] = res.ok ? await res.json() : [];
+          await applyMemberships(data);
+        } catch (fetchError) {
+          console.error('[AuthContext] Error fetching guilds:', fetchError);
+          if (mounted) setGuilds([]);
+        } finally {
+          setIsLoadingGuilds(false);
+          loadingGuildsRef = false;
+        }
+      }, 0);
+    }
+    handleSignedInRef.current = handleSignedIn;
+
     loadUser();
 
     // Listen for auth changes
@@ -213,15 +247,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Ignore SIGNED_IN if we already have guilds loaded (initial load already handled)
-      if (event === 'SIGNED_IN' && hasLoadedInitialGuilds.current) {
-        console.log('[AuthContext] Ignoring SIGNED_IN - guilds already loaded');
-        return;
-      }
-
       // Only process specific events
       if (event === 'SIGNED_OUT') {
         console.log('[AuthContext] User signed out, clearing guilds');
+        loadedUserId.current = null;
+        hasLoadedInitialGuilds.current = false;
         setUser(null);
         setGuilds([]);
         setCurrentGuildState(null);
@@ -229,38 +259,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setMyCharacters([]);
         localStorage.removeItem('currentGuildId');
       } else if (event === 'SIGNED_IN' && session?.user) {
-        // ONLY process SIGNED_IN, not INITIAL_SESSION (already handled in loadUser)
-        console.log('[AuthContext] User signed in, fetching guilds');
-        setUser(session.user);
-
-        // Fetch guilds when user signs in. Deferred out of the auth callback:
-        // Supabase holds a lock while callbacks run, so awaiting a request here can race
-        // the session cookie being written (the server then sees no session until refresh).
-        if (!loadingGuildsRef && mounted) {
-          loadingGuildsRef = true;
-          setIsLoadingGuilds(true);
-          setTimeout(async () => {
-            try {
-              console.log('[AuthContext] Fetching guilds for user:', session.user.id);
-              const res = await fetch('/api/auth/memberships', { cache: 'no-store' });
-              if (!mounted) return;
-              const data: GuildMembership[] = res.ok ? await res.json() : [];
-              await applyMemberships(data);
-            } catch (fetchError) {
-              console.error('[AuthContext] Error fetching guilds:', fetchError);
-              if (mounted) setGuilds([]);
-            } finally {
-              setIsLoadingGuilds(false);
-              loadingGuildsRef = false;
-            }
-          }, 0);
-        }
+        handleSignedIn(session.user);
       }
       // Ignore TOKEN_REFRESHED, USER_UPDATED, etc. to prevent loops
     });
 
     return () => {
       mounted = false;
+      handleSignedInRef.current = null;
       subscription.unsubscribe();
     };
   }, [supabase]); // Only depend on supabase client
@@ -275,7 +281,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (!error && data.user) handleSignedInRef.current?.(data.user);
     return { error: error as Error | null };
   };
 

@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, ArrowRight, Coins, Crown, Shield, Swords, Users, Hammer, PiggyBank } from 'lucide-react';
 import { createAdminClient } from '@/lib/supabase-server';
 import { findGuildByTag, loadGuildDirectory } from '@/lib/guild-directory';
-import { ASSAULT_ENTRY_GUILD_ID, ASSAULT_TOP_GUILD_ID } from '@/lib/raids';
+import { ASSAULT_ENTRY_GUILD_ID, ASSAULT_TOP_GUILD_ID, ASSAULT_TOP_MIN_CL, raidLabel } from '@/lib/raids';
 import { formatGold } from '@/lib/utils';
 import { levelLabel, requirementLabel } from '@/components/guilds/GuildCard';
 import MemberShortcut from '@/components/guilds/MemberShortcut';
@@ -20,8 +20,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const g = findGuildByTag(dir, params.tag);
   if (!g) return { title: 'Guild not found' };
   return {
-    title: `${g.name} [${g.tag}] · Dream Guilds`,
-    description: `${g.name}: ${levelLabel(g)}, ${g.is_assault ? 'assaults' : g.raids.map((r) => r.name).join(', ') || 'raids'}, ${requirementLabel(g)}.`,
+    title: `${g.name} [${g.tag}]`,
+    description: `${g.name}: ${levelLabel(g)}, ${g.is_assault ? 'assaults' : g.raids.map(raidLabel).join(', ') || 'raids'}, ${requirementLabel(g)}.`,
   };
 }
 
@@ -61,14 +61,14 @@ export default async function GuildPage({ params }: Props) {
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-3xl font-bold">{g.name}</h1>
             <span className="text-muted-foreground">[{g.tag}]</span>
-            <Badge variant="outline" className={g.is_assault ? 'border-red-500/50 text-red-400' : 'border-sky-500/50 text-sky-400'}>{levelLabel(g)}</Badge>
+            <Badge variant="outline" className={g.is_assault ? 'border-red-500/50 text-red-400' : 'border-crystal/50 text-crystal'}>{levelLabel(g)}</Badge>
             {!g.is_active && <Badge variant="outline" className="border-orange-500/50 text-orange-400">Closed</Badge>}
           </div>
           <p className="text-muted-foreground mt-1">
             {g.is_assault
               ? g.id === ASSAULT_TOP_GUILD_ID
-                ? 'Hardcore assault guild. Members move up from Dream Engineers.'
-                : 'Assault guild: conquests, waves and territory boosts instead of raids.'
+                ? `Hardcore assault guild for CL ${ASSAULT_TOP_MIN_CL}+. No raids.`
+                : 'Energizing Pools guild open to every level: up to 12% Magic Find and 15% EXP from the pool, casual assaults on the side. No raids.'
               : `Raid guild for combat level ${g.min_level > 1 ? `${g.min_level}+` : '1 and up'}.`}
           </p>
         </div>
@@ -96,19 +96,22 @@ export default async function GuildPage({ params }: Props) {
           <CardHeader className="pb-3"><CardTitle className="text-base flex items-center gap-2"><Swords className="h-4 w-4" />{g.is_assault ? 'Content' : 'Raids'}</CardTitle></CardHeader>
           <CardContent className="space-y-2">
             {g.is_assault ? (
-              <p className="text-sm text-muted-foreground">No scheduled raids. The guild fights conquest zones together: waves, marks and territory boosts for the top guilds, with shard rewards each season.</p>
+              g.id === ASSAULT_ENTRY_GUILD_ID ? (
+                <p className="text-sm text-muted-foreground">No scheduled raids. The guild hall runs Energizing Pools: boosts scale with your Guild Mastery, up to 12% Magic Find and 15% EXP. Members also join casual conquest assaults.</p>
+              ) : (
+                <p className="text-sm text-muted-foreground">No scheduled raids. The guild fights conquest zones together: waves, marks and territory boosts for the top guilds, with shard rewards each season.</p>
+              )
             ) : g.raids.length === 0 ? (
               <p className="text-sm text-muted-foreground">Raid not set yet.</p>
             ) : (
               g.raids.map((r) => (
                 <div key={r.key} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
                   <div className="min-w-0">
-                    <p className="font-medium truncate">{r.name}</p>
-                    <p className="text-xs text-muted-foreground truncate">{r.location} · {r.minutes} min</p>
+                    <p className="font-medium truncate">CL {r.min_cl} raids</p>
+                    <p className="text-xs text-muted-foreground truncate">{r.name} · {r.location} · {r.minutes} min</p>
                   </div>
                   <div className="text-right shrink-0">
                     <p className="text-sm">{r.marks} marks</p>
-                    <p className="text-xs text-muted-foreground">CL {r.min_cl}+</p>
                   </div>
                 </div>
               ))
@@ -193,16 +196,16 @@ export default async function GuildPage({ params }: Props) {
             )}
             {topOfLadder && de && (
               <Link href={`/guilds/${de.tag.toLowerCase()}`} className="inline-flex items-center gap-1 hover:underline">
-                Top raid tier. Want assaults? {de.name} <ArrowRight className="h-3.5 w-3.5" />
+                Top raid tier. Pools or assaults? {de.name} <ArrowRight className="h-3.5 w-3.5" />
               </Link>
             )}
             {g.id === ASSAULT_ENTRY_GUILD_ID && di && (
               <Link href={`/guilds/${di.tag.toLowerCase()}`} className="inline-flex items-center gap-1 hover:underline">
-                Hardcore assaults: {di.name} <ArrowRight className="h-3.5 w-3.5" />
+                Hardcore assaults at CL {ASSAULT_TOP_MIN_CL}+: {di.name} <ArrowRight className="h-3.5 w-3.5" />
               </Link>
             )}
           </div>
-          <Link href="/guilds#fit" className="text-sky-400 hover:underline">Not sure? Find the guild that fits you</Link>
+          <Link href="/guilds#fit" className="text-crystal hover:underline">Not sure? Find your guild by CL</Link>
         </CardContent>
       </Card>
     </div>

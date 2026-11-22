@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Sparkles } from 'lucide-react';
 import GuildFitPicker from '@/components/guilds/GuildFitPicker';
 import type { DirectoryGuild } from '@/lib/guild-directory';
@@ -14,6 +14,15 @@ import type { DirectoryGuild } from '@/lib/guild-directory';
  * Members already in a Dream guild see their guilds instead; the picker folds away
  * (still handy for an alt or a move up).
  */
+function PickerCard({ guilds }: { guilds: DirectoryGuild[] }) {
+  return (
+    <Card className="border-crystal/30">
+      <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-lg"><Sparkles className="h-4 w-4 text-crystal" />Which guild is mine?</CardTitle></CardHeader>
+      <CardContent><GuildFitPicker guilds={guilds} /></CardContent>
+    </Card>
+  );
+}
+
 export default function PickerSection({ guilds }: { guilds: DirectoryGuild[] }) {
   const { user, loading, isAwaitingAssignment, myCharacters } = useAuth();
   const [open, setOpen] = useState(false);
@@ -22,7 +31,7 @@ export default function PickerSection({ guilds }: { guilds: DirectoryGuild[] }) 
     : [];
 
   if (loading) return null;
-  if (mine.length === 0) return <GuildFitPicker guilds={guilds} />;
+  if (mine.length === 0) return <PickerCard guilds={guilds} />;
 
   return (
     <div className="space-y-3">
@@ -41,13 +50,13 @@ export default function PickerSection({ guilds }: { guilds: DirectoryGuild[] }) 
             })}
           </div>
           {!open && (
-            <Button variant="ghost" size="sm" className="px-0 text-sky-400 hover:text-sky-300 hover:bg-transparent" onClick={() => setOpen(true)}>
+            <Button variant="ghost" size="sm" className="px-0 text-crystal hover:text-crystal-light hover:bg-transparent" onClick={() => setOpen(true)}>
               <Sparkles className="h-3.5 w-3.5 mr-1.5" />Find a guild for an alt or a move up
             </Button>
           )}
         </CardContent>
       </Card>
-      {open && <GuildFitPicker guilds={guilds} />}
+      {open && <PickerCard guilds={guilds} />}
     </div>
   );
 }

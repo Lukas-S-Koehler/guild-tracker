@@ -2,50 +2,38 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Dream Guilds theme: deep navy surfaces, crystal-blue accent.
+ * The site is dark only (<html class="dark">), so :root and .dark carry the same values.
+ * --crystal* are the brand colours (use `text-crystal`, `bg-crystal/10`, `border-crystal/40` ...).
+ */
 @layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
-  }
-
+  :root,
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
+    --background: 224 47% 6%;
+    --foreground: 210 40% 96%;
+    --card: 223 42% 9%;
+    --card-foreground: 210 40% 96%;
+    --popover: 223 44% 8%;
+    --popover-foreground: 210 40% 96%;
+    --primary: 199 92% 60%;
+    --primary-foreground: 224 60% 8%;
+    --secondary: 221 36% 15%;
+    --secondary-foreground: 210 40% 96%;
+    --muted: 221 34% 14%;
+    --muted-foreground: 217 22% 66%;
+    --accent: 214 45% 17%;
     --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
+    --destructive: 0 63% 42%;
     --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    --border: 220 32% 17%;
+    --input: 220 32% 19%;
+    --ring: 199 92% 60%;
+    --radius: 0.6rem;
+
+    --crystal: 199 92% 60%;
+    --crystal-light: 199 95% 86%;
+    --crystal-deep: 204 80% 24%;
   }
 }
 
@@ -53,7 +41,25 @@
   * {
     @apply border-border;
   }
+  html {
+    color-scheme: dark;
+  }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+    /* Soft crystal glow behind the header, fixed so it doesn't scroll with long pages. */
+    background-image:
+      radial-gradient(60rem 30rem at 15% -10%, hsl(var(--crystal) / 0.10), transparent 70%),
+      radial-gradient(50rem 30rem at 95% -15%, hsl(262 80% 60% / 0.07), transparent 70%);
+    background-attachment: fixed;
+  }
+  ::selection {
+    background: hsl(var(--crystal) / 0.35);
+  }
+}
+
+@layer components {
+  /* Cards sit slightly above the page with a faint top highlight. */
+  .card-surface {
+    box-shadow: inset 0 1px 0 hsl(var(--crystal-light) / 0.05), 0 1px 3px hsl(224 60% 2% / 0.45);
   }
 }
