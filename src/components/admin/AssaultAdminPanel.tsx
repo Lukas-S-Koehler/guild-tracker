@@ -1,12 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { ArrowLeft, Loader2, AlertCircle, Check } from 'lucide-react';
-import ProtectedRoute from '@/components/ProtectedRoute';
+import { Loader2, AlertCircle, Check } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { ApiClient } from '@/lib/api-client';
 import GuildStatusCard, { type StatusValue } from '@/components/assault/GuildStatusCard';
@@ -314,7 +312,7 @@ function GuildPanel({ guildId, guildName, onMsg }: {
   );
 }
 
-function AssaultManagerContent() {
+export default function AssaultManagerContent() {
   const { guilds, currentGuild } = useAuth();
   const visibleGuilds = guilds.filter(g => g.is_assault === true);
   const [activeGuildId, setActiveGuildId] = useState<string>(
@@ -343,11 +341,10 @@ function AssaultManagerContent() {
   }
 
   return (
-    <div className="container mx-auto p-4 max-w-5xl space-y-4">
+    <div className="max-w-5xl space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-2">
-          <Link href="/assault"><Button variant="ghost" size="sm"><ArrowLeft className="h-4 w-4 mr-1" />Assault</Button></Link>
-          <h1 className="text-2xl font-bold">Assault Admin</h1>
+          <h2 className="text-lg font-semibold">Assault Admin</h2>
         </div>
       </div>
 
@@ -371,13 +368,5 @@ function AssaultManagerContent() {
         ))}
       </Tabs>
     </div>
-  );
-}
-
-export default function AssaultManagerPage() {
-  return (
-    <ProtectedRoute requiredRole="DEPUTY">
-      <AssaultManagerContent />
-    </ProtectedRoute>
   );
 }

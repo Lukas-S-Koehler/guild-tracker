@@ -226,7 +226,7 @@ export default function AssaultLandingPage() {
     { href: '/assault/guide', icon: BookOpen, title: 'Guide', desc: 'Zone info, 5Ps, hits-to-kill, gear.' },
     { href: '/assault/checklist', icon: CheckSquare, title: 'Checklist', desc: 'Track your prep each launch.' },
     { href: '/assault/potions', icon: FlaskConical, title: 'Potions', desc: 'Plan stacks, costs, restacks.' },
-    ...(canAdmin ? [{ href: '/assault/admin', icon: Settings, title: 'Admin', desc: 'Schedule, pings, location.' }] : []),
+    ...(canAdmin ? [{ href: '/admin?tab=assault', icon: Settings, title: 'Admin', desc: 'Schedule, pings, location.' }] : []),
   ];
 
   return (

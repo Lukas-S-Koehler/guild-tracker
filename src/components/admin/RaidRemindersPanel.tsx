@@ -1,16 +1,14 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, Trash2, ArrowLeft, Plus, AlertCircle, Check, Pencil, X } from 'lucide-react';
+import { Loader2, Trash2, Plus, AlertCircle, Check, Pencil, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import ProtectedRoute from '@/components/ProtectedRoute';
 
 interface RaidReminder {
   id: string;
@@ -93,7 +91,7 @@ function DayPicker({ value, onChange }: { value: number[]; onChange: (v: number[
   );
 }
 
-function RaidRemindersContent() {
+export default function RaidRemindersContent() {
   const { isSuperAdmin, loading: authLoading } = useAuth();
   const [reminders, setReminders] = useState<RaidReminder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -244,7 +242,7 @@ function RaidRemindersContent() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold">Access Denied</h1>
+          <h2 className="text-lg font-semibold">Access Denied</h2>
           <p className="text-muted-foreground">Super admin only.</p>
         </div>
       </div>
@@ -252,13 +250,10 @@ function RaidRemindersContent() {
   }
 
   return (
-    <div className="container mx-auto p-4 sm:p-6 max-w-4xl space-y-4">
+    <div className="max-w-4xl space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <Link href="/admin" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 mb-1">
-            <ArrowLeft className="h-3 w-3" /> Back to admin
-          </Link>
-          <h1 className="text-2xl font-bold">Raid Reminders</h1>
+          <h2 className="text-lg font-semibold">Raid Reminders</h2>
           <p className="text-sm text-muted-foreground">Minute-precise Discord pings via Supabase pg_cron. Times shown/entered in your device local time; stored as UTC.</p>
         </div>
         <Button onClick={() => setShowForm(v => !v)} size="sm">
@@ -409,13 +404,5 @@ function RaidRemindersContent() {
         </CardContent>
       </Card>
     </div>
-  );
-}
-
-export default function RaidRemindersPage() {
-  return (
-    <ProtectedRoute requiredRole="LEADER">
-      <RaidRemindersContent />
-    </ProtectedRoute>
   );
 }

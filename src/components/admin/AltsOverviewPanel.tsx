@@ -4,8 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2, Crown, Shield, Users, RefreshCw, Link as LinkIcon, Search, X, ArrowUpCircle } from 'lucide-react';
-import Link from 'next/link';
-import ProtectedRoute from '@/components/ProtectedRoute';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface Char {
@@ -53,7 +51,7 @@ function positionBadge(pos: string | null | undefined) {
   return <Users className="h-3 w-3 text-gray-400" />;
 }
 
-function AltsOverviewContent() {
+export default function AltsOverviewContent() {
   const { currentGuild, isSuperAdmin } = useAuth();
   const [data, setData] = useState<OverviewPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -185,7 +183,7 @@ function AltsOverviewContent() {
   };
 
   if (!isSuperAdmin) {
-    return <div className="max-w-xl mx-auto p-6 text-sm text-muted-foreground">Cross-guild overview is super-admin only. Per-guild leaders can switch main from the <Link href="/admin" className="underline">Admin page</Link>.</div>;
+    return <div className="max-w-xl mx-auto p-6 text-sm text-muted-foreground">Cross-guild overview is super-admin only. Per-guild leaders can switch main from Admin → Guilds.</div>;
   }
 
   if (loading) {
@@ -193,14 +191,13 @@ function AltsOverviewContent() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-4 p-4">
+    <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><LinkIcon className="h-5 w-5" /> Alt Characters Overview</h1>
+          <h2 className="text-lg font-semibold flex items-center gap-2"><LinkIcon className="h-5 w-5" /> Alt Characters Overview</h2>
           <p className="text-sm text-muted-foreground">Accounts are auto-linked via shared Discord ID + API sync. Use 👑 to set a different main when the auto-pick is wrong. Deputy+ char exempts the whole account from activity checks.</p>
         </div>
         <div className="flex gap-2">
-          <Link href="/admin"><Button size="sm" variant="outline">← Admin</Button></Link>
           <Button size="sm" variant="outline" onClick={load} disabled={loading}><RefreshCw className="h-3 w-3 mr-1" />Reload</Button>
           <Button size="sm" variant="outline" onClick={handleLinkByDiscord} disabled={linkingDiscord}>
             {linkingDiscord ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
@@ -334,13 +331,5 @@ function AltsOverviewContent() {
         )}
       </div>
     </div>
-  );
-}
-
-export default function AltsOverviewPage() {
-  return (
-    <ProtectedRoute requiredRole="LEADER">
-      <AltsOverviewContent />
-    </ProtectedRoute>
   );
 }

@@ -55,15 +55,17 @@ export default function Navigation() {
     }
   };
 
-  const navLinks: { href: string; label: string; requiresRole?: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER'; requiresSuperAdmin?: boolean }[] = [
+  // Officer+ in any guild (not just the selected one) gets the admin hub; tabs gate themselves.
+  const isStaff = isSuperAdmin || (!isAwaitingAssignment && guilds.some((g) => g.role !== 'MEMBER'));
+
+  const navLinks: { href: string; label: string; requiresRole?: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER'; requiresStaff?: boolean }[] = [
     { href: '/', label: 'Dashboard' },
     { href: '/overview', label: 'Overview' },
     { href: '/leaderboard', label: 'Leaderboard' },
     { href: '/assault', label: 'Assault' },
     { href: '/combat', label: 'Combat', requiresRole: 'MEMBER' },
     { href: '/guide', label: 'Guide' },
-    { href: '/data-management', label: 'Manage Data', requiresSuperAdmin: true },
-    { href: '/admin', label: 'Admin', requiresRole: 'LEADER' },
+    { href: '/admin', label: 'Admin', requiresStaff: true },
   ];
 
   return (
@@ -79,7 +81,7 @@ export default function Navigation() {
             {currentGuild && (
               <div className="order-last flex w-full min-w-0 max-w-full items-center gap-1 overflow-x-auto whitespace-nowrap text-sm lg:order-none lg:w-auto lg:overflow-visible">
                 {navLinks.map((link) => {
-                  if (link.requiresSuperAdmin && !isSuperAdmin) return null;
+                  if (link.requiresStaff && !isStaff) return null;
                   if (!isSuperAdmin && link.requiresRole && !hasRole(link.requiresRole)) return null;
 
                   const isActive = pathname === link.href;
@@ -223,9 +225,9 @@ export default function Navigation() {
                       <DropdownMenuItem asChild>
                         <Link href="/account">My characters</Link>
                       </DropdownMenuItem>
-                      {(isSuperAdmin || guilds.some((g) => !isAwaitingAssignment && g.role !== 'MEMBER')) && (
+                      {isStaff && (
                         <DropdownMenuItem asChild>
-                          <Link href="/admin/claims">Character claims</Link>
+                          <Link href="/admin?tab=claims">Character claims</Link>
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuSeparator />

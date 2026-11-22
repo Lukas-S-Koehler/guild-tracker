@@ -9,7 +9,6 @@ import { Loader2, Trash2, Edit, ChevronDown, ChevronRight } from 'lucide-react';
 import { formatGold, formatDate } from '@/lib/utils';
 import { useApiClient } from '@/lib/api-client';
 import { useAuth } from '@/contexts/AuthContext';
-import ProtectedRoute from '@/components/ProtectedRoute';
 
 interface ActivityLog {
   id: string;
@@ -41,7 +40,7 @@ interface GuildOption {
   nickname: string;
 }
 
-function DataManagementContent() {
+export default function DataManagementContent() {
   const { isSuperAdmin } = useAuth();
   const api = useApiClient();
 
@@ -63,7 +62,7 @@ function DataManagementContent() {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold">Access Denied</h1>
+          <h2 className="text-lg font-semibold">Access Denied</h2>
           <p className="text-muted-foreground">This page is restricted to super admins.</p>
         </div>
       </div>
@@ -236,7 +235,7 @@ function DataManagementContent() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">🗂️ Data Management</h1>
+        <h2 className="text-lg font-semibold">🗂️ Data Management</h2>
         <p className="text-muted-foreground">View, edit, and delete activity logs and challenges across all guilds</p>
         <p className="text-xs text-muted-foreground mt-1">
           Note: Members meet requirements by reaching the configured total gold (challenge donations + valid guild hall deposits).
@@ -494,13 +493,5 @@ function DataManagementContent() {
         </>
       )}
     </div>
-  );
-}
-
-export default function DataManagementPage() {
-  return (
-    <ProtectedRoute>
-      <DataManagementContent />
-    </ProtectedRoute>
   );
 }

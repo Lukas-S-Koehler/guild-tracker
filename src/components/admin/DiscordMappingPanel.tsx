@@ -9,7 +9,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, Check, AlertCircle, Search, Info, MessageSquare, HelpCircle, Link2, Crown, BarChart2 } from 'lucide-react';
 import { useApiClient } from '@/lib/api-client';
 import { useAuth } from '@/contexts/AuthContext';
-import ProtectedRoute from '@/components/ProtectedRoute';
 
 interface GuildMemberDiscord {
   id: string;
@@ -51,7 +50,7 @@ interface AccessibleGuild {
   role: string;
 }
 
-function DiscordMappingContent() {
+export default function DiscordMappingContent() {
   const api = useApiClient();
   const { guilds, isSuperAdmin } = useAuth();
 
@@ -398,14 +397,14 @@ function DiscordMappingContent() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-4xl space-y-6">
       {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
+          <h2 className="text-lg font-semibold flex items-center gap-2">
             <MessageSquare className="h-6 w-6 text-[#5865F2]" />
             Discord Mapping
-          </h1>
+          </h2>
           <p className="text-muted-foreground mt-1 text-sm">
             Link each member&apos;s IGN to their Discord account. Alt characters inherit automatically.
           </p>
@@ -775,13 +774,5 @@ function DiscordMappingContent() {
         </CardContent>
       </Card>
     </div>
-  );
-}
-
-export default function DiscordMappingPage() {
-  return (
-    <ProtectedRoute requiredRole="OFFICER">
-      <DiscordMappingContent />
-    </ProtectedRoute>
   );
 }

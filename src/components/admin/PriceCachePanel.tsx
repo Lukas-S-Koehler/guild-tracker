@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button';
 import { Loader2, RefreshCw, Trash2, Package, Clock, CheckCircle, AlertCircle } from 'lucide-react';
 import { useApiClient } from '@/lib/api-client';
 import { useAuth } from '@/contexts/AuthContext';
-import ProtectedRoute from '@/components/ProtectedRoute';
 
 interface CacheEntry {
   item_name: string;
@@ -38,7 +37,7 @@ function formatPrice(price: number): string {
   return price.toLocaleString();
 }
 
-function PriceCacheContent() {
+export default function PriceCacheContent() {
   const api = useApiClient();
   const { isSuperAdmin } = useAuth();
   const [entries, setEntries] = useState<CacheEntry[]>([]);
@@ -156,10 +155,10 @@ function PriceCacheContent() {
   }).length;
 
   return (
-    <div className="container mx-auto px-4 py-8 space-y-6">
+    <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Price Cache</h1>
+          <h2 className="text-lg font-semibold">Price Cache</h2>
           <p className="text-muted-foreground text-sm">IdleMMO item price cache management</p>
         </div>
         <div className="flex items-center gap-2">
@@ -312,13 +311,5 @@ function PriceCacheContent() {
         </CardContent>
       </Card>
     </div>
-  );
-}
-
-export default function PriceCachePage() {
-  return (
-    <ProtectedRoute requiredRole="LEADER">
-      <PriceCacheContent />
-    </ProtectedRoute>
   );
 }

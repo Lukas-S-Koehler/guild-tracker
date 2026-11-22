@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Check, Loader2, UserCheck, X } from 'lucide-react';
-import ProtectedRoute from '@/components/ProtectedRoute';
 
 type Status = 'pending' | 'approved' | 'rejected';
 
@@ -29,15 +28,8 @@ interface SearchResult {
   taken: boolean;
 }
 
-export default function AdminClaimsPage() {
-  return (
-    <ProtectedRoute requiredRole="OFFICER">
-      <ClaimsAdmin />
-    </ProtectedRoute>
-  );
-}
 
-function ClaimsAdmin() {
+export default function ClaimsAdmin() {
   const [status, setStatus] = useState<Status>('pending');
   const [rows, setRows] = useState<ClaimRow[] | null>(null);
   const [isSuper, setIsSuper] = useState(false);
@@ -78,10 +70,10 @@ function ClaimsAdmin() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-4">
+    <div className="max-w-5xl space-y-4">
       <div className="flex items-center gap-2">
         <UserCheck className="h-6 w-6 text-primary" />
-        <h1 className="text-2xl font-bold">Character claims</h1>
+        <h2 className="text-lg font-semibold">Character claims</h2>
         <span className="text-sm text-muted-foreground ml-2">{isSuper ? 'All guilds' : 'Characters in guilds you lead / officer'}</span>
       </div>
 

@@ -1,14 +1,12 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, ArrowLeft, Check, AlertCircle, Rocket } from 'lucide-react';
+import { Loader2, Check, AlertCircle, Rocket } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import ProtectedRoute from '@/components/ProtectedRoute';
 
 interface BumpConfig {
   bump_server_id: string;
@@ -28,7 +26,7 @@ const BLANK: BumpConfig = {
   bump_source_url: '',
 };
 
-function BumpsContent() {
+export default function BumpsContent() {
   const { isSuperAdmin, loading: authLoading } = useAuth();
   const [config, setConfig] = useState<BumpConfig>(BLANK);
   const [edit, setEdit] = useState<BumpConfig>(BLANK);
@@ -146,12 +144,7 @@ function BumpsContent() {
   }
 
   return (
-    <div className="space-y-4 max-w-2xl mx-auto p-4">
-      <Link href="/admin">
-        <Button size="sm" variant="ghost">
-          <ArrowLeft className="h-4 w-4 mr-1" /> Back
-        </Button>
-      </Link>
+    <div className="space-y-4 max-w-2xl">
 
       <Card>
         <CardHeader>
@@ -252,13 +245,5 @@ function BumpsContent() {
         </CardContent>
       </Card>
     </div>
-  );
-}
-
-export default function BumpsPage() {
-  return (
-    <ProtectedRoute>
-      <BumpsContent />
-    </ProtectedRoute>
   );
 }

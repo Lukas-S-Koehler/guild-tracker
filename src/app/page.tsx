@@ -351,7 +351,7 @@ function DashboardPageContent() {
           )}
           {hasRole('OFFICER') && (
             <Button asChild variant="outline" className="h-auto py-3">
-              <Link href="/discord-mapping" className="flex flex-col items-center gap-1.5">
+              <Link href="/admin?tab=discord&sub=mapping" className="flex flex-col items-center gap-1.5">
                 <span className="text-xl">💬</span>
                 <span className="text-xs">Discord</span>
               </Link>
@@ -371,7 +371,7 @@ function DashboardPageContent() {
           </Button>
           {isSuperAdmin && (
             <Button asChild variant="outline" className="h-auto py-3">
-              <Link href="/price-cache" className="flex flex-col items-center gap-1.5">
+              <Link href="/admin?tab=system&sub=prices" className="flex flex-col items-center gap-1.5">
                 <span className="text-xl">💰</span>
                 <span className="text-xs">Price Cache</span>
               </Link>
