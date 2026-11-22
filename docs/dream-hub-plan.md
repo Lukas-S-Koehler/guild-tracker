@@ -44,7 +44,7 @@ Static game data in `src/lib/raids.ts` (name, location, minutes, marks, min CL):
 Crystal Echoes 25, Frostbite Summit 40, Dunekeeper's Last Stand 60, Skybound Eden 70, Orbit of the Forgotten 80,
 The Silent Watchers 92. Guild `min_level` uses the same CL scale. Each guild runs one raid, some lower guilds several:
 set per guild in Admin → Guilds (`guild_config.settings.raids`); unset = the raid whose CL equals the guild's min level.
-Used by /me now; reuse in step 5 (guild pages, "which guild fits me" picker matches on CL + raid), step 7 (live raid
+Assault guilds (`guilds.is_assault`: DE, DI) run no raids and are nominally CL 100+; DE → DI is a "hardcore assaults" move, not a level move, and the top raid tier (DT/DR) points to DE for assaults. Used by /me now; reuse in step 5 (guild pages, "which guild fits me" picker matches on CL + raid), step 7 (live raid
 schedule message) and F5 (calendar). `raid_reminders` could get a `raid_key` column later to tie pings to a raid.
 
 ## Phase 2: gamification and community
