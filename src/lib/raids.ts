@@ -41,3 +41,10 @@ export function guildRaids(settings: { raids?: unknown } | null | undefined, min
   const match = RAIDS.find((r) => r.min_cl === (minLevel ?? -1));
   return match ? [match] : [];
 }
+
+/** Dream Engineers: assault entry guild (no level gate in game; we point CL 100 / top of ladder here). */
+export const ASSAULT_ENTRY_GUILD_ID = '1184';
+/** Dream Invaders: hardcore assaults, reached by moving up from DE, not by level. */
+export const ASSAULT_TOP_GUILD_ID = '138';
+/** Assault guilds (DE, DI) don't run raids; they nominally take CL 100+. */
+export const ASSAULT_MIN_CL = 100;

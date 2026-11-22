@@ -20,7 +20,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getAccountCharacters, type AccountCharacter } from '@/lib/account-service';
 import { DAY_BOUNDARY_OFFSET_MINUTES } from '@/lib/activity-processor';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
-import { bestRaidFor, guildRaids, type Raid } from '@/lib/raids';
+import { ASSAULT_ENTRY_GUILD_ID, ASSAULT_MIN_CL, ASSAULT_TOP_GUILD_ID, bestRaidFor, guildRaids, type Raid } from '@/lib/raids';
 import {
   findLastMetWeek,
   getISOWeekKey,
@@ -34,10 +34,8 @@ const DAY_MS = 86_400_000;
 const CL_REFRESH_MS = DAY_MS;
 /** Daily check: GitHub daily-activity.yml cron '48 11 * * *'. */
 const CHECK_UTC = { h: 11, m: 48 };
-const ASSAULT_TOP_GUILD = '138'; // Dream Invaders: hardcore assaults
-const ASSAULT_ENTRY_GUILD = '1184'; // Dream Engineers
-/** Assault guilds (DE, DI) don't run raids; they take CL 100+. */
-const ASSAULT_MIN_CL = 100;
+const ASSAULT_TOP_GUILD = ASSAULT_TOP_GUILD_ID;
+const ASSAULT_ENTRY_GUILD = ASSAULT_ENTRY_GUILD_ID;
 
 interface LogRow {
   member_id: string;

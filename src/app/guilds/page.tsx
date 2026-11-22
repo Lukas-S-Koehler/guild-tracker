@@ -1,156 +1,50 @@
-'use client';
+import type { Metadata } from 'next';
+import { createAdminClient } from '@/lib/supabase-server';
+import { loadGuildDirectory } from '@/lib/guild-directory';
+import GuildCard from '@/components/guilds/GuildCard';
+import GuildFitPicker from '@/components/guilds/GuildFitPicker';
+import ChooseCurrentGuild from '@/components/guilds/ChooseCurrentGuild';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { useAuth } from '@/contexts/AuthContext';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Loader2, Users, Shield, Crown } from 'lucide-react';
+export const dynamic = 'force-dynamic';
+export const metadata: Metadata = {
+  title: 'Dream Guilds · Guild directory',
+  description: 'Every Dream guild in IdleMMO: level, raids, requirements and leadership. Find the one that fits you.',
+};
 
-export default function GuildsPage() {
-  const { user, loading, guilds, currentGuild, setCurrentGuild } = useAuth();
-  const router = useRouter();
-
-  useEffect(() => {
-    // If not logged in, redirect to login
-    if (!loading && !user) {
-      router.push('/login');
-    }
-
-    // If user has a current guild selected, redirect to home
-    if (!loading && currentGuild) {
-      router.push('/');
-    }
-  }, [loading, user, currentGuild, router]);
-
-  const getRoleIcon = (role: string) => {
-    switch (role) {
-      case 'LEADER':
-        return <Crown className="h-4 w-4" />;
-      case 'OFFICER':
-        return <Shield className="h-4 w-4" />;
-      default:
-        return <Users className="h-4 w-4" />;
-    }
-  };
-
-  const getRoleBadgeColor = (role: string) => {
-    switch (role) {
-      case 'LEADER':
-        return 'bg-yellow-500/20 text-yellow-500 border-yellow-500/50';
-      case 'OFFICER':
-        return 'bg-blue-500/20 text-blue-500 border-blue-500/50';
-      default:
-        return 'bg-gray-500/20 text-gray-500 border-gray-500/50';
-    }
-  };
-
-  const handleSelectGuild = (guild: typeof guilds[0]) => {
-    setCurrentGuild(guild);
-    router.push('/');
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (!user) {
-    return null; // Will redirect
-  }
-
-  if (guilds.length === 0) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl font-bold text-center">No Guilds Found</CardTitle>
-            <CardDescription className="text-center">
-              You&apos;re not a member of any guilds yet
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="p-4 bg-muted rounded-md text-center">
-              <p className="text-sm text-muted-foreground">
-                Contact your guild leader to get invited to a guild.
-              </p>
-            </div>
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={() => router.push('/login')}
-            >
-              Sign Out
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+export default async function GuildsPage() {
+  const { guilds } = await loadGuildDirectory(createAdminClient());
+  const active = guilds.filter((g) => g.is_active);
+  const raid = active.filter((g) => !g.is_assault).sort((a, b) => b.min_level - a.min_level || a.display_order - b.display_order);
+  const assault = active.filter((g) => g.is_assault).sort((a, b) => a.display_order - b.display_order);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
-      <Card className="w-full max-w-2xl">
-        <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold text-center">Select a Guild</CardTitle>
-          <CardDescription className="text-center">
-            Choose which guild you want to view
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4">
-            {guilds.map((guild) => {
-              const isActive = guild.is_active ?? true;
-              return (
-                <Card
-                  key={guild.guild_id}
-                  className={`cursor-pointer transition-colors ${isActive ? 'hover:bg-accent/50' : 'opacity-60 hover:bg-accent/30'}`}
-                  onClick={() => handleSelectGuild(guild)}
-                >
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <h3 className={`font-semibold text-lg ${!isActive ? 'text-muted-foreground' : ''}`}>{guild.guild_name}</h3>
-                          {!isActive && (
-                            <Badge variant="outline" className="text-xs bg-orange-500/10 text-orange-500 border-orange-500/50">Inactive</Badge>
-                          )}
-                        </div>
-                        <p className="text-sm text-muted-foreground">
-                          Member since {new Date(guild.joined_at).toLocaleDateString()}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className={getRoleBadgeColor(guild.role)}>
-                          <span className="mr-1">{getRoleIcon(guild.role)}</span>
-                          {guild.role}
-                        </Badge>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
+    <div className="space-y-8">
+      <ChooseCurrentGuild />
+      <div>
+        <h1 className="text-3xl font-bold">Dream Guilds</h1>
+        <p className="text-muted-foreground mt-1">
+          {active.length} active guilds. Climb the raid ladder by combat level, or join the assault guilds for conquests.
+        </p>
+      </div>
 
-          <div className="mt-6 pt-6 border-t">
-            <p className="text-sm text-muted-foreground text-center mb-3">
-              Logged in as {user.email}
-            </p>
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={() => router.push('/login')}
-            >
-              Sign Out
-            </Button>
+      <div id="fit" className="scroll-mt-20"><GuildFitPicker guilds={active} /></div>
+
+      <section className="space-y-3">
+        <h2 className="text-xl font-semibold">Raid guilds</h2>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {raid.map((g) => <GuildCard key={g.id} guild={g} />)}
+        </div>
+      </section>
+
+      {assault.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-xl font-semibold">Assault guilds</h2>
+          <p className="text-sm text-muted-foreground">No raids: conquests, waves and territory boosts. Dream Invaders is the hardcore step up from Dream Engineers.</p>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {assault.map((g) => <GuildCard key={g.id} guild={g} />)}
           </div>
-        </CardContent>
-      </Card>
+        </section>
+      )}
     </div>
   );
 }

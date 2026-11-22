@@ -27,7 +27,7 @@ export default function Navigation() {
   const otherGuilds = guilds.filter((g) => !switchableCharacters.some((c) => c.guild_id === g.guild_id));
 
   // Don't show navigation on auth pages
-  if (pathname === '/login' || pathname === '/signup' || pathname === '/guilds') {
+  if (pathname === '/login' || pathname === '/signup') {
     return null;
   }
 
@@ -60,7 +60,8 @@ export default function Navigation() {
 
   const navLinks: { href: string; label: string; requiresRole?: 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER'; requiresStaff?: boolean; requiresUser?: boolean }[] = [
     { href: '/me', label: 'Me', requiresUser: true },
-    { href: '/', label: 'Dashboard' },
+    { href: '/', label: user ? 'Dashboard' : 'Home' },
+    { href: '/guilds', label: 'Guilds' },
     { href: '/overview', label: 'Overview' },
     { href: '/leaderboard', label: 'Leaderboard' },
     { href: '/assault', label: 'Assault' },
@@ -86,7 +87,7 @@ export default function Navigation() {
                   if (link.requiresUser && (!user || isGuest)) return null;
                   if (!isSuperAdmin && link.requiresRole && !hasRole(link.requiresRole)) return null;
 
-                  const isActive = pathname === link.href;
+                  const isActive = pathname === link.href || (link.href !== '/' && pathname.startsWith(link.href + '/'));
                   return (
                     <Link
                       key={link.href}

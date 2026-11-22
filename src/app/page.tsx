@@ -10,6 +10,7 @@ import { formatGold, formatDate, getLastCompletedDay } from '@/lib/utils';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import CronCountdown from '@/components/CronCountdown';
 import { useAuth } from '@/contexts/AuthContext';
+import Landing from '@/components/guilds/Landing';
 
 interface TodayLog {
   id: string;
@@ -392,6 +393,16 @@ function DashboardPageContent() {
 }
 
 export default function DashboardPage() {
+  const { user, loading } = useAuth();
+  // Logged-out visitors get the public landing page; signed-in users their dashboard.
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (!user) return <Landing />;
   return (
     <ProtectedRoute requiredRole="MEMBER">
       <DashboardPageContent />
