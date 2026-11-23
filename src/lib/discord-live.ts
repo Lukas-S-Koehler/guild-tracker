@@ -108,11 +108,17 @@ export async function listLiveRows(supabase: SupabaseClient): Promise<LiveRow[]>
   return (data ?? []) as LiveRow[];
 }
 
+/**
+ * Partial update of an existing row, insert otherwise. Not an upsert: Postgres checks NOT NULL on
+ * the proposed insert row before resolving the conflict, so a patch without channel_id
+ * (e.g. clearing message_ids in repost mode) would fail even though the row exists.
+ */
 async function saveRow(supabase: SupabaseClient, key: string, patch: Partial<LiveRow>) {
-  const { error } = await supabase
-    .from(TABLE)
-    .upsert({ key, ...patch, updated_at: new Date().toISOString() }, { onConflict: 'key' });
-  if (error) throw new Error(`Saving live message ${key} failed: ${error.message}`);
+  const values = { ...patch, updated_at: new Date().toISOString() };
+  const { data, error } = await supabase.from(TABLE).update(values).eq('key', key).select('key');
+  if (!error && data?.length) return;
+  const { error: insertError } = error ? { error } : await supabase.from(TABLE).insert({ key, ...values });
+  if (insertError) throw new Error(`Saving live message ${key} failed: ${insertError.message}`);
 }
 
 /** Bind a key to a channel (creates the row). Messages in an old channel are removed on next publish. */
