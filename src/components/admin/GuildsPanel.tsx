@@ -7,10 +7,18 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, UserPlus, Trash2, Shield, Crown, Users, AlertCircle, Check, ChevronDown, ChevronRight, Settings, RefreshCw } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Loader2, UserPlus, Trash2, Shield, Crown, Users, AlertCircle, Check, RefreshCw } from 'lucide-react';
 import { useApiClient } from '@/lib/api-client';
 import { useAuth } from '@/contexts/AuthContext';
 import { RAIDS, guildRaids } from '@/lib/raids';
+
+/**
+ * Admin → Guilds. Pick a guild, then: Settings (requirement & bank, raids & level, buildings,
+ * API key), Site access (website users and their roles), Alts. Discord posts for a guild
+ * (inactivity report, guild hall) live in Admin → Discord → Live messages; Discord ↔ member
+ * links in Admin → Discord → Member mapping.
+ */
 
 interface GuildMember {
   user_id: string;
@@ -41,13 +49,8 @@ interface GuildSettings {
   requirement_period: 'daily' | 'weekly';
   weekly_donation_requirement: number;
   deposits_only: boolean;
-  discord_log_channel_id: string;
-  discord_server_id: string;
-  guild_hall_channel_id: string;
-  energizing_pool_ping_role_id: string;
   overflow_enabled: boolean;
   overflow_limit: number;
-  disable_pings: boolean;
   /** Raid keys from src/lib/raids.ts. Empty = default (raid matching min level). */
   raids: string[];
 }
@@ -57,8 +60,35 @@ interface Building {
   name: string;
 }
 
+function Section({ title, desc, children }: { title: string; desc?: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-3 rounded-lg border p-4 bg-muted/20">
+      <div>
+        <p className="text-sm font-semibold">{title}</p>
+        {desc && <p className="text-xs text-muted-foreground">{desc}</p>}
+      </div>
+      {children}
+    </div>
+  );
+}
 
-function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsActive, currentIsAssault }: { guildId: string; guildName: string; currentMinLevel: number; currentIsActive: boolean; currentIsAssault: boolean }) {
+function Check2({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
+  return (
+    <div>
+      <label className="flex items-center gap-2 cursor-pointer text-sm">
+        <input type="checkbox" className="rounded" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+        {label}
+      </label>
+      {hint && <p className="text-xs text-muted-foreground mt-0.5 ml-6">{hint}</p>}
+    </div>
+  );
+}
+
+const numberInput = (v: string) => (v === '' ? 0 : parseInt(v) || 0);
+
+function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsActive, currentIsAssault, onSaved }: {
+  guildId: string; guildName: string; currentMinLevel: number; currentIsActive: boolean; currentIsAssault: boolean; onSaved: () => void;
+}) {
   const api = useApiClient();
   const { currentGuild, isSuperAdmin } = useAuth();
   const isLeaderOfThisGuild = isSuperAdmin || currentGuild?.guild_id === guildId;
@@ -69,13 +99,8 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
     requirement_period: 'daily',
     weekly_donation_requirement: 35000,
     deposits_only: false,
-    discord_log_channel_id: '',
-    discord_server_id: '',
-    guild_hall_channel_id: '',
-    energizing_pool_ping_role_id: '',
     overflow_enabled: true,
     overflow_limit: 10000,
-    disable_pings: false,
     raids: [],
   });
   const [minLevel, setMinLevel] = useState<number>(currentMinLevel);
@@ -96,7 +121,6 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
           api.get('/api/config', { guildId }),
           api.get('/api/guild-buildings', { guildId }),
         ]);
-
         if (configRes.ok) {
           const data = await configRes.json();
           setSettings({
@@ -106,17 +130,11 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
             requirement_period: data.settings?.requirement_period ?? 'daily',
             weekly_donation_requirement: data.settings?.weekly_donation_requirement ?? 35000,
             deposits_only: data.settings?.deposits_only ?? false,
-            discord_log_channel_id: data.settings?.discord_log_channel_id ?? '',
-            discord_server_id: data.settings?.discord_server_id ?? '',
-            guild_hall_channel_id: data.settings?.guild_hall_channel_id ?? '',
-            energizing_pool_ping_role_id: data.settings?.energizing_pool_ping_role_id ?? '',
             overflow_enabled: data.settings?.overflow_enabled ?? true,
             overflow_limit: data.settings?.overflow_limit ?? 10000,
-            disable_pings: data.settings?.disable_pings ?? false,
             raids: Array.isArray(data.settings?.raids) ? data.settings.raids : [],
           });
         }
-
         if (buildingsRes.ok) {
           const data = await buildingsRes.json();
           setBuildings(Array.isArray(data) ? data : []);
@@ -134,6 +152,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
     setMessage({ type, text });
     setTimeout(() => setMessage(null), 4000);
   };
+  const set = <K extends keyof GuildSettings>(k: K, v: GuildSettings[K]) => setSettings((prev) => ({ ...prev, [k]: v }));
 
   const handleSave = async () => {
     setSaving(true);
@@ -144,34 +163,24 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
           guild_id: guildId,
           api_key: settings.api_key || 'placeholder',
           donation_requirement: settings.donation_requirement,
+          // Merged server-side into the existing settings, so keys not sent here are kept.
           settings: {
             donation_requirement: settings.donation_requirement,
             active_buildings: settings.active_buildings,
             requirement_period: settings.requirement_period,
             weekly_donation_requirement: settings.weekly_donation_requirement,
             deposits_only: settings.deposits_only,
-            discord_log_channel_id: settings.discord_log_channel_id || null,
-            discord_server_id: settings.discord_server_id || null,
-            guild_hall_channel_id: settings.guild_hall_channel_id || null,
-            energizing_pool_ping_role_id: settings.energizing_pool_ping_role_id || null,
             overflow_enabled: settings.overflow_enabled,
             overflow_limit: settings.overflow_limit,
-            disable_pings: settings.disable_pings,
             raids: settings.raids,
           },
         }, { guildId }),
         api.patch('/api/admin/guild-meta', { guild_id: guildId, min_level: minLevel, is_active: isActive, is_assault: isAssault }, { guildId }),
       ]);
-
-      if (!configRes.ok) {
-        const data = await configRes.json();
-        throw new Error(data.error || 'Failed to save config');
-      }
-      if (!metaRes.ok) {
-        const data = await metaRes.json();
-        throw new Error(data.error || 'Failed to save guild meta');
-      }
+      if (!configRes.ok) throw new Error((await configRes.json()).error || 'Failed to save config');
+      if (!metaRes.ok) throw new Error((await metaRes.json()).error || 'Failed to save guild meta');
       showMsg('success', 'Settings saved');
+      onSaved();
     } catch (err) {
       showMsg('error', err instanceof Error ? err.message : 'Failed to save');
     } finally {
@@ -183,11 +192,8 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
     setSyncing(true);
     try {
       const res = await api.post('/api/members/sync', {}, { guildId });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Sync failed');
-      }
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Sync failed');
       showMsg('success', `Synced ${data.synced} members`);
     } catch (err) {
       showMsg('error', err instanceof Error ? err.message : 'Sync failed');
@@ -200,11 +206,8 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
     setBackfillingBank(true);
     try {
       const res = await api.post('/api/admin/backfill-bank', { guild_id: guildId }, { guildId });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Backfill failed');
-      }
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Backfill failed');
       const r = data.results?.[0];
       showMsg('success', `Bank backfilled: ${r?.logsUpdated ?? 0} logs updated across ${r?.members ?? 0} members`);
     } catch (err) {
@@ -214,283 +217,131 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
     }
   };
 
-  const toggleBuilding = (buildingId: string) => {
-    setSettings(prev => ({
-      ...prev,
-      active_buildings: prev.active_buildings.includes(buildingId)
-        ? prev.active_buildings.filter(id => id !== buildingId)
-        : [...prev.active_buildings, buildingId],
-    }));
-  };
+  const toggleBuilding = (id: string) =>
+    set('active_buildings', settings.active_buildings.includes(id) ? settings.active_buildings.filter((b) => b !== id) : [...settings.active_buildings, id]);
 
   if (loading) {
     return <div className="py-4 flex justify-center"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
   }
 
+  const weekly = settings.requirement_period === 'weekly';
+
   return (
-    <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
-      <h3 className="font-semibold flex items-center gap-2 text-sm">
-        <Settings className="h-4 w-4" />
-        Guild Settings
-      </h3>
-
-      {message && (
-        <div className={`flex items-center gap-2 p-2 rounded text-sm ${message.type === 'success' ? 'bg-green-500/10 text-green-600' : 'bg-destructive/10 text-destructive'}`}>
-          {message.type === 'success' ? <Check className="h-3 w-3" /> : <AlertCircle className="h-3 w-3" />}
-          {message.text}
-        </div>
-      )}
-
-      <div className="grid gap-3">
-        {isLeaderOfThisGuild && (
-          <div>
-            <Label className="text-xs text-muted-foreground">IdleMMO API Key (for automated fetching)</Label>
-            <Input
-              type="password"
-              value={settings.api_key}
-              onChange={e => setSettings(prev => ({ ...prev, api_key: e.target.value }))}
-              placeholder="Enter API key..."
-              className="mt-1"
-            />
-          </div>
-        )}
-
-        <div>
-          <Label className="text-xs text-muted-foreground">Donation Requirement (gold)</Label>
-          <Input
-            type="number"
-            value={settings.donation_requirement}
-            onChange={e => setSettings(prev => ({ ...prev, donation_requirement: e.target.value === '' ? 0 : (parseInt(e.target.value) || 0) }))}
-            className="mt-1 w-40"
-          />
-        </div>
-
-        <div>
-          <Label className="text-xs text-muted-foreground">Min Level Required</Label>
-          <Input
-            type="number"
-            value={minLevel}
-            onChange={e => setMinLevel(parseInt(e.target.value) || 0)}
-            className="mt-1 w-40"
-          />
-          <p className="text-xs text-muted-foreground mt-0.5">Combat level (CL), same scale as raid requirements</p>
-        </div>
-
-        {isAssault ? (
-          <p className="text-xs text-muted-foreground">Assault guild: no scheduled raids (members are CL 100+).</p>
-        ) : (
-        <div>
-          <Label className="text-xs text-muted-foreground">Raids this guild runs</Label>
-          <div className="mt-1 grid sm:grid-cols-2 gap-x-4 gap-y-1">
-            {RAIDS.map(r => (
-              <label key={r.key} className="flex items-center gap-2 text-sm cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="rounded"
-                  checked={settings.raids.includes(r.key)}
-                  onChange={e => setSettings(prev => ({
-                    ...prev,
-                    raids: e.target.checked ? [...prev.raids, r.key] : prev.raids.filter(k => k !== r.key),
-                  }))}
-                />
-                <span>{r.name}</span>
-                <span className="text-xs text-muted-foreground">CL {r.min_cl}</span>
-              </label>
-            ))}
-          </div>
-          {settings.raids.length === 0 && (
-            <p className="text-xs text-muted-foreground mt-0.5">
-              None ticked: defaults to {guildRaids(null, minLevel)[0]?.name ?? 'nothing (no raid matches the min level)'}
-            </p>
-          )}
-        </div>
-        )}
-
-        <div>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={isActive}
-              onChange={e => setIsActive(e.target.checked)}
-              className="rounded"
-            />
-            <span className="text-sm">Guild is active</span>
-          </label>
-          <p className="text-xs text-muted-foreground mt-0.5">Inactive guilds are visually marked in the UI</p>
-        </div>
-
-        <div>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={isAssault}
-              onChange={e => setIsAssault(e.target.checked)}
-              className="rounded"
-            />
-            <span className="text-sm">Assault guild</span>
-          </label>
-          <p className="text-xs text-muted-foreground mt-0.5">Only assault guilds appear on the Assault page</p>
-        </div>
-
-        <div>
-          <Label className="text-xs text-muted-foreground">Activity Requirement Period</Label>
-          <div className="flex gap-3 mt-1">
-            {(['daily', 'weekly'] as const).map(p => (
+    <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Section title="Requirement & bank" desc="What members must donate. Checked once a day at 11:48 UTC.">
+          <div className="flex gap-4">
+            {(['daily', 'weekly'] as const).map((p) => (
               <label key={p} className="flex items-center gap-1.5 text-sm cursor-pointer">
-                <input
-                  type="radio"
-                  name={`period-${guildId}`}
-                  value={p}
-                  checked={settings.requirement_period === p}
-                  onChange={() => setSettings(prev => ({ ...prev, requirement_period: p }))}
-                />
-                {p.charAt(0).toUpperCase() + p.slice(1)}
+                <input type="radio" name={`period-${guildId}`} checked={settings.requirement_period === p} onChange={() => set('requirement_period', p)} />
+                {p === 'daily' ? 'Daily' : 'Weekly'}
               </label>
             ))}
           </div>
-        </div>
-
-        {settings.requirement_period === 'weekly' && (
-          <>
+          <div className="flex flex-wrap gap-4">
             <div>
-              <Label className="text-xs text-muted-foreground">Weekly Requirement (gold)</Label>
-              <Input
-                type="number"
-                value={settings.weekly_donation_requirement}
-                onChange={e => setSettings(prev => ({ ...prev, weekly_donation_requirement: parseInt(e.target.value) || 0 }))}
-                className="mt-1 w-40"
-              />
+              <Label className="text-xs text-muted-foreground">Daily requirement (gold)</Label>
+              <Input type="number" value={settings.donation_requirement} onChange={(e) => set('donation_requirement', numberInput(e.target.value))} className="mt-1 w-36" />
             </div>
-            <div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={settings.deposits_only}
-                  onChange={e => setSettings(prev => ({ ...prev, deposits_only: e.target.checked }))}
-                  className="rounded"
-                />
-                <span className="text-sm">Stockpile deposits only (no challenge donations)</span>
-              </label>
-            </div>
-          </>
-        )}
-
-        <div className="border rounded-lg p-3 space-y-3 bg-muted/20">
-          <p className="text-xs font-medium text-foreground">Overflow Bank</p>
-          <div>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.overflow_enabled}
-                onChange={e => setSettings(prev => ({ ...prev, overflow_enabled: e.target.checked }))}
-                className="rounded"
-              />
-              <span className="text-sm">Enable overflow bank</span>
-            </label>
-            <p className="text-xs text-muted-foreground mt-0.5">Gold above daily req is banked and used to cover future shortfalls</p>
+            {weekly && (
+              <div>
+                <Label className="text-xs text-muted-foreground">Weekly requirement (gold)</Label>
+                <Input type="number" value={settings.weekly_donation_requirement} onChange={(e) => set('weekly_donation_requirement', numberInput(e.target.value))} className="mt-1 w-36" />
+              </div>
+            )}
           </div>
+          {weekly && <Check2 checked={settings.deposits_only} onChange={(v) => set('deposits_only', v)} label="Stockpile deposits only (no challenge donations)" />}
+          <Check2
+            checked={settings.overflow_enabled}
+            onChange={(v) => set('overflow_enabled', v)}
+            label="Overflow bank"
+            hint="Gold above the requirement is banked and covers later shortfalls."
+          />
           {settings.overflow_enabled && (
-            <div>
-              <Label className="text-xs text-muted-foreground">Bank limit (gold)</Label>
-              <Input
-                type="number"
-                value={settings.overflow_limit}
-                onChange={e => setSettings(prev => ({ ...prev, overflow_limit: parseInt(e.target.value) || 0 }))}
-                className="mt-1 w-40"
-                min={0}
-              />
+            <div className="flex flex-wrap items-end gap-3 ml-6">
+              <div>
+                <Label className="text-xs text-muted-foreground">Bank limit (gold)</Label>
+                <Input type="number" min={0} value={settings.overflow_limit} onChange={(e) => set('overflow_limit', numberInput(e.target.value))} className="mt-1 w-36" />
+              </div>
+              <Button size="sm" variant="outline" onClick={handleBackfillBank} disabled={backfillingBank}>
+                {backfillingBank && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
+                Backfill bank history
+              </Button>
             </div>
           )}
-        </div>
+        </Section>
 
-        <div>
-          <Label className="text-xs text-muted-foreground">Discord Log Channel ID (for auto-warn summaries)</Label>
-          <Input
-            value={settings.discord_log_channel_id}
-            onChange={e => setSettings(prev => ({ ...prev, discord_log_channel_id: e.target.value }))}
-            placeholder="Channel snowflake ID"
-            className="mt-1"
-          />
-        </div>
-
-        <div>
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <input
-              type="checkbox"
-              checked={settings.disable_pings}
-              onChange={e => setSettings(prev => ({ ...prev, disable_pings: e.target.checked }))}
-              className="rounded"
-            />
-            <span>Disable @mentions for this guild in log channel reports</span>
-          </label>
-        </div>
-
-        <div>
-          <Label className="text-xs text-muted-foreground">Discord Server ID</Label>
-          <Input
-            value={settings.discord_server_id}
-            onChange={e => setSettings(prev => ({ ...prev, discord_server_id: e.target.value }))}
-            placeholder="Server snowflake ID"
-            className="mt-1"
-          />
-        </div>
-
-        <div>
-          <Label className="text-xs text-muted-foreground">Guild Hall Stockpile Channel ID (daily hall message)</Label>
-          <Input
-            value={settings.guild_hall_channel_id}
-            onChange={e => setSettings(prev => ({ ...prev, guild_hall_channel_id: e.target.value }))}
-            placeholder="Channel snowflake ID"
-            className="mt-1"
-          />
-        </div>
-
-        <div>
-          <Label className="text-xs text-muted-foreground">Energizing Pool Ping Role ID (pinged in log channel on activation)</Label>
-          <Input
-            value={settings.energizing_pool_ping_role_id}
-            onChange={e => setSettings(prev => ({ ...prev, energizing_pool_ping_role_id: e.target.value }))}
-            placeholder="Role snowflake ID"
-            className="mt-1"
-          />
-        </div>
-
-
-        {buildings.length > 0 && (
+        <Section title="Raids & level" desc="Shown on the guild directory, guild pages and the raid schedule.">
           <div>
-            <Label className="text-xs text-muted-foreground">Active Buildings (valid deposit items)</Label>
-            <div className="mt-1 grid grid-cols-2 gap-2">
-              {buildings.map(b => (
+            <Label className="text-xs text-muted-foreground">Min combat level (CL)</Label>
+            <Input type="number" value={minLevel} onChange={(e) => setMinLevel(parseInt(e.target.value) || 0)} className="mt-1 w-36" />
+          </div>
+          <Check2 checked={isActive} onChange={setIsActive} label="Guild is active" hint="Inactive guilds are hidden from the directory and get no inactivity warnings or reports." />
+          <Check2 checked={isAssault} onChange={setIsAssault} label="Assault guild" hint="Runs no raids; shows on the Assault pages." />
+          {!isAssault && (
+            <div>
+              <Label className="text-xs text-muted-foreground">Raids this guild runs</Label>
+              <div className="mt-1 grid sm:grid-cols-2 gap-x-4 gap-y-1">
+                {RAIDS.map((r) => (
+                  <label key={r.key} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="rounded"
+                      checked={settings.raids.includes(r.key)}
+                      onChange={(e) => set('raids', e.target.checked ? [...settings.raids, r.key] : settings.raids.filter((k) => k !== r.key))}
+                    />
+                    <span>CL {r.min_cl}</span>
+                    <span className="text-xs text-muted-foreground">{r.name}</span>
+                  </label>
+                ))}
+              </div>
+              {settings.raids.length === 0 && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  None ticked: defaults to {guildRaids(null, minLevel)[0] ? `the CL ${guildRaids(null, minLevel)[0].min_cl} raid` : 'nothing (no raid matches the min CL)'}.
+                </p>
+              )}
+            </div>
+          )}
+        </Section>
+
+        <Section title="Buildings" desc="Active buildings decide which deposits count and feed the guild hall post.">
+          {buildings.length ? (
+            <div className="grid grid-cols-2 gap-2">
+              {buildings.map((b) => (
                 <label key={b.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={settings.active_buildings.includes(b.id)}
-                    onChange={() => toggleBuilding(b.id)}
-                    className="rounded"
-                  />
+                  <input type="checkbox" className="rounded" checked={settings.active_buildings.includes(b.id)} onChange={() => toggleBuilding(b.id)} />
                   {b.name}
                 </label>
               ))}
             </div>
-          </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">No buildings defined.</p>
+          )}
+        </Section>
+
+        {isLeaderOfThisGuild && (
+          <Section title="IdleMMO API key" desc="Used for the daily activity fetch, member sync and the guild hall post. Leader only.">
+            <Input type="password" value={settings.api_key} onChange={(e) => set('api_key', e.target.value)} placeholder="Enter API key..." />
+            <Button size="sm" variant="outline" onClick={handleSyncMembers} disabled={syncing}>
+              {syncing ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+              Sync members now
+            </Button>
+          </Section>
         )}
       </div>
 
-      <div className="flex flex-wrap gap-2 pt-2">
-        <Button size="sm" onClick={handleSave} disabled={saving}>
-          {saving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
-          Save Settings
+      <div className="flex flex-wrap items-center gap-3">
+        <Button onClick={handleSave} disabled={saving}>
+          {saving && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+          Save settings
         </Button>
-        <Button size="sm" variant="outline" onClick={handleSyncMembers} disabled={syncing}>
-          {syncing ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
-          Sync Members
-        </Button>
-        {settings.overflow_enabled && (
-          <Button size="sm" variant="outline" onClick={handleBackfillBank} disabled={backfillingBank}>
-            {backfillingBank ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
-            Backfill Bank History
-          </Button>
+        {message && (
+          <span className={`text-sm flex items-center gap-1.5 ${message.type === 'success' ? 'text-green-500' : 'text-destructive'}`}>
+            {message.type === 'success' ? <Check className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
+            {message.text}
+          </span>
         )}
+        <span className="text-xs text-muted-foreground">Inactivity report and guild hall channels: Admin → Discord → Live messages.</span>
       </div>
     </div>
   );
@@ -503,113 +354,6 @@ interface GuildMemberDiscord {
   discord_username: string | null;
 }
 
-function DiscordMappingSection({ guildId }: { guildId: string }) {
-  const api = useApiClient();
-  const [members, setMembers] = useState<GuildMemberDiscord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState<Record<string, { discord_id: string; discord_username: string }>>({});
-  const [saving, setSaving] = useState<string | null>(null);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      try {
-        const res = await api.get('/api/members/list', { guildId });
-        if (res.ok) {
-          const data = await res.json();
-          setMembers(Array.isArray(data) ? data : []);
-        }
-      } catch { /* ignore */ }
-      finally { setLoading(false); }
-    }
-    load();
-  }, [api, guildId]);
-
-  const handleEdit = (memberId: string, field: 'discord_id' | 'discord_username', value: string) => {
-    setEditing(prev => ({
-      ...prev,
-      [memberId]: {
-        discord_id: prev[memberId]?.discord_id ?? (members.find(m => m.id === memberId)?.discord_id ?? ''),
-        discord_username: prev[memberId]?.discord_username ?? (members.find(m => m.id === memberId)?.discord_username ?? ''),
-        [field]: value,
-      },
-    }));
-  };
-
-  const handleSave = async (memberId: string) => {
-    const vals = editing[memberId];
-    if (!vals) return;
-    setSaving(memberId);
-    try {
-      const res = await api.patch(`/api/members/list?member_id=${memberId}`, {
-        discord_id: vals.discord_id || null,
-        discord_username: vals.discord_username || null,
-      }, { guildId });
-      if (res.ok) {
-        setMembers(prev => prev.map(m => m.id === memberId ? { ...m, ...vals } : m));
-        setEditing(prev => { const n = { ...prev }; delete n[memberId]; return n; });
-        setMessage({ type: 'success', text: 'Discord mapping saved' });
-        setTimeout(() => setMessage(null), 3000);
-      } else {
-        const d = await res.json();
-        setMessage({ type: 'error', text: d.error || 'Save failed' });
-      }
-    } catch { setMessage({ type: 'error', text: 'Network error' }); }
-    finally { setSaving(null); }
-  };
-
-  if (loading) return <div className="py-2 flex justify-center"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
-
-  const mapped = members.filter(m => m.discord_id).length;
-
-  return (
-    <div className="space-y-3 p-4 border rounded-lg bg-muted/30">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <h3 className="font-semibold text-sm">Discord Member Mapping</h3>
-        <span className="text-xs text-muted-foreground">{mapped}/{members.length} mapped</span>
-      </div>
-      {message && (
-        <div className={`text-xs p-2 rounded ${message.type === 'success' ? 'bg-green-500/10 text-green-600' : 'bg-destructive/10 text-destructive'}`}>
-          {message.text}
-        </div>
-      )}
-      <div className="space-y-2 max-h-64 overflow-y-auto">
-        {members.map(m => {
-          const ed = editing[m.id];
-          const discordId = ed?.discord_id ?? m.discord_id ?? '';
-          const discordUser = ed?.discord_username ?? m.discord_username ?? '';
-          const hasEdit = !!ed;
-          return (
-            <div key={m.id} className="flex items-center gap-2 text-sm">
-              <span className="w-28 shrink-0 font-medium truncate">{m.ign}</span>
-              <input
-                className="flex-1 px-2 py-1 rounded border bg-background text-xs"
-                placeholder="Discord ID (snowflake)"
-                value={discordId}
-                onChange={e => handleEdit(m.id, 'discord_id', e.target.value)}
-              />
-              <input
-                className="flex-1 px-2 py-1 rounded border bg-background text-xs"
-                placeholder="Username"
-                value={discordUser}
-                onChange={e => handleEdit(m.id, 'discord_username', e.target.value)}
-              />
-              {hasEdit && (
-                <Button size="sm" className="h-6 text-xs px-2" onClick={() => handleSave(m.id)} disabled={saving === m.id}>
-                  {saving === m.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-                </Button>
-              )}
-              {!hasEdit && m.discord_id && (
-                <Check className="h-3 w-3 text-green-500 shrink-0" />
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 interface AltInfo {
   id: string;
@@ -800,8 +544,7 @@ export default function AdminPageContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [expandedGuild, setExpandedGuild] = useState<string | null>(null);
-  const [showSettings, setShowSettings] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // Add user form state
   const [addingToGuild, setAddingToGuild] = useState<string | null>(null);
@@ -846,7 +589,9 @@ export default function AdminPageContent() {
         throw new Error(data.error || 'Failed to fetch guilds');
       }
       const data = await res.json();
-      setGuilds(Array.isArray(data) ? data : []);
+      const list: Guild[] = Array.isArray(data) ? data : [];
+      setGuilds(list);
+      setSelectedId((cur) => cur ?? (list.find((g) => g.is_active ?? true) ?? list[0])?.id ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load guilds');
     } finally {
@@ -943,272 +688,184 @@ export default function AdminPageContent() {
     );
   }
 
+  const guild = guilds.find((g) => g.id === selectedId) ?? null;
+  const active = guilds.filter((g) => g.is_active ?? true);
+  const inactive = guilds.filter((g) => !(g.is_active ?? true));
+
+  const chip = (g: Guild) => (
+    <Button
+      key={g.id}
+      size="sm"
+      variant={g.id === selectedId ? 'default' : 'outline'}
+      className={!(g.is_active ?? true) && g.id !== selectedId ? 'opacity-60' : ''}
+      onClick={() => { setSelectedId(g.id); setAddingToGuild(null); }}
+      title={g.name}
+    >
+      <span className="font-mono">{g.nickname}</span>
+    </Button>
+  );
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold">Leadership Management</h2>
-        <p className="text-muted-foreground">Manage leadership and settings across all Dream guilds</p>
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {active.map(chip)}
+          {inactive.length > 0 && <span className="text-xs text-muted-foreground ml-2">Inactive:</span>}
+          {inactive.map(chip)}
+        </div>
       </div>
 
-
       {error && (
-        <div className="flex items-center gap-2 p-4 bg-destructive/10 text-destructive rounded-lg">
+        <div className="flex items-center gap-2 p-3 bg-destructive/10 text-destructive rounded-lg text-sm">
           <AlertCircle className="h-4 w-4" />
           {error}
         </div>
       )}
-
       {success && (
-        <div className="flex items-center gap-2 p-4 bg-green-500/10 text-green-500 rounded-lg">
+        <div className="flex items-center gap-2 p-3 bg-green-500/10 text-green-500 rounded-lg text-sm">
           <Check className="h-4 w-4" />
           {success}
         </div>
       )}
 
-      <div className="grid gap-4">
-        {guilds.map((guild) => (
-          <Card key={guild.id}>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setExpandedGuild(expandedGuild === guild.id ? null : guild.id)}
-                  >
-                    {expandedGuild === guild.id ? (
-                      <ChevronDown className="h-4 w-4" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4" />
-                    )}
+      {guild && (
+        <Card key={guild.id}>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex flex-wrap items-center gap-2">
+              {guild.name}
+              <span className="font-mono text-crystal">{guild.nickname}</span>
+              <span className="text-xs text-muted-foreground font-normal">ID {guild.id}</span>
+              {!(guild.is_active ?? true) && <Badge variant="outline" className="text-orange-500 border-orange-500/50">Inactive</Badge>}
+              {guild.is_assault && <Badge variant="outline">Assault</Badge>}
+            </CardTitle>
+            <CardDescription className="flex flex-wrap gap-x-4 gap-y-1">
+              <span>CL {guild.min_level}+</span>
+              <span className="inline-flex items-center gap-1"><Crown className="h-3 w-3 text-yellow-500" />{guild.leader?.display_name ?? 'no leader'}</span>
+              {guild.deputy && <span className="inline-flex items-center gap-1"><Shield className="h-3 w-3 text-purple-500" />{guild.deputy.display_name}</span>}
+              <span>{guild.member_count} site user{guild.member_count !== 1 ? 's' : ''}</span>
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Tabs defaultValue="settings">
+              <TabsList>
+                <TabsTrigger value="settings">Settings</TabsTrigger>
+                <TabsTrigger value="access">Site access ({guild.members.length})</TabsTrigger>
+                <TabsTrigger value="alts">Alts</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="settings" className="pt-3">
+                <GuildSettingsSection
+                  guildId={guild.id}
+                  guildName={guild.name}
+                  currentMinLevel={guild.min_level}
+                  currentIsActive={guild.is_active ?? true}
+                  currentIsAssault={guild.is_assault ?? false}
+                  onSaved={fetchGuilds}
+                />
+              </TabsContent>
+
+              <TabsContent value="access" className="pt-3 space-y-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <p className="text-xs text-muted-foreground max-w-xl">
+                    Who can use this guild&apos;s staff tools on the website. <b>Leader</b>: everything incl. settings and API key ·
+                    {' '}<b>Deputy</b>: settings, activity fetches, challenges, reports · <b>Officer</b>: activity fetches, challenges, reports ·
+                    {' '}<b>Member</b>: member pages. Roles from claimed characters are added automatically.
+                  </p>
+                  <Button size="sm" variant="outline" onClick={() => setAddingToGuild(addingToGuild === guild.id ? null : guild.id)}>
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    Add user
                   </Button>
-                  <div>
-                    <CardTitle className="flex items-center gap-2">
-                      <span className="font-mono font-bold text-primary">{guild.nickname}</span>
-                      <span>-</span>
-                      <span>{guild.name}</span>
-                      <span className="text-sm text-muted-foreground font-normal">(ID: {guild.id})</span>
-                      {!(guild.is_active ?? true) && (
-                        <Badge variant="outline" className="text-xs bg-orange-500/10 text-orange-500 border-orange-500/50">Inactive</Badge>
-                      )}
-                    </CardTitle>
-                    <CardDescription>
-                      {guild.member_count} member{guild.member_count !== 1 ? 's' : ''}
-                    </CardDescription>
-                  </div>
                 </div>
 
-                <div className="flex items-center gap-4">
-                  <div className="text-right">
-                    <p className="text-xs text-muted-foreground">Leader</p>
-                    {guild.leader ? (
-                      <p className="text-sm font-medium flex items-center gap-1 justify-end">
-                        <Crown className="h-3 w-3 text-yellow-500" />
-                        {guild.leader.display_name}
-                      </p>
-                    ) : (
-                      <p className="text-sm text-muted-foreground italic">None</p>
-                    )}
-                  </div>
-
-                  <div className="text-right">
-                    <p className="text-xs text-muted-foreground">Deputy</p>
-                    {guild.deputy ? (
-                      <p className="text-sm font-medium flex items-center gap-1 justify-end">
-                        <Shield className="h-3 w-3 text-purple-500" />
-                        {guild.deputy.display_name}
-                      </p>
-                    ) : (
-                      <p className="text-sm text-muted-foreground italic">None</p>
-                    )}
-                  </div>
-
-                  <div className="text-right">
-                    <p className="text-xs text-muted-foreground">Officers</p>
-                    <p className="text-sm font-medium">{guild.officers.length}</p>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setShowSettings(showSettings === guild.id ? null : guild.id)}
-                    >
-                      <Settings className="h-4 w-4 mr-2" />
-                      Settings
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setAddingToGuild(addingToGuild === guild.id ? null : guild.id)}
-                    >
-                      <UserPlus className="h-4 w-4 mr-2" />
-                      Add User
-                    </Button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Add User Form */}
-              {addingToGuild === guild.id && (
-                <div className="mt-4 p-4 border rounded-lg bg-muted/50">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <div className="md:col-span-2">
-                      <Label htmlFor={`email-${guild.id}`}>Email or Username</Label>
-                      <Input
-                        id={`email-${guild.id}`}
-                        type="text"
-                        placeholder="user@example.com or username"
-                        value={newUserEmail}
-                        onChange={(e) => setNewUserEmail(e.target.value)}
-                        disabled={submitting}
-                        list={`user-suggestions-${guild.id}`}
-                        autoComplete="off"
-                      />
-                      <datalist id={`user-suggestions-${guild.id}`}>
-                        {userSuggestions.map((name) => (
-                          <option key={name} value={name} />
-                        ))}
-                      </datalist>
+                {addingToGuild === guild.id && (
+                  <div className="p-4 border rounded-lg bg-muted/40">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="md:col-span-2">
+                        <Label htmlFor={`email-${guild.id}`}>Email or username</Label>
+                        <Input
+                          id={`email-${guild.id}`}
+                          type="text"
+                          placeholder="user@example.com or username"
+                          value={newUserEmail}
+                          onChange={(e) => setNewUserEmail(e.target.value)}
+                          disabled={submitting}
+                          list={`user-suggestions-${guild.id}`}
+                          autoComplete="off"
+                        />
+                        <datalist id={`user-suggestions-${guild.id}`}>
+                          {userSuggestions.map((name) => <option key={name} value={name} />)}
+                        </datalist>
+                      </div>
+                      <div>
+                        <Label htmlFor={`role-${guild.id}`}>Role</Label>
+                        <Select value={newUserRole} onValueChange={(value) => setNewUserRole(value as typeof newUserRole)} disabled={submitting}>
+                          <SelectTrigger id={`role-${guild.id}`}><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="MEMBER">Member</SelectItem>
+                            <SelectItem value="OFFICER">Officer</SelectItem>
+                            <SelectItem value="DEPUTY">Deputy</SelectItem>
+                            {isSuperAdmin && <SelectItem value="LEADER">Leader</SelectItem>}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
-                    <div>
-                      <Label htmlFor={`role-${guild.id}`}>Role</Label>
-                      <Select
-                        value={newUserRole}
-                        onValueChange={(value) => setNewUserRole(value as any)}
-                        disabled={submitting}
-                      >
-                        <SelectTrigger id={`role-${guild.id}`}>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="MEMBER">Member</SelectItem>
-                          <SelectItem value="OFFICER">Officer</SelectItem>
-                          <SelectItem value="DEPUTY">Deputy</SelectItem>
-                          {isSuperAdmin && <SelectItem value="LEADER">Leader</SelectItem>}
-                        </SelectContent>
-                      </Select>
+                    <div className="flex gap-2 mt-3">
+                      <Button size="sm" onClick={() => handleAddUser(guild.id)} disabled={submitting}>
+                        {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add'}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => { setAddingToGuild(null); setNewUserEmail(''); }}>Cancel</Button>
                     </div>
                   </div>
-                  <div className="flex gap-2 mt-3">
-                    <Button size="sm" onClick={() => handleAddUser(guild.id)} disabled={submitting}>
-                      {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add'}
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => { setAddingToGuild(null); setNewUserEmail(''); }}>
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              )}
+                )}
 
-              {/* Guild Settings */}
-              {showSettings === guild.id && (
-                <div className="mt-4 space-y-4">
-                  <GuildSettingsSection guildId={guild.id} guildName={guild.name} currentMinLevel={guild.min_level} currentIsActive={guild.is_active ?? true} currentIsAssault={guild.is_assault ?? false} />
-                  <DiscordMappingSection guildId={guild.id} />
-                  <AltCharactersSection guildId={guild.id} />
-                </div>
-              )}
-            </CardHeader>
-
-            {/* Expanded Member List */}
-            {expandedGuild === guild.id && (
-              <CardContent>
                 {guild.members.length === 0 ? (
-                  <p className="text-muted-foreground text-sm">No members in this guild.</p>
+                  <p className="text-muted-foreground text-sm">No website users in this guild.</p>
                 ) : (
-                  <div className="space-y-2">
-                    {guild.members.map((member) => (
-                      <div
-                        key={member.user_id}
-                        className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50"
-                      >
-                        <div className="flex-1">
-                          <p className="font-medium">{member.display_name}</p>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          <Select
-                            value={member.role}
-                            onValueChange={(value) => handleUpdateRole(guild.id, member.user_id, value as any)}
-                          >
-                            <SelectTrigger className="w-[140px]">
+                  <div className="divide-y rounded-lg border">
+                    {guild.members.map((member) => {
+                      // Hierarchy: leaders manage deputies and below; leaders and the super admin only by the super admin.
+                      // The API enforces it too (it also knows who the super admin is).
+                      const locked = !isSuperAdmin && member.role === 'LEADER';
+                      return (
+                      <div key={member.user_id} className="flex items-center justify-between gap-3 px-3 py-2">
+                        <p className="font-medium text-sm truncate">{member.display_name}</p>
+                        {locked ? (
+                          <span className="flex items-center gap-2 text-sm text-muted-foreground">{getRoleIcon(member.role)} Leader</span>
+                        ) : (
+                        <div className="flex items-center gap-2">
+                          <Select value={member.role} onValueChange={(value) => handleUpdateRole(guild.id, member.user_id, value as GuildMember['role'])}>
+                            <SelectTrigger className="w-[140px] h-8">
                               <div className="flex items-center gap-2">
                                 {getRoleIcon(member.role)}
                                 <SelectValue />
                               </div>
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="MEMBER">
-                                <div className="flex items-center gap-2"><Users className="h-4 w-4" />Member</div>
-                              </SelectItem>
-                              <SelectItem value="OFFICER">
-                                <div className="flex items-center gap-2"><Shield className="h-4 w-4 text-blue-500" />Officer</div>
-                              </SelectItem>
-                              <SelectItem value="DEPUTY">
-                                <div className="flex items-center gap-2"><Shield className="h-4 w-4 text-purple-500" />Deputy</div>
-                              </SelectItem>
-                              {isSuperAdmin && (
-                                <SelectItem value="LEADER">
-                                  <div className="flex items-center gap-2"><Crown className="h-4 w-4 text-yellow-500" />Leader</div>
-                                </SelectItem>
-                              )}
+                              <SelectItem value="MEMBER">Member</SelectItem>
+                              <SelectItem value="OFFICER">Officer</SelectItem>
+                              <SelectItem value="DEPUTY">Deputy</SelectItem>
+                              {isSuperAdmin && <SelectItem value="LEADER">Leader</SelectItem>}
                             </SelectContent>
                           </Select>
-
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleRemoveUser(guild.id, member.user_id, member.display_name)}
-                          >
+                          <Button variant="ghost" size="sm" onClick={() => handleRemoveUser(guild.id, member.user_id, member.display_name)}>
                             <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
                         </div>
+                        )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
-              </CardContent>
-            )}
-          </Card>
-        ))}
-      </div>
+              </TabsContent>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Role Permissions</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex items-start gap-2">
-            <Crown className="h-5 w-5 text-yellow-500 mt-0.5" />
-            <div>
-              <p className="font-medium">Leader</p>
-              <p className="text-sm text-muted-foreground">Full access — manage settings, members, leadership, and all guild features</p>
-            </div>
-          </div>
-          <div className="flex items-start gap-2">
-            <Shield className="h-5 w-5 text-purple-500 mt-0.5" />
-            <div>
-              <p className="font-medium">Deputy</p>
-              <p className="text-sm text-muted-foreground">Can trigger activity fetches, manage challenges, configure settings, and view reports</p>
-            </div>
-          </div>
-          <div className="flex items-start gap-2">
-            <Shield className="h-5 w-5 text-blue-500 mt-0.5" />
-            <div>
-              <p className="font-medium">Officer</p>
-              <p className="text-sm text-muted-foreground">Can trigger activity fetches, manage challenges, and view reports</p>
-            </div>
-          </div>
-          <div className="flex items-start gap-2">
-            <Users className="h-5 w-5 text-gray-500 mt-0.5" />
-            <div>
-              <p className="font-medium">Member</p>
-              <p className="text-sm text-muted-foreground">Can view leaderboard, members, and reports</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+              <TabsContent value="alts" className="pt-3">
+                <AltCharactersSection guildId={guild.id} />
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

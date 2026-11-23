@@ -19,6 +19,7 @@ import DiscordMappingPanel from '@/components/admin/DiscordMappingPanel';
 import RaidRemindersPanel from '@/components/admin/RaidRemindersPanel';
 import BumpsPanel from '@/components/admin/BumpsPanel';
 import AdvertisingPanel from '@/components/admin/AdvertisingPanel';
+import LiveMessagesPanel from '@/components/admin/LiveMessagesPanel';
 import DataManagementPanel from '@/components/admin/DataManagementPanel';
 import PriceCachePanel from '@/components/admin/PriceCachePanel';
 import { AltSyncTools, DiscordSwitches } from '@/components/admin/SuperAdminTools';
@@ -96,7 +97,7 @@ const TABS: HubTab[] = [
   },
   {
     id: 'guilds', label: 'Guilds', icon: Castle, access: 'LEADER',
-    subs: [{ id: 'leadership', label: 'Leadership & settings', access: 'LEADER', render: () => <GuildsPanel /> }],
+    subs: [{ id: 'leadership', label: 'Guild settings', access: 'LEADER', render: () => <GuildsPanel /> }],
   },
   {
     id: 'members', label: 'Members & Alts', icon: Users, access: 'SUPER',
@@ -121,6 +122,7 @@ const TABS: HubTab[] = [
     subs: [
       // Promotion first: copyable ads (live data) next to the bump tracker.
       { id: 'ads', label: 'Advertising', access: 'OFFICER', render: () => <AdvertisingPanel /> },
+      { id: 'live', label: 'Live messages', access: 'SUPER', render: () => <LiveMessagesPanel /> },
       { id: 'bumps', label: 'Bump tracker', access: 'SUPER', render: () => <BumpsPanel /> },
       { id: 'mapping', label: 'Member mapping', access: 'OFFICER', render: () => <DiscordMappingPanel /> },
       { id: 'raids', label: 'Raid reminders', access: 'SUPER', render: () => <RaidRemindersPanel /> },

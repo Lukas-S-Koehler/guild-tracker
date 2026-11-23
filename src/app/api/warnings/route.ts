@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { verifyAuth, verifyAuthOrPublic, isErrorResponse } from '@/lib/auth-helpers';
+import { RANK, outranks, outrankError, rankOfRole } from '@/lib/role-hierarchy';
 import { sendDirectMessage } from '@/lib/discord-api';
 
 export const dynamic = 'force-dynamic';
@@ -58,11 +59,18 @@ export async function POST(req: NextRequest) {
 
   const { data: member } = await supabase
     .from('members')
-    .select('id, ign, discord_id')
+    .select('id, ign, discord_id, position')
     .eq('id', member_id)
     .single();
 
   if (!member) return NextResponse.json({ error: 'Member not found' }, { status: 404 });
+
+  // Hierarchy: only warn characters whose in-game position ranks below your site role.
+  const actorRank = (auth as { isSuperAdmin?: boolean }).isSuperAdmin ? RANK.SUPER : rankOfRole(auth.role);
+  const targetRank = rankOfRole(member.position);
+  if (!outranks(actorRank, targetRank)) {
+    return NextResponse.json({ error: outrankError(actorRank, targetRank, 'warn') }, { status: 403 });
+  }
 
   let dmSent = false;
   let dmError: string | null = null;

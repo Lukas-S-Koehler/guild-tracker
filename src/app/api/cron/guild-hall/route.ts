@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
-import { postToChannelReturnId, editChannelMessage } from '@/lib/discord-api';
+import { getLiveRow, publishLive } from '@/lib/discord-live';
+import { adoptLegacyGuildHalls, guildHallKey } from '@/lib/live-messages';
 import { formatGold } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
@@ -58,6 +59,8 @@ export async function POST(req: NextRequest) {
     (allPrices ?? []).map((p: { item_name: string; price: number }) => [p.item_name.toLowerCase(), p.price])
   );
 
+  await adoptLegacyGuildHalls(supabase);
+
   const results: { guild: string; status: string }[] = [];
   const now = new Date();
   const dateLabel = `<t:${Math.floor(now.getTime() / 1000)}:f>`;
@@ -65,11 +68,13 @@ export async function POST(req: NextRequest) {
   for (const config of configs ?? []) {
     const guildName: string = config.guild_name ?? config.guild_id;
     const settings = config.settings ?? {};
-    const hallChannelId: string | undefined = settings.guild_hall_channel_id;
     const activeBuildings: string[] = settings.active_buildings ?? [];
+    const key = guildHallKey(config.guild_id);
 
-    if (!hallChannelId || activeBuildings.length === 0 || !config.api_key) {
-      results.push({ guild: guildName, status: 'skipped' });
+    const row = await getLiveRow(supabase, key);
+
+    if (!row?.enabled || activeBuildings.length === 0 || !config.api_key) {
+      results.push({ guild: guildName, status: row ? (row.enabled ? 'skipped' : 'paused') : 'unbound' });
       continue;
     }
 
@@ -183,33 +188,11 @@ export async function POST(req: NextRequest) {
 
       const content = parts.join('\n');
 
-      // Post or edit existing message
-      let storedMessageId: string | undefined = settings.guild_hall_message_id;
-      let posted = false;
-
-      if (storedMessageId) {
-        const editResult = await editChannelMessage(hallChannelId, storedMessageId, content);
-        if (editResult.ok) {
-          posted = true;
-        } else {
-          // Message deleted — fall through to re-post
-          storedMessageId = undefined;
-        }
-      }
-
-      if (!posted) {
-        const postResult = await postToChannelReturnId(hallChannelId, content);
-        if (postResult.ok && postResult.messageId) {
-          storedMessageId = postResult.messageId;
-          await supabase
-            .from('guild_config')
-            .update({ settings: { ...settings, guild_hall_message_id: storedMessageId } })
-            .eq('guild_id', config.guild_id);
-          posted = true;
-        } else {
-          results.push({ guild: guildName, status: `post_failed: ${postResult.error}` });
-          continue;
-        }
+      // Live message (Admin → Discord → Live messages), edited in place.
+      const live = await publishLive(supabase, key, [{ content, allowed_mentions: { parse: [] } }], { mode: 'edit' });
+      if (!live.ok) {
+        results.push({ guild: guildName, status: `post_failed: ${live.error ?? live.status}` });
+        continue;
       }
 
       results.push({ guild: guildName, status: 'ok' });

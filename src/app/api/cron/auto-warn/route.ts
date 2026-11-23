@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
-import { sendDirectMessage, postToChannel } from '@/lib/discord-api';
+import { sendDirectMessage } from '@/lib/discord-api';
+import { messageLink, publishLive, textPayloads } from '@/lib/discord-live';
+import { buildDailyBoard, DAILY_BOARD_KEY, inactivityKey, type BoardGuild, type DmStatus } from '@/lib/live-messages';
 import { getWarningInfo, getEffectiveDaysInactive, findLastMetWeek, getISOWeekKey, getWeekSunday, getWeekKeyRange, RequirementPeriod } from '@/lib/warning-calculator';
 
 export const dynamic = 'force-dynamic';
@@ -50,9 +52,15 @@ export async function POST(req: NextRequest) {
   // Fetch active status for all guilds in scope
   const configGuildIds = (configs ?? []).map((c) => c.guild_id);
   const { data: guildRows } = configGuildIds.length
-    ? await supabase.from('guilds').select('id, is_active').in('id', configGuildIds)
+    ? await supabase.from('guilds').select('id, is_active, nickname, display_order').in('id', configGuildIds)
     : { data: [] };
   const guildActiveMap = new Map((guildRows ?? []).map((g) => [g.id, g.is_active]));
+  const guildTagMap = new Map<string, string | null>((guildRows ?? []).map((g) => [g.id, g.nickname ?? null]));
+  const guildOrderMap = new Map<string, number>((guildRows ?? []).map((g) => [g.id, g.display_order ?? 0]));
+
+  // Live daily kick board (#daily-check): one board for all guilds, with DM status per member.
+  // Only the full cron run updates it; a single-guild officer run would overwrite it with partial data.
+  const board: BoardGuild[] = [];
 
   if (!configs || configs.length === 0) {
     return NextResponse.json({ message: 'No guilds with Discord log channel configured', summary });
@@ -81,7 +89,6 @@ export async function POST(req: NextRequest) {
     const { guild_id: guildId, guild_name: guildName, settings, donation_requirement } = config;
     if (guildActiveMap.get(guildId) === false) continue;
 
-    const logChannelId: string | null = settings?.discord_log_channel_id ?? null;
     const period: RequirementPeriod = settings?.requirement_period ?? 'daily';
     const weeklyReq: number = settings?.weekly_donation_requirement ?? 35000;
     const depositsOnly: boolean = settings?.deposits_only ?? false;
@@ -469,6 +476,7 @@ export async function POST(req: NextRequest) {
       // Collect all inactive members for the full inactivity report
       const inactiveReport: Array<{ ign: string; daysInactive: number; warning_level: string; discord_id: string | null }> = [];
       const sharedBankCovered: Array<{ ign: string }> = [];
+      const boardMembers: BoardGuild['members'] = [];
 
       for (const member of members) {
         if (exemptIds.has(member.id)) { skipped++; continue; }
@@ -527,6 +535,7 @@ export async function POST(req: NextRequest) {
 
         // Skip only if warned at this exact level in last 24h (prevent duplicates, allow escalation)
         if (recentlyWarnedSet.has(`${member.id}:${warning_level}`)) {
+          boardMembers.push({ ign: member.ign, days: effectiveDays, level: warning_level as 'warn1' | 'warn2' | 'kick', dm: 'earlier' });
           skipped++;
           continue;
         }
@@ -570,25 +579,14 @@ export async function POST(req: NextRequest) {
           discord_dm_error: dmError,
         });
 
-        // Post per-member DM confirmation to warn log channel
-        const warnLogChannelId = process.env.DISCORD_WARN_LOG_CHANNEL_ID;
-        if (warnLogChannelId && botToken) {
-          const dmStatus = dmsPaused
-            ? '⏸️ DM paused'
-            : member.discord_id
-              ? (dmSent ? '✅ DM sent' : `❌ DM failed: ${dmError ?? 'unknown'}`)
-              : '❌ No Discord ID';
-          const logLine = `${levelLabel} **${member.ign}** · Guild: **${guildName}** · ${daysInactive} days inactive · ${dmStatus}`;
-          const channelResult = await postToChannel(warnLogChannelId, logLine);
-          if (!channelResult.ok) {
-            console.error(`[auto-warn] Warn log post failed for ${member.ign}:`, channelResult.error);
-          }
-          await new Promise(r => setTimeout(r, 500));
-        }
+        const dmState: DmStatus = dmsPaused ? 'paused' : !member.discord_id ? 'no-discord' : dmSent ? 'sent' : 'failed';
+        boardMembers.push({ ign: member.ign, days: effectiveDays, level: warning_level as 'warn1' | 'warn2' | 'kick', dm: dmState });
+
       }
 
-      // Post full inactivity report to guild log channel
-      if (logChannelId && botToken) {
+      // Full inactivity report for the guild's chat
+      let reportUrl: string | null = null;
+      if (botToken) {
         const kickList = inactiveReport.filter((m) => m.warning_level === 'kick').sort((a, b) => b.daysInactive - a.daysInactive);
         const warn2List = inactiveReport.filter((m) => m.warning_level === 'warn2').sort((a, b) => b.daysInactive - a.daysInactive);
         const warn1List = inactiveReport.filter((m) => m.warning_level === 'warn1').sort((a, b) => b.daysInactive - a.daysInactive);
@@ -654,19 +652,21 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // Chunk into messages under 2000 chars, with delay between posts to avoid rate limiting
-        let chunk = '';
-        for (const line of lines) {
-          if ((chunk + '\n' + line).length > 1900) {
-            await postToChannel(logChannelId, chunk.trim());
-            await new Promise(r => setTimeout(r, 500));
-            chunk = line;
-          } else {
-            chunk = chunk ? chunk + '\n' + line : line;
-          }
-        }
-        if (chunk) await postToChannel(logChannelId, chunk.trim());
+        // Live report (Admin → Discord → Live messages): delete yesterday's, post today's so mentions still notify.
+        // Unbound or paused = no report.
+        const live = await publishLive(supabase, inactivityKey(guildId), textPayloads(lines, { pingUsers: !pingsDisabledForGuild }), { mode: 'repost', force: true });
+        if (live.error) console.error(`[auto-warn] Live inactivity report failed for ${guildName}:`, live.error);
+        if (live.ok && live.message_ids[0] && live.channel_id) reportUrl = messageLink(live.channel_id, live.message_ids[0]);
       }
+
+      board.push({
+        name: guildName,
+        tag: guildTagMap.get(guildId) ?? null,
+        members: boardMembers,
+        bankCovered: sharedBankCovered.length,
+        reportUrl,
+        order: guildOrderMap.get(guildId) ?? 0,
+      });
 
       summary.push({ guild: guildName, warned, skipped, no_discord: noDiscord });
     } catch (err) {
@@ -675,5 +675,12 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ok: true, summary });
+  let boardResult: string | undefined;
+  if (isCron) {
+    board.sort((a, b) => a.order - b.order);
+    const r = await publishLive(supabase, DAILY_BOARD_KEY, buildDailyBoard(board, checkedDayBoundaryTs), { mode: 'repost', force: true });
+    boardResult = r.error ? `error: ${r.error}` : r.status; // 'unbound' / 'disabled' = not posted
+  }
+
+  return NextResponse.json({ ok: true, summary, board: boardResult });
 }

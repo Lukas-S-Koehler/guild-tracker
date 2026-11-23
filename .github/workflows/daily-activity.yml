@@ -70,6 +70,19 @@ jobs:
           echo "HTTP status: $http_code"
 
 
+      - name: Refresh live Discord messages
+        if: ${{ github.event.inputs.run_backfill != 'true' }}
+        run: |
+          echo "Refreshing live Discord messages (directory, raid schedule, links)..."
+          response=$(curl -s -L -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/discord-live" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | head -n -1)
+          echo "Response: $body"
+          echo "HTTP status: $http_code"
+
+
       - name: Run backfill
         if: ${{ github.event.inputs.run_backfill == 'true' }}
         run: |

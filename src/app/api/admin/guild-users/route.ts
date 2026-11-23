@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, createAdminClient } from '@/lib/supabase-server';
 import { verifyAdminOrLeader, isErrorResponse } from '@/lib/auth-helpers';
+import { RANK, grantError, outranks, outrankError, rankOfRole, rankOfUser } from '@/lib/role-hierarchy';
+
+/** Hierarchy check (src/lib/role-hierarchy.ts): target must rank below the caller in this guild. */
+async function checkTarget(isSuperAdmin: boolean, targetUserId: string, guildId: string, verb: string): Promise<NextResponse | null> {
+  const actor = isSuperAdmin ? RANK.SUPER : RANK.LEADER; // verifyAdminOrLeader: super admin or this guild's leader
+  const target = await rankOfUser(createAdminClient(), targetUserId, guildId);
+  if (!outranks(actor, target)) return NextResponse.json({ error: outrankError(actor, target, verb) }, { status: 403 });
+  return null;
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -38,8 +47,8 @@ export async function POST(req: NextRequest) {
       if (target_guild_id !== auth.guildId) {
         return NextResponse.json({ error: 'Forbidden - You can only manage your own guild' }, { status: 403 });
       }
-      if (role === 'LEADER') {
-        return NextResponse.json({ error: 'Forbidden - Only super admin can assign LEADER role' }, { status: 403 });
+      if (!outranks(RANK.LEADER, rankOfRole(role))) {
+        return NextResponse.json({ error: grantError(RANK.LEADER, rankOfRole(role)) }, { status: 403 });
       }
     }
 
@@ -132,10 +141,12 @@ export async function PATCH(req: NextRequest) {
       if (target_guild_id !== auth.guildId) {
         return NextResponse.json({ error: 'Forbidden - You can only manage your own guild' }, { status: 403 });
       }
-      if (role === 'LEADER') {
-        return NextResponse.json({ error: 'Forbidden - Only super admin can assign LEADER role' }, { status: 403 });
+      if (!outranks(RANK.LEADER, rankOfRole(role))) {
+        return NextResponse.json({ error: grantError(RANK.LEADER, rankOfRole(role)) }, { status: 403 });
       }
     }
+    const denied = await checkTarget(auth.isSuperAdmin, user_id, target_guild_id, 'change the role of');
+    if (denied) return denied;
 
     const { error: updateError } = await db
       .from('guild_leaders')
@@ -183,6 +194,8 @@ export async function DELETE(req: NextRequest) {
     if (userIdToRemove === auth.user.id && !auth.isSuperAdmin) {
       return NextResponse.json({ error: 'Cannot remove yourself from the guild' }, { status: 400 });
     }
+    const denied = await checkTarget(auth.isSuperAdmin, userIdToRemove, targetGuildId, 'remove');
+    if (denied) return denied;
 
     const { error: deleteError } = await db
       .from('guild_leaders')

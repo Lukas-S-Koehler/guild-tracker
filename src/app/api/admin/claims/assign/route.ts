@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { findBundleLocks, getActiveClaim, recomputeUserGuildAccess, reviewableGuildIds } from '@/lib/account-service';
 import { requireUser, isResponse } from '@/lib/user-auth';
+import { grantError, outranks, outrankError, rankInGuild, rankOfRole, rankOfUser } from '@/lib/role-hierarchy';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +20,7 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = createAdminClient();
-  const { data: member } = await supabase.from('members').select('id, ign, current_guild_id').eq('id', member_id).maybeSingle();
+  const { data: member } = await supabase.from('members').select('id, ign, current_guild_id, position').eq('id', member_id).maybeSingle();
   if (!member) return NextResponse.json({ error: 'Character not found' }, { status: 404 });
 
   const allowed = await reviewableGuildIds(user, supabase);
@@ -35,6 +36,15 @@ export async function POST(req: NextRequest) {
   if (!found?.length) return NextResponse.json({ error: 'No website account found — they need to sign up first' }, { status: 404 });
   if (found.length > 1) return NextResponse.json({ error: 'Several accounts match that username — use email' }, { status: 400 });
   const targetId = found[0].id as string;
+
+  // Hierarchy: only assign to people ranked below you, and only characters granting a role below yours.
+  const actorRank = await rankInGuild(supabase, user, member.current_guild_id);
+  const granted = rankOfRole(member.position);
+  if (!outranks(actorRank, granted)) return NextResponse.json({ error: grantError(actorRank, granted) }, { status: 403 });
+  const targetRank = await rankOfUser(supabase, targetId);
+  if (targetId !== user.id && !outranks(actorRank, targetRank)) {
+    return NextResponse.json({ error: outrankError(actorRank, targetRank, 'assign characters to') }, { status: 403 });
+  }
 
   const { locks } = await findBundleLocks(member.id, supabase);
   if (locks.some((l) => l.user_id !== targetId)) {

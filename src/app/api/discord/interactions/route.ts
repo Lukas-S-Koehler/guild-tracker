@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { outranks, outrankError, rankOfRole } from '@/lib/role-hierarchy';
 import { waitUntil } from '@vercel/functions';
 import { createAdminClient } from '@/lib/supabase-server';
 import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registerMapCommand, registerAltCommand, registerActivityBankCommand, registerWhipCommand, registerLeaderboardCommand, registerBumpsCommand, registerAssaultCommand, registerLookupCommand, registerRaidCommand, registerGuideCommand, sendInteractionFollowup, editOriginalInteractionResponse, editChannelMessageRich, postToChannel, listGlobalCommands, listGuildCommands, deleteGlobalCommand, deleteGuildCommand } from '@/lib/discord-api';
@@ -279,10 +280,22 @@ async function handleWarnCommand(interaction: {
   // Look up member by discord_id
   const { data: member } = await supabase
     .from('members')
-    .select('id, ign, current_guild_id, discord_id')
+    .select('id, ign, current_guild_id, discord_id, position')
     .eq('discord_id', targetDiscordId)
     .eq('is_active', true)
     .maybeSingle();
+
+  // Hierarchy: the caller's highest in-game position must outrank the target's.
+  if (member) {
+    const { data: callerChars } = callerDiscordId
+      ? await supabase.from('members').select('position').eq('discord_id', callerDiscordId).eq('is_active', true)
+      : { data: [] };
+    const callerRank = Math.max(0, ...(callerChars ?? []).map((c) => rankOfRole(c.position)));
+    const targetRank = rankOfRole(member.position);
+    if (!outranks(callerRank, targetRank)) {
+      return NextResponse.json({ type: 4, data: { content: `❌ ${outrankError(callerRank, targetRank, 'warn')}.`, flags: 64 } });
+    }
+  }
 
   if (!member) {
     return NextResponse.json({

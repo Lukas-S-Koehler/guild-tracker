@@ -7,6 +7,11 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Check, Loader2, UserCheck, X } from 'lucide-react';
 
+/** Shown instead of actions when the claim's user (or the role it grants) ranks at or above you. */
+function RankedAbove() {
+  return <span className="text-xs text-muted-foreground" title="You can only act on people ranked below you">ranked at or above you</span>;
+}
+
 type Status = 'pending' | 'approved' | 'rejected';
 
 interface ClaimRow {
@@ -18,6 +23,10 @@ interface ClaimRow {
   requested_at: string;
   reviewed_at: string | null;
   guild_name: string | null;
+  /** Hierarchy (src/lib/role-hierarchy.ts): may reject/revoke this user's claim. */
+  can_manage?: boolean;
+  /** May approve: the character's in-game position grants a role below yours. */
+  can_approve?: boolean;
   member: { id: string; ign: string; avatar_url: string | null; total_level: number | null; discord_username: string | null };
 }
 
@@ -120,13 +129,16 @@ export default function ClaimsAdmin() {
                         <Loader2 className="h-4 w-4 animate-spin inline" />
                       ) : status === 'pending' ? (
                         <>
-                          <Button size="sm" className="h-7 mr-1" onClick={() => act(r, 'approve')}><Check className="h-3.5 w-3.5 mr-1" />Approve</Button>
-                          <Button size="sm" variant="outline" className="h-7" onClick={() => act(r, 'reject')}><X className="h-3.5 w-3.5 mr-1" />Reject</Button>
+                          {r.can_approve !== false && <Button size="sm" className="h-7 mr-1" onClick={() => act(r, 'approve')}><Check className="h-3.5 w-3.5 mr-1" />Approve</Button>}
+                          {r.can_manage !== false && <Button size="sm" variant="outline" className="h-7" onClick={() => act(r, 'reject')}><X className="h-3.5 w-3.5 mr-1" />Reject</Button>}
+                          {r.can_approve === false && r.can_manage === false && <RankedAbove />}
                         </>
                       ) : status === 'approved' ? (
-                        <Button size="sm" variant="outline" className="h-7" onClick={() => act(r, 'revoke')}>Revoke</Button>
-                      ) : (
+                        r.can_manage !== false ? <Button size="sm" variant="outline" className="h-7" onClick={() => act(r, 'revoke')}>Revoke</Button> : <RankedAbove />
+                      ) : r.can_approve !== false ? (
                         <Button size="sm" variant="outline" className="h-7" onClick={() => act(r, 'approve')}>Approve anyway</Button>
+                      ) : (
+                        <RankedAbove />
                       )}
                     </td>
                   </tr>
