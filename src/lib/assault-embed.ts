@@ -2,7 +2,7 @@ import { formatGold } from '@/lib/utils';
 
 /** Shared look & feel for assault Discord output (commands + stat crons). */
 
-export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://guild-tracker-9ys7-blond.vercel.app').replace(/\/$/, '');
+export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://guild-tracker-9ys7.vercel.app').replace(/\/$/, '');
 
 export const siteUrl = (path = '/assault') => `${SITE_URL}${path}`;
 

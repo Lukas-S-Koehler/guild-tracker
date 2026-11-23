@@ -21,7 +21,7 @@ export interface GuideSection {
 export const PET_SHEET_URL =
   'https://docs.google.com/spreadsheets/d/1sceVGy4VlSJ1jVA2E5BOJGHkTJtRJSSjTZqtkkYBHRU/edit?gid=1508925425#gid=1508925425';
 export const DUNGEON_TRACKER_URL = 'https://dungeon-tracker-seven.vercel.app/profile';
-export const GUIDE_SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://guild-tracker-9ys7-blond.vercel.app').replace(/\/$/, '');
+export const GUIDE_SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://guild-tracker-9ys7.vercel.app').replace(/\/$/, '');
 export const ZENITH_URL = 'https://zenith-companion.vercel.app/';
 export const POTIONS_URL = 'https://www.iddlemmotools.com/categories?category=consumables&label=Potions+%26+Food';
 export const ESSENCES_URL = 'https://www.iddlemmotools.com/categories?category=essence_crystals&label=Essence+Crystals';
@@ -601,7 +601,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
         items: [
           '`/lb` — current Dream activity leaderboard',
           '`/assault lb` — top assaulters',
-          'Web: [Guild Tracker](https://guild-tracker-9ys7-blond.vercel.app/) · [Leaderboard](/leaderboard) · [Assault leaderboard](/assault/leaderboard)',
+          'Web: [Guild Tracker](https://guild-tracker-9ys7.vercel.app/) · [Leaderboard](/leaderboard) · [Assault leaderboard](/assault/leaderboard)',
         ],
       },
     ],

@@ -210,9 +210,64 @@ function LiveCard({ item, onChange }: { item: Item; onChange: () => void }) {
   );
 }
 
+type SectionId = 'network' | 'recaps' | 'reports' | 'halls';
+
+const SECTIONS: { id: SectionId; label: string; note?: string; compact: boolean }[] = [
+  { id: 'network', label: 'Network posts', compact: false },
+  { id: 'recaps', label: 'Assault recaps', note: 'One season recap per assault guild, posted once the day after the season ends.', compact: true },
+  {
+    id: 'reports',
+    label: 'Inactivity reports',
+    note: 'One report per guild in its guild chat. Unbound or paused = no report. Inactive guilds get none (the activity check skips them).',
+    compact: true,
+  },
+  {
+    id: 'halls',
+    label: 'Guild halls',
+    note: "Stockpile post per guild. Needs the guild's API key and active buildings in Admin → Guilds.",
+    compact: true,
+  },
+];
+
+const sectionOf = (key: string): SectionId =>
+  key.startsWith('inactivity:') ? 'reports' : key.startsWith('guild-hall:') ? 'halls' : key.startsWith('assault-recap:') ? 'recaps' : 'network';
+
+/** Problems first, then live, paused, unbound; inactive guilds last. */
+const weight = (i: Item) =>
+  (i.guild_active === false ? 10 : 0) + (i.last_error ? 0 : !i.bound ? 3 : !i.enabled ? 2 : 1);
+
+function statusBadge(i: Item) {
+  if (!i.bound) return <Badge variant="outline">not bound</Badge>;
+  if (!i.enabled) return <Badge variant="secondary">paused</Badge>;
+  return <Badge className="bg-crystal/20 text-crystal border-crystal/30">live</Badge>;
+}
+
+/** One line per guild; click to open the full card. */
+function CompactRow({ item, open, onToggle, onChange }: { item: Item; open: boolean; onToggle: () => void; onChange: () => void }) {
+  return (
+    <div className="rounded-md border">
+      <button onClick={onToggle} className="flex w-full flex-wrap items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted/40">
+        <span className="font-medium min-w-0 flex-1 truncate">{item.label.includes(' · ') ? item.label.slice(item.label.indexOf(' · ') + 3) : item.label}</span>
+        {item.last_error && <AlertCircle className="h-4 w-4 text-destructive" />}
+        {item.guild_active === false && <Badge variant="secondary">guild inactive</Badge>}
+        {item.pings === false && item.bound && <Badge variant="outline" className="font-normal">no @mentions</Badge>}
+        {statusBadge(item)}
+        <span className="w-24 text-right text-xs text-muted-foreground">{item.bound ? ago(item.last_published_at) : ''}</span>
+      </button>
+      {open && (
+        <div className="border-t p-2">
+          <LiveCard item={item} onChange={onChange} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function LiveMessagesPanel() {
   const [items, setItems] = useState<Item[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [section, setSection] = useState<SectionId>('network');
+  const [open, setOpen] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -231,29 +286,52 @@ export default function LiveMessagesPanel() {
   if (error) return <p className="text-sm text-destructive">{error}</p>;
   if (!items) return <div className="flex justify-center p-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
 
-  const main = items.filter((i) => !i.key.startsWith('inactivity:') && !i.key.startsWith('guild-hall:'));
-  const reports = items.filter((i) => i.key.startsWith('inactivity:'));
-  const halls = items.filter((i) => i.key.startsWith('guild-hall:'));
+  const by = (id: SectionId) => items.filter((i) => sectionOf(i.key) === id).sort((a, b) => weight(a) - weight(b));
+  const current = SECTIONS.find((s) => s.id === section)!;
+  const list = by(section);
+  const errors = items.filter((i) => i.last_error).length;
 
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
         DreamBot posts that stay current instead of piling up. Nothing is posted until you bind a channel.
         Reference posts are rebuilt daily after the activity check and only edited when something changed; daily reports replace yesterday&apos;s copy.
+        {errors > 0 && <span className="text-destructive"> {errors} with an error (shown first).</span>}
       </p>
-      <div className="grid gap-4 lg:grid-cols-2">
-        {main.map((i) => <LiveCard key={i.key} item={i} onChange={load} />)}
+
+      <div className="flex flex-wrap gap-2">
+        {SECTIONS.map((s) => {
+          const rows = by(s.id);
+          if (!rows.length) return null;
+          const live = rows.filter((i) => i.bound && i.enabled).length;
+          const bad = rows.some((i) => i.last_error);
+          return (
+            <button
+              key={s.id}
+              onClick={() => { setSection(s.id); setOpen(null); }}
+              className={`rounded-full border px-3 py-1.5 text-sm transition ${section === s.id ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted/50'}`}
+            >
+              {s.label}
+              <span className="ml-1.5 text-xs opacity-70">{live}/{rows.length} live</span>
+              {bad && <span className="ml-1.5 inline-block h-2 w-2 rounded-full bg-destructive align-middle" />}
+            </button>
+          );
+        })}
       </div>
-      <h3 className="text-sm font-semibold pt-2">Per-guild inactivity reports</h3>
-      <p className="text-xs text-muted-foreground">Unbound or paused = no report for that guild. Inactive guilds get no report (the activity check skips them).</p>
-      <div className="grid gap-4 lg:grid-cols-2">
-        {reports.map((i) => <LiveCard key={i.key} item={i} onChange={load} />)}
-      </div>
-      <h3 className="text-sm font-semibold pt-2">Guild hall stockpile</h3>
-      <p className="text-xs text-muted-foreground">Needs the guild&apos;s API key and active buildings in Admin → Guilds. Guilds bound under the old setting were moved here automatically.</p>
-      <div className="grid gap-4 lg:grid-cols-2">
-        {halls.map((i) => <LiveCard key={i.key} item={i} onChange={load} />)}
-      </div>
+
+      {current.note && <p className="text-xs text-muted-foreground">{current.note}</p>}
+
+      {current.compact ? (
+        <div className="space-y-2">
+          {list.map((i) => (
+            <CompactRow key={i.key} item={i} open={open === i.key} onToggle={() => setOpen(open === i.key ? null : i.key)} onChange={load} />
+          ))}
+        </div>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {list.map((i) => <LiveCard key={i.key} item={i} onChange={load} />)}
+        </div>
+      )}
     </div>
   );
 }
