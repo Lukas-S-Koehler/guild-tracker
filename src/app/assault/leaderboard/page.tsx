@@ -1,5 +1,6 @@
 'use client';
 
+import { profilePath } from '@/lib/profile-path';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -142,7 +143,7 @@ export default function AssaultLeaderboardPage() {
                       <tr key={e.key} className={`border-b last:border-0 ${rank <= 3 ? 'bg-muted/30' : ''}`}>
                         <td className="py-3"><span className="text-lg">{getRankEmoji(rank)}</span></td>
                         <td className="py-3">
-                          <span className="font-medium">{e.name}</span>
+                          <Link href={profilePath(e.name)} className="font-medium hover:underline underline-offset-4">{e.name}</Link>
                           {e.total_level ? <span className="ml-1.5 text-xs text-muted-foreground">Lv {e.total_level}</span> : null}
                           {merged && e.alt_count > 0 && (
                             <span className="ml-1.5 text-xs text-blue-400" title={`Alts: ${e.alt_names.join(', ')}`}>

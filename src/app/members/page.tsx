@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+import { profilePath } from '@/lib/profile-path';
 import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -358,7 +360,7 @@ function MembersPageContent() {
                             ? <img src={member.avatar_url} alt={member.ign} className="w-10 h-10 rounded" />
                             : <div className="w-10 h-10 bg-muted rounded" />}
                         </td>
-                        <td className="py-2 px-4 font-medium">{member.ign}</td>
+                        <td className="py-2 px-4 font-medium"><Link href={profilePath(member.ign)} className="hover:underline underline-offset-4">{member.ign}</Link></td>
                         {isAllGuilds && (
                           <td className="py-2 px-4">
                             <span className="font-mono text-xs font-bold text-primary">

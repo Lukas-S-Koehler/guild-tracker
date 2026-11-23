@@ -159,10 +159,10 @@ export async function postHallOfFame(supabase: SupabaseClient, day: string): Pro
 }
 
 /** Short line for the Discord /me embed. Reads stored unlocks only (cheap). */
-export async function achievementsField(supabase: SupabaseClient, memberIds: string[], userId: string) {
+export async function achievementsField(supabase: SupabaseClient, memberIds: string[], userId: string | null) {
   const [{ data: rows }, { data: title }] = await Promise.all([
     supabase.from('achievement_unlocks').select('achievement_key, unlocked_at').in('member_id', memberIds),
-    supabase.from('user_titles').select('achievement_key').eq('user_id', userId).maybeSingle(),
+    userId ? supabase.from('user_titles').select('achievement_key').eq('user_id', userId).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   const latest = new Map<string, string>();
   for (const r of rows ?? []) {

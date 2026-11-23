@@ -49,13 +49,14 @@ function BadgeTile({ a }: { a: AchievementView }) {
 }
 
 /** Achievements for the whole account: count, Dream XP, title picker, next up, full catalogue. */
-export default function AchievementsCard() {
-  const [data, setData] = useState<Data | null>(null);
+export default function AchievementsCard({ initial, readOnly = false }: { initial?: Data; readOnly?: boolean } = {}) {
+  const [data, setData] = useState<Data | null>(initial ?? null);
   const [failed, setFailed] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    if (initial) return;
     let cancelled = false;
     fetch('/api/me/achievements', { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
@@ -64,7 +65,7 @@ export default function AchievementsCard() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initial]);
 
   const view = useMemo(() => {
     if (!data?.claimed) return null;
@@ -120,7 +121,7 @@ export default function AchievementsCard() {
               )}
             </span>
           )}
-          {view && view.titles.length > 0 && data?.claimed && (
+          {!readOnly && view && view.titles.length > 0 && data?.claimed && (
             <label className="ml-auto flex items-center gap-2 text-xs font-normal text-muted-foreground">
               Title
               <select
@@ -157,7 +158,7 @@ export default function AchievementsCard() {
               </div>
             )}
 
-            {view.next.length > 0 && !showAll && (
+            {!readOnly && view.next.length > 0 && !showAll && (
               <div className="space-y-2">
                 <p className="text-xs font-medium text-muted-foreground">Next up</p>
                 {view.next.map((a) => (

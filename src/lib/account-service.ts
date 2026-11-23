@@ -58,6 +58,16 @@ export async function getAccountCharacters(
   if (claimedIds.length === 0) return [];
 
   const ids = Array.from(await getAccountMemberIds(supabase, claimedIds));
+  return getBundleCharacters(ids, new Set(claimedIds), supabase);
+}
+
+/** Characters for a known bundle of member ids (claimed ones first, then by level). */
+export async function getBundleCharacters(
+  ids: string[],
+  claimedSet: Set<string>,
+  supabase: SupabaseClient = createAdminClient()
+): Promise<AccountCharacter[]> {
+  if (ids.length === 0) return [];
   const [{ data: members }, { data: guilds }] = await Promise.all([
     supabase
       .from('members')
@@ -66,7 +76,6 @@ export async function getAccountCharacters(
     supabase.from('guilds').select('id, name, nickname'),
   ]);
   const guildMap = new Map((guilds ?? []).map((g) => [g.id as string, g]));
-  const claimedSet = new Set(claimedIds);
 
   return (members ?? [])
     .map((m) => {

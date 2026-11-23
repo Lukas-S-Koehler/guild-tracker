@@ -36,20 +36,20 @@ function RankCell({ label, r, detail }: { label: string; r: Rank | null; detail?
 }
 
 /** Account-wide leaderboard ranks: activity and assault. Loads on its own (assault data is slow). */
-export default function RankingsCard() {
+export default function RankingsCard({ src = '/api/me/rankings' }: { src?: string } = {}) {
   const [data, setData] = useState<MeRankings | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/me/rankings', { cache: 'no-store' })
+    fetch(src, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((d: MeRankings) => !cancelled && setData(d))
       .catch(() => !cancelled && setFailed(true));
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [src]);
 
   if (failed || (data && !data.claimed)) return null;
   const a = data?.activity;
@@ -78,7 +78,7 @@ export default function RankingsCard() {
               <div className="grid grid-cols-2 gap-2">
                 <RankCell label="This week" r={a?.week ?? null} detail={act(a?.week)} />
                 <RankCell
-                  label={data.guild_week ? `In ${data.guild_week.guild_name} · week` : 'In your guild · week'}
+                  label={data.guild_week ? `In ${data.guild_week.guild_name} · week` : 'In guild · week'}
                   r={data.guild_week}
                   detail={act(data.guild_week)}
                 />
