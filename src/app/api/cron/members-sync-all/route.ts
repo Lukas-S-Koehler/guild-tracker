@@ -70,12 +70,12 @@ export async function POST(req: NextRequest) {
       const memberIds = apiMembers.map((m: any) => m.name.toLowerCase());
       const { data: existing } = await supabase
         .from('members')
-        .select('idlemmo_id, current_guild_id, first_seen')
+        .select('idlemmo_id, current_guild_id, first_seen, created_at, hashed_id')
         .in('idlemmo_id', memberIds);
 
-      const existingMap = new Map<string, { current_guild_id: string | null; first_seen: string | null }>();
+      const existingMap = new Map<string, { current_guild_id: string | null; first_seen: string | null; created_at: string | null; hashed_id: string | null }>();
       existing?.forEach((m: any) => {
-        existingMap.set(m.idlemmo_id, { current_guild_id: m.current_guild_id, first_seen: m.first_seen });
+        existingMap.set(m.idlemmo_id, { current_guild_id: m.current_guild_id, first_seen: m.first_seen, created_at: m.created_at, hashed_id: m.hashed_id });
       });
 
       const members = apiMembers.map((m: any) => {
@@ -93,7 +93,9 @@ export async function POST(req: NextRequest) {
           avatar_url: m.avatar_url,
           is_active: true,
           synced_at: new Date().toISOString(),
-          ...(isNewToGuild ? { first_seen: today } : {}),
+          // Always send first_seen/hashed_id: a bulk upsert fills keys missing from a row with NULL,
+          // so conditional spreads wiped first_seen of existing members whenever a newcomer was synced.
+          first_seen: isNewToGuild ? today : (ex?.first_seen ?? ex?.created_at?.slice(0, 10) ?? today),
         };
       });
 

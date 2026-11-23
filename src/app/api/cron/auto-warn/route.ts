@@ -110,7 +110,7 @@ export async function POST(req: NextRequest) {
       // Fetch all active members — leader/deputy exemption applied after alt-graph propagation
       const { data: members } = await supabase
         .from('members')
-        .select('id, ign, position, discord_id, first_seen, hashed_id, character_id')
+        .select('id, ign, position, discord_id, first_seen, created_at, hashed_id, character_id')
         .eq('current_guild_id', guildId)
         .eq('is_active', true);
 
@@ -455,9 +455,11 @@ export async function POST(req: NextRequest) {
         if (awayUntil) { onHoliday.push({ ign: member.ign, until: awayUntil }); skipped++; continue; }
         const lastDate = lastActivityMap.get(member.id);
 
+        // first_seen can be missing (lost by older syncs); the row's creation date is the next best join date.
+        const joined = member.first_seen ?? member.created_at?.slice(0, 10) ?? null;
         let daysSinceJoin = 999;
-        if (member.first_seen) {
-          daysSinceJoin = Math.max(0, Math.floor((today.getTime() - new Date(member.first_seen).getTime()) / 86400000));
+        if (joined) {
+          daysSinceJoin = Math.max(0, Math.floor((today.getTime() - new Date(joined).getTime()) / 86400000));
         }
 
         let daysInactive: number;
