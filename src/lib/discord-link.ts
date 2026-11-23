@@ -183,3 +183,24 @@ export async function linkDiscordToUser(
 export async function unlinkDiscord(supabase: SupabaseClient, userId: string) {
   await supabase.from('user_discord_links').delete().eq('user_id', userId);
 }
+
+/**
+ * Website link for a Discord user, creating it when it's unambiguous: staff mapped this Discord to
+ * characters (`members.discord_id`) and exactly one site user already holds an approved claim on that
+ * account. Same trust as A5 auto-approve, the other way round. Saves "/claim knows me but /me doesn't".
+ */
+export async function resolveDiscordLink(supabase: SupabaseClient, discordId: string, username: string) {
+  const existing = await getLinkByDiscord(supabase, discordId);
+  if (existing) return existing;
+
+  const { data: mapped } = await supabase.from('members').select('id').eq('discord_id', discordId);
+  if (!mapped?.length) return null;
+  const bundle = Array.from(await getAccountMemberIds(supabase, mapped.map((m) => m.id as string)));
+  const { data: claims } = await supabase.from('user_characters').select('user_id').eq('status', 'approved').in('member_id', bundle);
+  const users = Array.from(new Set((claims ?? []).map((c) => c.user_id as string)));
+  if (users.length !== 1) return null;
+  if (await getLinkByUser(supabase, users[0]!)) return null; // that site account is linked to another Discord
+
+  const res = await linkDiscordToUser(supabase, users[0]!, discordId, username);
+  return res.ok ? getLinkByDiscord(supabase, discordId) : null;
+}

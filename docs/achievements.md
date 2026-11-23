@@ -28,12 +28,13 @@ bronze ≈ half of active members, silver ≈ top 25 %, gold ≈ top 10 %, cryst
 | gold-4 | Golden Pillar | 3.5M | Crystal (p99) |
 | gold-5 | Dream Benefactor | 7.5M | Dream |
 
-### Raids — raid participations, lifetime
+### Raids — raid participations, lifetime, pooled across the account
+One character rarely goes past ~470 raids, so the ladder sits above that (user, 2026-11-23).
 | raids-1 | First Raid | 1 | Bronze |
-| raids-2 | Raider | 50 | Bronze |
-| raids-3 | Raid Regular | 150 | Silver (p90) |
-| raids-4 | Raid Veteran | 300 | Gold (p98) |
-| raids-5 | Raid Legend | 500 | Dream |
+| raids-2 | Raider | 75 | Bronze (p75) |
+| raids-3 | Raid Regular | 250 | Silver (p92) |
+| raids-4 | Raid Veteran | 600 | Gold (p98) |
+| raids-5 | Raid Legend | 1,200 | Dream |
 
 ### Reliability — days the requirement was met (bank cover counts)
 | met-1 | Showing Up | 7 | Bronze |

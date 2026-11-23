@@ -118,11 +118,12 @@ export const ACHIEVEMENTS: Achievement[] = [
   ], (t) => `Donate and deposit ${k(t)} gold to Dream guilds`),
 
   ...ladder('raids', 'raids', 'raids', [
+    // Pooled over the account's characters, so set higher than one character reaches (~470).
     ['First Raid', 1, 'bronze'],
-    ['Raider', 50, 'bronze'],
-    ['Raid Regular', 150, 'silver'],
-    ['Raid Veteran', 300, 'gold'],
-    ['Raid Legend', 500, 'dream'],
+    ['Raider', 75, 'bronze'],
+    ['Raid Regular', 250, 'silver'],
+    ['Raid Veteran', 600, 'gold'],
+    ['Raid Legend', 1200, 'dream'],
   ], (t) => (t === 1 ? 'Join your first guild raid' : `Join ${t} guild raids`)),
 
   ...ladder('reliability', 'met_days', 'met', [

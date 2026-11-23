@@ -8,7 +8,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createAdminClient } from '@/lib/supabase-server';
 import { editOriginalInteractionResponse, postToChannel, upsertGlobalCommand } from '@/lib/discord-api';
 import { getActiveClaim } from '@/lib/account-service';
-import { getLinkByDiscord, linkUrl, mappedIgns } from '@/lib/discord-link';
+import { linkUrl, mappedIgns, resolveDiscordLink } from '@/lib/discord-link';
 import { buildMeSummary, type GuildGroup } from '@/lib/me-summary';
 import { findGuildByTag, loadGuildDirectory } from '@/lib/guild-directory';
 import { raidCls, req } from '@/lib/discord-posts';
@@ -59,7 +59,7 @@ function deferred(i: HubInteraction, ephemeralReply: boolean, work: () => Promis
 // ─── /claim ──────────────────────────────────────────────────────────────────
 
 async function claimPayload(supabase: SupabaseClient, discordId: string, username: string) {
-  const link = await getLinkByDiscord(supabase, discordId);
+  const link = await resolveDiscordLink(supabase, discordId, username);
   if (link) {
     const claim = await getActiveClaim(link.user_id, supabase);
     const content = !claim
@@ -126,7 +126,7 @@ export function handleMe(i: HubInteraction) {
   const share = i.data.options?.find((o) => o.name === 'share')?.value === true;
   return deferred(i, !share, async () => {
     const supabase = createAdminClient();
-    const link = await getLinkByDiscord(supabase, u.id);
+    const link = await resolveDiscordLink(supabase, u.id, u.global_name ?? u.username);
     if (!link) return { content: 'Your Discord is not linked to a website account yet. Run `/claim` first.' };
     const s = await buildMeSummary(link.user_id, {}, supabase);
     if (!s.claimed) {
