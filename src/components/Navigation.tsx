@@ -15,7 +15,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import {
   ChevronDown, User, LogOut, Users, Shield, Crown, Gauge, Castle, Activity, Trophy, Swords, Globe, BarChart3, Medal,
-  BookOpen, MapPin, CheckSquare, FlaskConical, Calculator,
+  BookOpen, MapPin, CheckSquare, FlaskConical, Calculator, CalendarDays,
   KeyRound, UserCircle, type LucideIcon,
 } from 'lucide-react';
 import { DreamWordmark } from '@/components/brand/DreamMark';
@@ -113,6 +113,7 @@ export default function Navigation() {
         },
       ],
     },
+    { kind: 'link', href: '/calendar', label: 'Calendar', icon: CalendarDays, show: member },
     { kind: 'link', href: '/combat', label: 'Combat', icon: Calculator, show: member },
     { kind: 'link', href: '/guide', label: 'Guide', icon: BookOpen, show: member },
     // Staff get one entry: the admin hub. Guild tools (dashboard, reports, roster ...) are linked from inside it.

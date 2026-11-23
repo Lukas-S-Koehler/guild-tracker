@@ -22,6 +22,8 @@ import { buildMeAssault } from '@/lib/me-assault';
 import { personalRecapEmbed } from '@/lib/assault-recap';
 import { buildProfile, findProfileAccount } from '@/lib/profile';
 import { profilePath } from '@/lib/profile-path';
+import { buildCalendar, calendarDiscordLines, forGuilds } from '@/lib/calendar';
+import { getAccountCharacters } from '@/lib/account-service';
 import { NETWORK_BOARDS, getNetworkBoards, placeOf, type NetworkBoardKey } from '@/lib/network-boards';
 
 const SITE = GUIDE_SITE_URL;
@@ -380,6 +382,51 @@ export function handleNetworkBoard(i: HubInteraction, boardRaw: unknown) {
   });
 }
 
+// ─── /calendar [days] [all] [share] (step 14) ────────────────────────────────
+
+export function handleCalendar(i: HubInteraction) {
+  const u = caller(i);
+  if (!u) return ephemeral('Could not identify you.');
+  const opt = (n: string) => i.data.options?.find((o) => o.name === n)?.value;
+  const share = opt('share') === true;
+  const days = Math.min(14, Math.max(1, Number(opt('days')) || 7));
+  const all = opt('all') === true;
+  return deferred(i, !share, async () => {
+    const supabase = createAdminClient();
+    let events = await buildCalendar(supabase, { from: new Date(), days });
+    let scope = 'all Dream guilds';
+    if (!all) {
+      // Your guilds: claimed account (via /claim link) plus characters staff mapped to your Discord.
+      const link = await getLinkByDiscord(supabase, u.id);
+      const [chars, { data: mapped }] = await Promise.all([
+        link ? getAccountCharacters(link.user_id, supabase) : Promise.resolve([]),
+        supabase.from('members').select('current_guild_id').eq('discord_id', u.id).eq('is_active', true),
+      ]);
+      const ids = new Set([
+        ...chars.filter((c) => c.in_dream_guild && c.guild_id).map((c) => c.guild_id as string),
+        ...(mapped ?? []).map((m) => m.current_guild_id as string).filter(Boolean),
+      ]);
+      if (ids.size) {
+        events = forGuilds(events, ids);
+        scope = 'your guilds';
+      }
+    }
+    const url = `${SITE}/calendar`;
+    return {
+      embeds: [
+        {
+          title: `📅 Next ${days} day${days === 1 ? '' : 's'} · ${scope}`,
+          url,
+          color: CRYSTAL,
+          description: calendarDiscordLines(events).join('\n').slice(0, 4000),
+          footer: { text: 'Times are in your local time · all:True shows every guild' },
+        },
+      ],
+      components: [row(linkButton('Full calendar', url))],
+    };
+  });
+}
+
 // ─── /away ───────────────────────────────────────────────────────────────────
 
 async function rankOfDiscord(supabase: SupabaseClient, discordId: string): Promise<number> {
@@ -453,6 +500,7 @@ const MEMBER_HELP: [string, string[]][] = [
   ['🏰 Guilds', [
     '`/guild tag:` requirement, raids, leaders and stats of a guild',
     '`/raid` raid times in your local time',
+    '`/calendar` raids, assault launches and guild events this week (`all:True` = every guild)',
     '`/activity-bank` how the activity bank works',
     '`/leaderboard` activity ranks (week / month / all time, per guild or class)',
     '`/leaderboard board:` current / longest streak, most improved, Dream XP',
@@ -536,6 +584,15 @@ export async function registerHubCommands() {
       options: [
         { name: 'ign', type: 3, description: 'Character name (any character of the account)', required: false, autocomplete: true },
         { name: 'user', type: 6, description: 'Discord member', required: false },
+        { name: 'share', type: 5, description: 'Post it in the channel instead of only showing you', required: false },
+      ],
+    },
+    {
+      name: 'calendar',
+      description: 'Raids, assault launches and guild events coming up (your guilds)',
+      options: [
+        { name: 'days', type: 4, description: 'How many days ahead (default 7)', required: false, min_value: 1, max_value: 14 },
+        { name: 'all', type: 5, description: 'Every Dream guild, not just yours', required: false },
         { name: 'share', type: 5, description: 'Post it in the channel instead of only showing you', required: false },
       ],
     },

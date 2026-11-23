@@ -3,7 +3,7 @@
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Loader2, Shield, UserCheck, Castle, Users, AlertTriangle, Swords, MessageSquare, Server, FlaskConical, Check, AlertCircle, LayoutGrid, FileWarning, ScrollText, ListChecks, type LucideIcon } from 'lucide-react';
+import { Loader2, Shield, UserCheck, Castle, Users, AlertTriangle, Swords, MessageSquare, Server, FlaskConical, Check, AlertCircle, LayoutGrid, FileWarning, ScrollText, ListChecks, CalendarDays, type LucideIcon } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -22,6 +22,7 @@ import AdvertisingPanel from '@/components/admin/AdvertisingPanel';
 import LiveMessagesPanel from '@/components/admin/LiveMessagesPanel';
 import DataManagementPanel from '@/components/admin/DataManagementPanel';
 import PriceCachePanel from '@/components/admin/PriceCachePanel';
+import CalendarPanel from '@/components/admin/CalendarPanel';
 import { AltSyncTools, DiscordSwitches } from '@/components/admin/SuperAdminTools';
 import { RoleSyncPanel } from '@/components/admin/RoleSyncPanel';
 
@@ -110,6 +111,10 @@ const TABS: HubTab[] = [
   {
     id: 'warnings', label: 'Warnings', icon: AlertTriangle, access: 'OFFICER',
     subs: [{ id: 'history', label: 'History', access: 'OFFICER', render: () => <WarningsPanel /> }],
+  },
+  {
+    id: 'calendar', label: 'Calendar', icon: CalendarDays, access: 'OFFICER',
+    subs: [{ id: 'events', label: 'Events', access: 'OFFICER', render: () => <CalendarPanel /> }],
   },
   {
     id: 'assault', label: 'Assault', icon: Swords, access: 'DEPUTY',
