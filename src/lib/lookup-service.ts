@@ -107,7 +107,8 @@ export async function getDiscordProfile(discordId: string): Promise<DiscordProfi
   const now = Date.now();
   const characters: LookupCharacter[] = members.map(m => {
     const g = m.current_guild_id ? guilds.get(m.current_guild_id) : undefined;
-    const inDream = !!(m.is_active && g && g.is_active !== false);
+    // Inactive guilds are still Dream guilds (no activity requirement, still synced daily).
+    const inDream = !!(m.is_active && g);
     const start = joined.get(m.id) ?? m.first_seen;
     const stats = lb.get(m.id);
     const as = m.character_id != null ? assaultByChar.get(m.character_id) : undefined;

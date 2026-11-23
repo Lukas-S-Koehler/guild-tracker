@@ -360,35 +360,34 @@ export function AltSyncTools() {
 }
 
 const GUIDE_CHANNEL = '1573818767505490051';
+const GUILD_INFO_CHANNEL = '1444861407978979459';
 
 /**
  * Copyable texts for the AutoMod welcome message. AutoMod stays the welcomer: it reacts to joins
  * instantly, DreamBot can't (no gateway). The text points people to /claim, which DreamBot handles.
  */
 function AutoModWelcomeTexts() {
-  const [site, setSite] = useState('');
   const [variant, setVariant] = useState('full');
   const [copied, setCopied] = useState(false);
-  useEffect(() => setSite(process.env.NEXT_PUBLIC_SITE_URL || window.location.origin), []);
 
   const texts: Record<string, { label: string; text: string }> = {
     full: {
       label: 'Full (recommended)',
       text: [
-        'Welcome to the Dream Guilds, {user}! Please send your character name and combat level, that way leadership can select a guild for you. Or find the guild that fits your CL yourself: ' + site + '/guilds',
+        'Welcome to the Dream Guilds, {user}! Please send your character name and combat level, that way leadership can select a guild for you. Or find the guild that fits your CL yourself in <#' + GUILD_INFO_CHANNEL + '>.',
         'In the meantime you can check out <#' + GUIDE_CHANNEL + '> for all the important info on the game.',
-        'Already in a Dream guild? Run `/claim` to link your Discord: your guild roles update automatically and `/me` shows your daily check. `/help` lists every DreamBot command.',
+        'Already in a Dream guild? Run `/claim` so your guild roles update automatically and `/me` shows your daily check. `/help` lists every DreamBot command.',
       ].join('\n'),
     },
     short: {
       label: 'Short',
-      text: 'Welcome to the Dream Guilds, {user}! Send your character name and combat level so leadership can pick a guild for you (or find one: ' + site + '/guilds). Already in a guild? Run `/claim`.',
+      text: 'Welcome to the Dream Guilds, {user}! Send your character name and combat level so leadership can pick a guild for you (or find one in <#' + GUILD_INFO_CHANNEL + '>). Already in a guild? Run `/claim`.',
     },
     current: {
       label: 'Current text + /claim line',
       text: [
         'Welcome to the server, {user}! Please send your character name and combat level, that way leadership can select a guild for you. In the meantime you can check out <#' + GUIDE_CHANNEL + '> for all the important info on the game!',
-        'Already in a Dream guild? Run `/claim` to link your Discord to the website.',
+        'Already in a Dream guild? Run `/claim` to link your Discord. Every guild is listed in <#' + GUILD_INFO_CHANNEL + '>.',
       ].join('\n'),
     },
   };
