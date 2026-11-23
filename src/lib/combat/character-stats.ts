@@ -254,8 +254,11 @@ export function buildCharacterStats(input: CharacterInput): CharacterStats {
 /* ─── Buffs (same order as HTML: % scales base only, flat adds after) ─── */
 
 export interface BuffState {
+  /** Total potion % (derived from potionIds when those are set). */
   apPotionPct: number;
   protPotionPct: number;
+  /** Combat potions picked on /combat (slot-legal). Older setups only have the % fields. */
+  potionIds?: number[];
   /** Assault siege: Scorpion +100 AP */
   scorpion: boolean;
   /** Assault siege: Explosive Keg +10% AP */

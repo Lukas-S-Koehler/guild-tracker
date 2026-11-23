@@ -18,9 +18,19 @@ export async function GET(req: NextRequest) {
   const auth = { user };
 
   const supabase = createAdminClient();
-  const characters = await getAccountCharacters(user.id, supabase);
-  const [canCalibrate, profiles, setups, gear, potions, enemies] = await Promise.all([
+  const [characters, { data: link }] = await Promise.all([
+    getAccountCharacters(user.id, supabase),
+    supabase.from('user_discord_links').select('discord_id').eq('user_id', user.id).maybeSingle(),
+  ]);
+  // Potion loadouts from /assault/potions (web) and /potions in Discord, so the Buffs card can
+  // start from the user's real assault setup.
+  const loadoutQ = supabase
+    .from('assault_potion_loadouts')
+    .select('id, name, is_default, combat_potion_ids, user_id, updated_at')
+    .order('updated_at', { ascending: false });
+  const [canCalibrate, loadouts, profiles, setups, gear, potions, enemies] = await Promise.all([
     canCalibrateStats(user.id, characters, supabase),
+    link?.discord_id ? loadoutQ.or(`user_id.eq.${user.id},discord_user_id.eq.${link.discord_id}`) : loadoutQ.eq('user_id', user.id),
     supabase.from('combat_profiles').select(PROFILE_COLUMNS).eq('user_id', auth.user.id).order('created_at'),
     supabase
       .from('combat_setups')
@@ -53,5 +63,15 @@ export async function GET(req: NextRequest) {
     enemies: enemies.data ?? [],
     characters,
     canCalibrate,
+    // Default first (web default beats Discord default, same as /me/assault), then most recent.
+    loadouts: (loadouts.data ?? [])
+      .map((l) => ({
+        id: l.id as string,
+        name: l.name as string,
+        is_default: !!l.is_default,
+        source: l.user_id === user.id ? 'web' : 'discord',
+        combat_potion_ids: (l.combat_potion_ids ?? []) as number[],
+      }))
+      .sort((a, b) => Number(b.is_default) - Number(a.is_default) || Number(b.source === 'web') - Number(a.source === 'web')),
   });
 }

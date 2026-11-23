@@ -64,6 +64,15 @@ export interface PotionRow {
   image_url: string | null;
 }
 
+/** Saved potion loadout from /assault/potions or Discord /potions. */
+export interface PotionLoadout {
+  id: string;
+  name: string;
+  is_default: boolean;
+  source: 'web' | 'discord';
+  combat_potion_ids: number[];
+}
+
 export interface MemberRow {
   id: string;
   ign: string;

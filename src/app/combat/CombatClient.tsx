@@ -44,12 +44,14 @@ import type {
   CombatProfile,
   Enemy,
   PetState,
+  PotionLoadout,
   PotionRow,
   ProfileSettings,
   SandboxState,
   SetupRow,
   TargetState,
 } from './types';
+import { clearSlot, kindOf, legalPotionIds, potionIdsOf, potionKey, togglePotion, withPotions } from './potion-slots';
 
 /* ─────────────────────────── helpers ─────────────────────────── */
 
@@ -60,7 +62,6 @@ const STAT_LABELS: Record<StatKey, string> = {
   accuracy: 'Accuracy',
 };
 const STAT_KEYS: StatKey[] = ['attackPower', 'protection', 'agility', 'accuracy'];
-const POTION_PCTS = [0, 5, 10, 15, 20, 25, 50];
 const fmt = (n: number) => Math.round(n).toLocaleString();
 const gold = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : `${Math.round(n)}`);
 
@@ -158,6 +159,8 @@ interface Bootstrap {
   characters: AccountCharacter[];
   /** Stat calibration is assaulters only (a character in DE/DI) or super admin. */
   canCalibrate?: boolean;
+  /** Potion loadouts (web + Discord), default first. */
+  loadouts?: PotionLoadout[];
 }
 
 export default function CombatClient() {
@@ -347,6 +350,13 @@ function Workbench({
   const api = useApiClient();
   const gearCatalog = useMemo(() => new Map(boot.gear.map((g) => [g.id, g])), [boot.gear]);
 
+  /* potions: start from your real assault loadout (default one from /assault/potions or Discord) */
+  const potionById = useMemo(() => new Map(boot.potions.map((p) => [p.id, p])), [boot.potions]);
+  const loadouts = boot.loadouts ?? [];
+  const myLoadout = loadouts.find((l) => l.is_default) ?? loadouts[0] ?? null;
+  const loadoutIds = useMemo(() => legalPotionIds(myLoadout?.combat_potion_ids ?? [], potionById), [myLoadout, potionById]);
+  const loadoutBuffs = () => withPotions({ ...NO_BUFFS }, loadoutIds, potionById);
+
   /* profile-backed (saved to the character automatically) */
   const [settings, setSettings] = useState<ProfileSettings>(profile.settings ?? {});
   const [profileGear, setProfileGear] = useState<GearSelection[]>(profile.gear ?? []);
@@ -355,6 +365,7 @@ function Workbench({
   /* sandbox (only kept if you save a setup) */
   const [sb, setSb] = useState<SandboxState>(() => {
     const s = emptySandbox();
+    s.buffs = loadoutBuffs();
     const zone = boot.enemies.find((e) => e.zone_id === profile.location?.id) ?? boot.enemies[0];
     s.target.zoneId = zone?.zone_id ?? null;
     s.target.enemyId = zone?.id ?? null;
@@ -459,7 +470,15 @@ function Workbench({
     }
   }
   function loadSetup(s: SetupRow) {
-    setSb({ ...emptySandbox(), ...s.data, target: { ...emptySandbox().target, ...s.data.target } });
+    const buffs = { ...NO_BUFFS, ...s.data.buffs };
+    const ids = potionIdsOf(buffs, boot.potions);
+    setSb({
+      ...emptySandbox(),
+      ...s.data,
+      // Older setups only stored potion %: map them onto real potions when they match one.
+      buffs: ids ? withPotions(buffs, ids, potionById) : buffs,
+      target: { ...emptySandbox().target, ...s.data.target },
+    });
     // Older setups have no gearMode: treat as sandbox only if their gear differs from your saved gear.
     const key = (g: GearSelection[]) => JSON.stringify([...g].sort((a, b) => a.slot.localeCompare(b.slot)).map((x) => [x.slot, x.gear_item_id, x.tier]));
     const usesSandboxGear = s.data.gearMode ? s.data.gearMode === 'sandbox' : key(s.data.gear ?? []) !== key(profileGear);
@@ -482,7 +501,8 @@ function Workbench({
     onSetupsChanged(boot.setups.map((x) => ({ ...x, pinned: x.id === s.id ? !s.pinned : false })));
   }
   function resetToCharacter() {
-    setSb((cur) => ({ ...emptySandbox(), target: cur.target, counts: cur.counts }));
+    // Siege buffs are situational, so they stay; potions go back to your loadout.
+    setSb((cur) => ({ ...emptySandbox(), buffs: withPotions(cur.buffs, loadoutIds, potionById), target: cur.target, counts: cur.counts }));
     setGearSandbox(false);
     setActiveSetupId(null);
   }
@@ -494,7 +514,10 @@ function Workbench({
   }
   const mySetups = boot.setups.filter((s) => s.profile_id === profile.id || !s.profile_id);
   const activeSetup = mySetups.find((s) => s.id === activeSetupId) ?? null;
-  const sandboxActive = gearSandbox || sb.pet.mode === 'sandbox' || !!sb.classOverride || !!activeSetup;
+  const pickedIds = potionIdsOf(sb.buffs, boot.potions);
+  const potionsDiffer = pickedIds == null || potionKey(pickedIds) !== potionKey(loadoutIds);
+  const sandboxActive = gearSandbox || sb.pet.mode === 'sandbox' || !!sb.classOverride || potionsDiffer || !!activeSetup;
+  const setPotionIds = (ids: number[]) => setSb((s) => ({ ...s, buffs: withPotions(s.buffs, ids, potionById) }));
 
   return (
     <div className="space-y-4">
@@ -620,12 +643,17 @@ function Workbench({
           critChance={char.critChance.gear}
         />
         <div className="flex flex-col gap-4">
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-base">Buffs</CardTitle></CardHeader>
-            <CardContent>
-              <BuffsInline buffs={sb.buffs} setBuffs={(b) => patchSb({ buffs: b })} />
-            </CardContent>
-          </Card>
+          <BuffsCard
+            buffs={sb.buffs}
+            setBuffs={(b) => patchSb({ buffs: b })}
+            pickedIds={pickedIds}
+            setPotionIds={setPotionIds}
+            potions={boot.potions}
+            potionById={potionById}
+            loadouts={loadouts}
+            myLoadout={myLoadout}
+            differs={potionsDiffer}
+          />
           <PetCard
             pet={sb.pet}
             setPet={(p) => patchSb({ pet: { ...sb.pet, ...p } })}
@@ -665,6 +693,7 @@ function Workbench({
         critDamage={fighter.critDamage}
         damageFlat={fighter.damageFlat}
         potions={boot.potions}
+        onUse={setPotionIds}
         maxHp={settings.maxHp ?? null}
         food={foodByName(settings.food)}
         marketAccess={hasMarketAccess(profile.character_class)}
@@ -1060,32 +1089,206 @@ function GearCard({
   );
 }
 
-function BuffsInline({ buffs, setBuffs }: { buffs: BuffState; setBuffs: (b: BuffState) => void }) {
+const SLOT_ROWS = [
+  { kind: 'attack', label: 'Attack', icon: '⚔' },
+  { kind: 'protection', label: 'Protection', icon: '🛡' },
+  { kind: 'combo', label: 'Both slots', icon: '✦' },
+] as const;
+
+const potionBonus = (p: PotionRow) =>
+  [p.attack_power_bonus && `+${p.attack_power_bonus}% AP`, p.protection_bonus && `+${p.protection_bonus}% Prot`].filter(Boolean).join(' · ');
+
+/**
+ * Buffs: potions picked from the real in-game combinations (one attack slot + one protection slot,
+ * combos fill both), starting from your default assault loadout. Siege buffs sit underneath.
+ */
+function BuffsCard({
+  buffs,
+  setBuffs,
+  pickedIds,
+  setPotionIds,
+  potions,
+  potionById,
+  loadouts,
+  myLoadout,
+  differs,
+}: {
+  buffs: BuffState;
+  setBuffs: (b: BuffState) => void;
+  /** null = an old setup whose potion % matches no real potion */
+  pickedIds: number[] | null;
+  setPotionIds: (ids: number[]) => void;
+  potions: PotionRow[];
+  potionById: Map<number, PotionRow>;
+  loadouts: PotionLoadout[];
+  myLoadout: PotionLoadout | null;
+  differs: boolean;
+}) {
   const set = (p: Partial<BuffState>) => setBuffs({ ...buffs, ...p });
+  const ids = pickedIds ?? [];
+  const picked = ids.map((id) => potionById.get(id)).filter((p): p is PotionRow => !!p);
+  const combo = picked.find((p) => kindOf(p) === 'combo') ?? null;
+  const rows = SLOT_ROWS.map((r) => ({
+    ...r,
+    items: potions
+      .filter((p) => kindOf(p) === r.kind)
+      .sort((a, b) => a.attack_power_bonus + a.protection_bonus - (b.attack_power_bonus + b.protection_bonus)),
+  })).filter((r) => r.items.length);
+  const loadoutKey = (l: PotionLoadout) => potionKey(legalPotionIds(l.combat_potion_ids, potionById));
+  const activeKey = pickedIds ? potionKey(pickedIds) : null;
+  const myLoadoutIds = myLoadout ? legalPotionIds(myLoadout.combat_potion_ids, potionById) : [];
+
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="space-y-1 block w-32">
-          <span className="text-xs text-muted-foreground">AP potion</span>
-          <Select value={buffs.apPotionPct} onChange={(v) => set({ apPotionPct: Number(v) })}>
-            {POTION_PCTS.map((p) => <option key={p} value={p}>{p ? `+${p}%` : 'None'}</option>)}
-          </Select>
-        </label>
-        <Toggle on={buffs.scorpion} onClick={() => set({ scorpion: !buffs.scorpion })}>🏰 Scorpion +100</Toggle>
-        <Toggle on={buffs.keg} onClick={() => set({ keg: !buffs.keg })}>🏰 Keg +10%</Toggle>
-      </div>
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="space-y-1 block w-32">
-          <span className="text-xs text-muted-foreground">Protection potion</span>
-          <Select value={buffs.protPotionPct} onChange={(v) => set({ protPotionPct: Number(v) })}>
-            {POTION_PCTS.map((p) => <option key={p} value={p}>{p ? `+${p}%` : 'None'}</option>)}
-          </Select>
-        </label>
-        <Toggle on={buffs.medTent} onClick={() => set({ medTent: !buffs.medTent })}>🏰 Med tent +50</Toggle>
-        <Toggle on={buffs.medKit} onClick={() => set({ medKit: !buffs.medKit })}>🏰 Med kit +10%</Toggle>
-      </div>
-    </div>
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="text-base">Buffs</CardTitle>
+          {myLoadout || ids.length ? (
+            differs ? (
+              <button
+                type="button"
+                className="text-xs text-amber-400 hover:underline"
+                onClick={() => setPotionIds(myLoadoutIds)}
+                title="Put your current assault loadout back in the slots"
+              >
+                {myLoadout ? `Differs from ${myLoadout.name} · reset` : 'Clear potions'}
+              </button>
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                <span className="text-green-500">✓</span> Your assault loadout{myLoadout ? <> · <b className="text-foreground">{myLoadout.name}</b></> : null}
+              </span>
+            )
+          ) : null}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {/* saved loadouts */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-muted-foreground mr-1">Loadouts</span>
+          {loadouts.map((l) => {
+            const lIds = legalPotionIds(l.combat_potion_ids, potionById);
+            const on = activeKey === loadoutKey(l);
+            return (
+              <button
+                key={l.id}
+                type="button"
+                onClick={() => setPotionIds(lIds)}
+                title={`${l.name}${l.is_default ? ' (current assault loadout)' : ''}${l.source === 'discord' ? ' · from Discord' : ''}: ${lIds.map((id) => potionById.get(id)?.name).join(' + ') || 'no combat potions'}`}
+                className={`inline-flex items-center gap-1 rounded-full border pl-1.5 pr-2 py-0.5 text-xs transition-colors ${
+                  on ? 'border-primary bg-primary/10 text-foreground' : 'hover:bg-muted text-muted-foreground'
+                }`}
+              >
+                {lIds.length ? (
+                  <span className="flex -space-x-1.5">
+                    {lIds.map((id) => <PotionIcon key={id} p={potionById.get(id)} className="h-4 w-4 ring-1 ring-background" />)}
+                  </span>
+                ) : null}
+                {l.name}
+                {l.is_default && <span className="text-[10px] text-crystal">current</span>}
+              </button>
+            );
+          })}
+          <Link href="/assault/potions" className="text-xs text-muted-foreground hover:text-foreground hover:underline ml-1">
+            {loadouts.length ? 'Edit' : 'No saved loadout yet · make one'}
+          </Link>
+        </div>
+
+        {/* slots */}
+        <div className="rounded-md border divide-y">
+          {rows.map((r) => {
+            const slotTaken = r.kind !== 'combo' && combo;
+            const slotFilled = r.kind !== 'combo' && picked.some((p) => kindOf(p) === r.kind);
+            return (
+              <div key={r.kind} className="flex items-start gap-2 px-2 py-1.5">
+                <span className="w-20 shrink-0 pt-1 text-xs text-muted-foreground">
+                  {r.icon} {r.label}
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  {r.kind !== 'combo' && (
+                    <PotionChip
+                      on={!slotFilled && !slotTaken}
+                      onClick={() => setPotionIds(clearSlot(ids, r.kind, potionById))}
+                    >
+                      <span className="text-muted-foreground">None</span>
+                    </PotionChip>
+                  )}
+                  {r.items.map((p) => (
+                    <PotionChip
+                      key={p.id}
+                      on={ids.includes(p.id)}
+                      dim={!!slotTaken}
+                      onClick={() => setPotionIds(togglePotion(ids, p, potionById))}
+                      title={`${p.name} · ${potionBonus(p)}${p.duration_minutes ? ` · ${p.duration_minutes} min` : ''}${slotTaken ? ` · replaces ${combo!.name}` : ''}`}
+                    >
+                      <PotionIcon p={p} className="h-4 w-4" />
+                      <span>{p.name}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {r.kind === 'combo' ? `${p.attack_power_bonus}/${p.protection_bonus}%` : `+${p.attack_power_bonus || p.protection_bonus}%`}
+                      </span>
+                    </PotionChip>
+                  ))}
+                  {slotTaken && <span className="self-center text-[10px] text-muted-foreground">in use by {combo!.name}</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="text-xs text-muted-foreground">
+          {pickedIds == null ? (
+            <span className="text-amber-400">
+              This setup has +{buffs.apPotionPct}% AP / +{buffs.protPotionPct}% Prot, which no potion combination gives. Pick potions to replace it.
+            </span>
+          ) : picked.length ? (
+            <>Potions: <b className="text-foreground">+{buffs.apPotionPct}% AP · +{buffs.protPotionPct}% Prot</b></>
+          ) : (
+            'No potions.'
+          )}
+        </div>
+
+        {/* siege buffs */}
+        <div className="flex flex-wrap items-center gap-1.5 border-t pt-3">
+          <span className="text-xs text-muted-foreground mr-1">🏰 Siege</span>
+          <Toggle on={buffs.scorpion} onClick={() => set({ scorpion: !buffs.scorpion })}>Scorpion +100 AP</Toggle>
+          <Toggle on={buffs.keg} onClick={() => set({ keg: !buffs.keg })}>Keg +10% AP</Toggle>
+          <Toggle on={buffs.medTent} onClick={() => set({ medTent: !buffs.medTent })}>Med tent +50 Prot</Toggle>
+          <Toggle on={buffs.medKit} onClick={() => set({ medKit: !buffs.medKit })}>Med kit +10% Prot</Toggle>
+        </div>
+      </CardContent>
+    </Card>
   );
+}
+
+function PotionChip({
+  on,
+  dim,
+  onClick,
+  title,
+  children,
+}: {
+  on: boolean;
+  dim?: boolean;
+  onClick: () => void;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-pressed={on}
+      className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs transition-colors ${
+        on ? 'border-primary bg-primary/10 text-foreground' : `hover:bg-muted ${dim ? 'opacity-50' : ''}`
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function PotionIcon({ p, className }: { p: PotionRow | undefined; className?: string }) {
+  if (!p?.image_url) return <span className={`inline-block rounded-full bg-muted ${className ?? ''}`} />;
+  return <img src={p.image_url} alt="" className={`rounded-full bg-background object-contain ${className ?? ''}`} />;
 }
 
 /** Breakpoint goals — same defaults as the original calculator. */
@@ -1460,6 +1663,7 @@ function PotionAdvisor({
   critDamage,
   damageFlat,
   potions,
+  onUse,
   maxHp,
   food,
   marketAccess,
@@ -1477,6 +1681,7 @@ function PotionAdvisor({
   critDamage: number;
   damageFlat: number;
   potions: PotionRow[];
+  onUse: (ids: number[]) => void;
   maxHp: number | null;
   food: Food;
 }) {
@@ -1543,7 +1748,7 @@ function PotionAdvisor({
         <CardTitle className="text-base flex items-center gap-2"><Shield className="h-4 w-4" />Potion advisor</CardTitle>
         <CardDescription>
           Enter how many hunted (not yet fled) enemies you have to battle. Tests every legal potion setup (one attack slot + one protection
-          slot; combo potions use both) and counts potions by battle time ÷ duration. Siege buffs above are kept.
+          slot; combo potions use both) and counts potions by battle time ÷ duration. Siege buffs above are kept; Use puts a pick in your potion slots.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -1570,9 +1775,9 @@ function PotionAdvisor({
         {res ? (
           <>
             <div className="grid gap-2 sm:grid-cols-3 text-sm">
-              <Pick title="Fastest" o={res.fastest} total={res.baseline.totalSeconds} />
-              <Pick title="Best value" o={res.bestValue} total={res.baseline.totalSeconds} />
-              <Pick title="Least damage" o={res.tankiest} total={res.baseline.totalSeconds} />
+              <Pick onUse={onUse} title="Fastest" o={res.fastest} total={res.baseline.totalSeconds} />
+              <Pick onUse={onUse} title="Best value" o={res.bestValue} total={res.baseline.totalSeconds} />
+              <Pick onUse={onUse} title="Least damage" o={res.tankiest} total={res.baseline.totalSeconds} />
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -1580,7 +1785,7 @@ function PotionAdvisor({
                   <tr><th className="py-1 pr-2">Setup</th><th className="pr-2">AP / Prot</th><th className="pr-2">Battle time</th><th className="pr-2">Hits saved</th><th className="pr-2">Dmg / 6-stack</th><th className="pr-2">Need</th><th className="text-right">Cost</th></tr>
                 </thead>
                 <tbody>
-                  <Row o={res.baseline} tag="now" />
+                  <Row o={res.baseline} tag="baseline" />
                   {res.options.slice(0, 12).map((o) => <Row key={o.key} o={o} />)}
                 </tbody>
               </table>
@@ -1599,10 +1804,18 @@ function PotionAdvisor({
   );
 }
 
-function Pick({ title, o, total }: { title: string; o: AdvisorOption | null; total: number }) {
+function Pick({ title, o, total, onUse }: { title: string; o: AdvisorOption | null; total: number; onUse: (ids: number[]) => void }) {
+  const ids = o ? Array.from(new Set([o.attackPotion?.id, o.protectionPotion?.id].filter((x): x is number => x != null))) : [];
   return (
     <div className="rounded-md border p-2">
-      <div className="text-xs text-muted-foreground">{title}</div>
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        {title}
+        {o && ids.length > 0 && (
+          <button type="button" className="hover:text-foreground hover:underline" onClick={() => onUse(ids)} title="Put these potions in your Buffs slots">
+            Use
+          </button>
+        )}
+      </div>
       {o ? (
         <>
           <div className="font-semibold">{o.isCombo ? o.attackPotion!.name : [o.attackPotion?.name, o.protectionPotion?.name].filter(Boolean).join(' + ')}</div>
