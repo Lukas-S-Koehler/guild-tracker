@@ -2,9 +2,9 @@ import { NextResponse } from 'next/server';
 import { COLORS } from '@/lib/assault-embed';
 
 // Times are given in server time (EST-based per guild); stored here as UTC.
-export const REGULAR_UTC = [11, 19];
-export const CL25_UTC = 15;
-export const EVENT_THIRD_UTC = 20; // "around"
+const REGULAR_UTC = [11, 19];
+const CL25_UTC = 15;
+const EVENT_THIRD_UTC = 20; // "around"
 /** Cursed Dreamers (CL 25 guild) runs the extra raid. */
 export const CURSED_DREAMERS_ID = '576';
 

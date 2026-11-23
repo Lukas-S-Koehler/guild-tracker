@@ -15,7 +15,6 @@ import { raidCls, req, raidLines } from '@/lib/discord-posts';
 import { buildRaidEmbed, CURSED_DREAMERS_ID } from '@/lib/raid-discord';
 import { GUIDE_SITE_URL } from '@/lib/game-guide';
 import { ASSAULT_ENTRY_GUILD_ID, ASSAULT_TOP_GUILD_ID, ASSAULT_TOP_MIN_CL } from '@/lib/raids';
-import { buildCalendar, calendarDiscordLines } from '@/lib/calendar';
 import { RECAP_PREFIX, assaultRecapKey, recapPayloadsFor } from '@/lib/assault-recap';
 import { getLiveRow, messageLink, publishLive, textPayloads, type LiveMode, type LivePayload, type PublishResult } from '@/lib/discord-live';
 
@@ -71,15 +70,6 @@ export const STATIC_DEFS: LiveDef[] = [
     label: 'Raid schedule',
     description: 'Raid times in local time plus which guild runs which CL raid. Pinned in #raid-pings, edited in place daily.',
     channel: CHANNELS.raidPings,
-    mode: 'edit',
-    pin: true,
-    source: 'build',
-  },
-  {
-    key: 'calendar-week',
-    label: 'Calendar: next 7 days',
-    description: 'Raid times, assault launches and staff events (Admin → Calendar) for the coming week, in local time. Edited in place daily.',
-    channel: null,
     mode: 'edit',
     pin: true,
     source: 'build',
@@ -272,7 +262,6 @@ async function buildLinksHub(supabase: SupabaseClient): Promise<LivePayload[]> {
     `• **Combat tool**: <${SITE}/combat>`,
     `• **Assault** live, rankings and prep: <${SITE}/assault>`,
     `• **Leaderboard**: <${SITE}/leaderboard>`,
-    `• **Calendar** (raids, assaults, events; add to your own calendar app): <${SITE}/calendar>`,
     `-# Run \`/claim\` to link your Discord and claim your character: unlocks the member pages and keeps your guild roles in sync.`,
     '',
     '## 💬 Channels',
@@ -292,18 +281,7 @@ async function buildLinksHub(supabase: SupabaseClient): Promise<LivePayload[]> {
   return textPayloads(lines);
 }
 
-async function buildCalendarWeek(supabase: SupabaseClient): Promise<LivePayload[]> {
-  const events = await buildCalendar(supabase, { from: new Date(), days: 7 });
-  return textPayloads([
-    '# 📅 Dream calendar: next 7 days',
-    ...calendarDiscordLines(events, { live: true }),
-    '',
-    `Full calendar + add it to your own calendar app: <${SITE}/calendar>`,
-  ]);
-}
-
 const BUILDERS: Record<string, (s: SupabaseClient) => Promise<LivePayload[]>> = {
-  'calendar-week': buildCalendarWeek,
   'guild-directory': buildGuildDirectory,
   'raid-schedule': buildRaidSchedule,
   'links-hub': buildLinksHub,

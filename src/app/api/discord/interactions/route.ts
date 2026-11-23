@@ -6,7 +6,7 @@ import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registe
 import { handleAssaultCommand, handleAssaultAutocomplete, handleAssaultChecklistComponent, handleAssaultPotionsComponent } from '@/lib/assault-discord';
 import { handleRaidCommand } from '@/lib/raid-discord';
 import { handleGuideCommand } from '@/lib/guide-discord';
-import { handleCalendar, handleNetworkBoard, handleAway, handleClaim, handleGuild, handleGuildAutocomplete, handleHelp, handleMe, handleProfile, handleProfileAutocomplete, registerHubCommands, type HubInteraction } from '@/lib/hub-discord';
+import { handleNetworkBoard, handleAway, handleClaim, handleGuild, handleGuildAutocomplete, handleHelp, handleMe, handleProfile, handleProfileAutocomplete, registerHubCommands, type HubInteraction } from '@/lib/hub-discord';
 import { getDiscordProfile, formatCharacterLine } from '@/lib/lookup-service';
 import { switchAccountMain } from '@/lib/alt-switch';
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
@@ -171,7 +171,6 @@ export async function POST(req: NextRequest) {
       if (name === 'me') return handleMe(hub);
       if (name === 'guild') return handleGuild(hub);
       if (name === 'profile') return handleProfile(hub);
-      if (name === 'calendar') return handleCalendar(hub);
       if (name === 'away') return handleAway(hub);
     }
   }
