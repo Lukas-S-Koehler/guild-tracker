@@ -361,6 +361,26 @@ export async function registerLeaderboardCommand(): Promise<{ ok: boolean; error
 
   const options = [
     {
+      name: 'board',
+      type: 3,
+      description: 'Which board (default: activity)',
+      required: false,
+      choices: [
+        { name: 'Activity (raids + gold)', value: 'activity' },
+        { name: 'Current streak', value: 'streak' },
+        { name: 'Longest streak', value: 'best_streak' },
+        { name: 'Most improved (this week vs last)', value: 'improved' },
+        { name: 'Dream XP (achievements)', value: 'dream_xp' },
+      ],
+    },
+    {
+      name: 'class',
+      type: 3,
+      description: 'Activity board: only this class',
+      required: false,
+      autocomplete: true,
+    },
+    {
       name: 'period',
       type: 3,
       description: 'Time period',
@@ -403,7 +423,7 @@ export async function registerLeaderboardCommand(): Promise<{ ok: boolean; error
         method: 'POST',
         body: JSON.stringify({
           name,
-          description: 'Show the activity leaderboard',
+          description: 'Dream leaderboards: activity, streaks, most improved, Dream XP',
           options,
         }),
       });

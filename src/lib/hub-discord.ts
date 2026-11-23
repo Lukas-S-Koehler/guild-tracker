@@ -22,6 +22,7 @@ import { buildMeAssault } from '@/lib/me-assault';
 import { personalRecapEmbed } from '@/lib/assault-recap';
 import { buildProfile, findProfileAccount } from '@/lib/profile';
 import { profilePath } from '@/lib/profile-path';
+import { NETWORK_BOARDS, getNetworkBoards, placeOf, type NetworkBoardKey } from '@/lib/network-boards';
 
 const SITE = GUIDE_SITE_URL;
 const CRYSTAL = 0x4cc9f0;
@@ -340,6 +341,45 @@ export function handleProfile(i: HubInteraction) {
   });
 }
 
+// ─── /leaderboard board: (step 13) ───────────────────────────────────────────
+
+const MEDALS = ['🥇', '🥈', '🥉'];
+
+export function handleNetworkBoard(i: HubInteraction, boardRaw: unknown) {
+  const board = String(boardRaw) as NetworkBoardKey;
+  const meta = NETWORK_BOARDS[board];
+  if (!meta) return ephemeral('Unknown board.');
+  return deferred(i, false, async () => {
+    const data = await getNetworkBoards();
+    const rows = data.boards[board].slice(0, 10);
+    const lines = rows.map((r, idx) => {
+      const place = placeOf(data.boards[board], idx);
+      const alts = r.alt_igns.length ? ` (+${r.alt_igns.length})` : '';
+      const tag = r.guild_nickname ? ` · ${r.guild_nickname}` : '';
+      const value =
+        board === 'improved'
+          ? `+${fmt(r.value)} (${fmt(r.before ?? 0)} → ${fmt(r.after ?? 0)})`
+          : board === 'dream_xp'
+            ? `${fmt(r.value)} XP${r.rank_emoji ? ` ${r.rank_emoji} ${r.rank_name}` : ''}`
+            : `${r.value} day${r.value === 1 ? '' : 's'}`;
+      return `${MEDALS[place - 1] ?? `**${place}.**`} **${r.ign}**${alts}${tag} · ${value}`;
+    });
+    const url = `${SITE}/leaderboard`;
+    return {
+      embeds: [
+        {
+          title: `${meta.emoji} ${meta.label}`,
+          url,
+          color: CRYSTAL,
+          description: [meta.description, '', ...(lines.length ? lines : ['_Nobody on this board yet._'])].join('\n').slice(0, 4000),
+          footer: { text: 'All Dream guilds · alts pooled into one account' },
+        },
+      ],
+      components: [row(linkButton('Full leaderboard', url))],
+    };
+  });
+}
+
 // ─── /away ───────────────────────────────────────────────────────────────────
 
 async function rankOfDiscord(supabase: SupabaseClient, discordId: string): Promise<number> {
@@ -414,7 +454,8 @@ const MEMBER_HELP: [string, string[]][] = [
     '`/guild tag:` requirement, raids, leaders and stats of a guild',
     '`/raid` raid times in your local time',
     '`/activity-bank` how the activity bank works',
-    '`/leaderboard` activity ranks (week / month / all time, per guild)',
+    '`/leaderboard` activity ranks (week / month / all time, per guild or class)',
+    '`/leaderboard board:` current / longest streak, most improved, Dream XP',
     '`/bumps` bump leaderboard',
     '`/guide show` links to the game guide',
   ]],

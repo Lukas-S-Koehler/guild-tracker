@@ -10,9 +10,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, Copy, Check } from 'lucide-react';
 import { formatGold, getRankEmoji, formatLeaderboard, copyToClipboard } from '@/lib/utils';
 import { useApiClient } from '@/lib/api-client';
+import { NetworkBoard, prettyClass, useNetworkBoards, type NetworkBoardKey } from '@/components/leaderboard/network-boards';
 
 type Period = 'week' | 'month' | 'all';
 type Filter = 'all' | 'non-locked' | 'locked';
+type Board = 'activity' | NetworkBoardKey;
 
 interface Guild {
   id: string;
@@ -48,7 +50,10 @@ export default function LeaderboardPage() {
   const [filter, setFilter] = useState<Filter>('all');
   const [merged, setMerged] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [board, setBoard] = useState<Board>('activity');
+  const [classFilter, setClassFilter] = useState<string>('all');
   const api = useApiClient();
+  const network = useNetworkBoards();
 
   // Fetch guilds list on mount
   useEffect(() => {
@@ -71,6 +76,7 @@ export default function LeaderboardPage() {
       try {
         const params = new URLSearchParams({ period, merged: String(merged), filter });
         if (guildFilter !== 'all') params.set('guild', guildFilter);
+        if (classFilter !== 'all') params.set('class', classFilter);
         const res = await api.get(`/api/leaderboard?${params}`);
         const data = await res.json();
         setEntries(Array.isArray(data) ? data : []);
@@ -83,7 +89,7 @@ export default function LeaderboardPage() {
     }
     fetchLeaderboard();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period, guildFilter, merged, filter]);
+  }, [period, guildFilter, merged, filter, classFilter]);
 
   const handleCopy = async () => {
     const periodLabel = period === 'week' ? 'This Week' : period === 'month' ? 'This Month' : 'All Time';
@@ -93,7 +99,8 @@ export default function LeaderboardPage() {
       const g = guilds.find((x) => x.id === guildFilter);
       if (g) guildLabel = g.nickname ? `${g.nickname} - ${g.name}` : g.name;
     }
-    const combinedLabel = [filterLabel, guildLabel].filter(Boolean).join(' · ') || null;
+    const classLabel = classFilter !== 'all' ? prettyClass(classFilter) : null;
+    const combinedLabel = [filterLabel, classLabel, guildLabel].filter(Boolean).join(' · ') || null;
     const text = formatLeaderboard(entries, periodLabel, combinedLabel);
     const ok = await copyToClipboard(text);
     if (ok) {
@@ -107,10 +114,23 @@ export default function LeaderboardPage() {
       <div>
         <h1 className="text-2xl font-bold">🏆 Leaderboard</h1>
         <p className="text-muted-foreground">
-          Activity rankings based on raids and donations
+          Rankings across every Dream guild
         </p>
       </div>
 
+      <Tabs value={board} onValueChange={(v) => setBoard(v as Board)}>
+        <TabsList className="h-auto flex-wrap">
+          <TabsTrigger value="activity">🏆 Activity</TabsTrigger>
+          <TabsTrigger value="streak">🔥 Streak</TabsTrigger>
+          <TabsTrigger value="best_streak">🏔️ Longest streak</TabsTrigger>
+          <TabsTrigger value="improved">📈 Most improved</TabsTrigger>
+          <TabsTrigger value="dream_xp">🌌 Dream XP</TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {board !== 'activity' ? (
+        <NetworkBoard board={board} data={network.data} error={network.error} />
+      ) : (
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between flex-wrap gap-4">
@@ -144,6 +164,20 @@ export default function LeaderboardPage() {
                   {guilds.map((guild) => (
                     <SelectItem key={guild.id} value={guild.id}>
                       {guild.nickname} - {guild.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={classFilter} onValueChange={setClassFilter}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="All classes" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All classes</SelectItem>
+                  {(network.data?.classes ?? []).map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {prettyClass(c)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -206,7 +240,7 @@ export default function LeaderboardPage() {
                                 ⛓ {entry.class}
                               </span>
                             ) : entry.class ? (
-                              <span className="ml-1.5 text-xs text-muted-foreground">{entry.class}</span>
+                              <span className="ml-1.5 text-xs text-muted-foreground">{prettyClass(entry.class)}</span>
                             ) : null}
                             {merged && entry.alt_count && entry.alt_count > 0 ? (
                               <span
@@ -246,6 +280,7 @@ export default function LeaderboardPage() {
           )}
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }

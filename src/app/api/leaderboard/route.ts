@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
       guildFilter,
       merged,
       filter,
+      cls: searchParams.get('class'),
     });
     return NextResponse.json(entries);
   } catch (err) {

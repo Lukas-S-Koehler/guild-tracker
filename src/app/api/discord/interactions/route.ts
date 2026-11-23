@@ -6,7 +6,7 @@ import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registe
 import { handleAssaultCommand, handleAssaultAutocomplete, handleAssaultChecklistComponent, handleAssaultPotionsComponent } from '@/lib/assault-discord';
 import { handleRaidCommand } from '@/lib/raid-discord';
 import { handleGuideCommand } from '@/lib/guide-discord';
-import { handleAway, handleClaim, handleGuild, handleGuildAutocomplete, handleHelp, handleMe, handleProfile, handleProfileAutocomplete, registerHubCommands, type HubInteraction } from '@/lib/hub-discord';
+import { handleNetworkBoard, handleAway, handleClaim, handleGuild, handleGuildAutocomplete, handleHelp, handleMe, handleProfile, handleProfileAutocomplete, registerHubCommands, type HubInteraction } from '@/lib/hub-discord';
 import { getDiscordProfile, formatCharacterLine } from '@/lib/lookup-service';
 import { switchAccountMain } from '@/lib/alt-switch';
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
@@ -198,6 +198,8 @@ export async function POST(req: NextRequest) {
     interaction.type === INTERACTION_TYPE_COMMAND &&
     (interaction.data?.name === 'leaderboard' || interaction.data?.name === 'lb')
   ) {
+    const board = interaction.data?.options?.find((o: { name: string }) => o.name === 'board')?.value;
+    if (board && board !== 'activity') return handleNetworkBoard(interaction as HubInteraction, board);
     return handleLeaderboardCommand(interaction);
   }
 
@@ -563,6 +565,16 @@ async function handleLeaderboardAutocomplete(interaction: {
 }) {
   const supabase = createAdminClient();
   const focused = interaction.data?.options?.find((o) => o.focused);
+  if (focused?.name === 'class') {
+    const q = String(focused.value ?? '').toLowerCase();
+    const { data } = await supabase.from('members').select('class').eq('is_active', true).not('class', 'is', null).limit(1000);
+    const classes = Array.from(new Set((data ?? []).map((m) => m.class as string))).sort();
+    const choices = classes
+      .filter((c) => !q || c.toLowerCase().includes(q))
+      .slice(0, 25)
+      .map((c) => ({ name: c.charAt(0) + c.slice(1).toLowerCase(), value: c }));
+    return NextResponse.json({ type: 8, data: { choices } });
+  }
   if (focused?.name !== 'guild') {
     return NextResponse.json({ type: 8, data: { choices: [] } });
   }
@@ -601,6 +613,7 @@ async function handleLeaderboardCommand(interaction: {
     filterRaw === 'locked' || filterRaw === 'non-locked' ? filterRaw : 'all';
   const guildFilter = (options.find((o) => o.name === 'guild')?.value as string) || null;
   const merged = options.find((o) => o.name === 'merge_alts')?.value === true;
+  const cls = (options.find((o) => o.name === 'class')?.value as string) || null;
 
   try {
     const entries = await fetchLeaderboard({
@@ -609,6 +622,7 @@ async function handleLeaderboardCommand(interaction: {
       guildFilter,
       merged,
       filter,
+      cls,
     });
 
     let guildLabel: string | null = null;
@@ -624,7 +638,8 @@ async function handleLeaderboardCommand(interaction: {
     const periodLabel = period === 'week' ? 'This Week' : period === 'month' ? 'This Month' : 'All Time';
     const filterLabel = filter === 'locked' ? 'Market-Locked' : filter === 'non-locked' ? 'Non-Locked' : null;
     const mergedLabel = merged ? 'Alts merged' : null;
-    const combinedLabel = [filterLabel, mergedLabel, guildLabel].filter(Boolean).join(' · ') || null;
+    const classLabel = cls ? cls.charAt(0) + cls.slice(1).toLowerCase() : null;
+    const combinedLabel = [filterLabel, classLabel, mergedLabel, guildLabel].filter(Boolean).join(' · ') || null;
     const content = entries.length === 0
       ? `_No entries match those filters._${guildLabel ? `\n_Guild: ${guildLabel}_` : ''}`
       : formatLeaderboard(entries, periodLabel, combinedLabel);

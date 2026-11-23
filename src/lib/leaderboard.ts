@@ -38,6 +38,8 @@ interface FetchArgs {
   guildFilter?: string | null;
   merged: boolean;
   filter: LeaderboardFilter;
+  /** Only characters (merged: accounts whose main) of this class, case-insensitive. */
+  cls?: string | null;
 }
 
 function viewFor(period: LeaderboardPeriod): string {
@@ -48,14 +50,15 @@ function viewFor(period: LeaderboardPeriod): string {
   }
 }
 
-function matchesFilter(cls: string | null | undefined, filter: LeaderboardFilter): boolean {
+function matchesFilter(cls: string | null | undefined, filter: LeaderboardFilter, only?: string | null): boolean {
+  if (only && (cls ?? '').toLowerCase() !== only.toLowerCase()) return false;
   if (filter === 'all') return true;
   const locked = isMarketLocked(cls);
   return filter === 'locked' ? locked : !locked;
 }
 
 export async function fetchLeaderboard({
-  supabase, period, guildFilter, merged, filter,
+  supabase, period, guildFilter, merged, filter, cls,
 }: FetchArgs): Promise<LeaderboardEntry[]> {
   let query = supabase.from(viewFor(period)).select('*');
   if (guildFilter && guildFilter !== 'all') {
@@ -67,7 +70,7 @@ export async function fetchLeaderboard({
   const entries = (data ?? []) as LeaderboardRow[];
 
   if (!merged) {
-    const filtered = entries.filter((e) => matchesFilter(e.class, filter));
+    const filtered = entries.filter((e) => matchesFilter(e.class, filter, cls));
     const memberIds = filtered.map((e) => e.id);
     if (memberIds.length === 0) return [];
 
@@ -201,7 +204,7 @@ export async function fetchLeaderboard({
     };
   });
 
-  const filtered = merged_entries.filter((e) => matchesFilter(e.class, filter));
+  const filtered = merged_entries.filter((e) => matchesFilter(e.class, filter, cls));
   filtered.sort((a, b) => b.activity_score - a.activity_score);
   return filtered;
 }
