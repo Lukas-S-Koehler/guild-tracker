@@ -6,6 +6,7 @@ import { messageLink, publishLive, textPayloads } from '@/lib/discord-live';
 import { buildDailyBoard, DAILY_BOARD_KEY, inactivityKey, type BoardGuild, type DmStatus } from '@/lib/live-messages';
 import { loadAwayCover, withAwayEnd, awayUnix } from '@/lib/away';
 import { getWarningInfo, getEffectiveDaysInactive, findLastMetWeek, getISOWeekKey, getWeekSunday, getWeekKeyRange, RequirementPeriod } from '@/lib/warning-calculator';
+import { getSameGuildAltMaps } from '@/lib/alt-graph';
 
 export const dynamic = 'force-dynamic';
 
@@ -153,50 +154,9 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Fetch alt relationships — both directions to catch external-main pairs (mirrors overview logic)
-      const [{ data: mainInGuildLinks }, { data: altInGuildLinks }] = await Promise.all([
-        supabase.from('member_alts').select('member_id, alt_member_id')
-          .in('member_id', memberIds).not('alt_member_id', 'is', null),
-        supabase.from('member_alts').select('member_id, alt_member_id')
-          .in('alt_member_id', memberIds).not('alt_member_id', 'is', null),
-      ]);
-
-      const altToMain = new Map<string, string>(); // alt_member_id → member_id
-      const mainToAlts = new Map<string, string[]>(); // member_id → [alt_member_ids]
-
-      // Links where main is in guild
-      for (const link of mainInGuildLinks ?? []) {
-        if (!link.alt_member_id || !memberSet.has(link.alt_member_id)) continue;
-        altToMain.set(link.alt_member_id, link.member_id);
-        const arr = mainToAlts.get(link.member_id) ?? [];
-        arr.push(link.alt_member_id);
-        mainToAlts.set(link.member_id, arr);
-      }
-
-      // Links where main is external — group in-guild alts sharing the same external main
-      const memberCharIdMap = new Map(members.map(m => [m.id, (m as any).character_id ?? Infinity]));
-      const externalGroups = new Map<string, string[]>();
-      for (const link of altInGuildLinks ?? []) {
-        if (!link.alt_member_id || !memberSet.has(link.alt_member_id)) continue;
-        if (memberSet.has(link.member_id)) continue; // already handled by mainInGuildLinks
-        const arr = externalGroups.get(link.member_id) ?? [];
-        arr.push(link.alt_member_id);
-        externalGroups.set(link.member_id, arr);
-      }
-      for (const [, peerIds] of Array.from(externalGroups)) {
-        if (peerIds.length < 2) continue;
-        const sorted = [...peerIds].sort(
-          (a, b) => (memberCharIdMap.get(a) ?? Infinity) - (memberCharIdMap.get(b) ?? Infinity)
-        );
-        const effectiveMain = sorted[0]!;
-        for (const altId of sorted.slice(1)) {
-          if (altToMain.has(altId)) continue;
-          altToMain.set(altId, effectiveMain);
-          const arr = mainToAlts.get(effectiveMain) ?? [];
-          arr.push(altId);
-          mainToAlts.set(effectiveMain, arr);
-        }
-      }
+      // Same-guild alt groups from the full account closure (alts linked via a character
+      // in another guild, or via a chain, still count as one entity).
+      const { mainToAlts, altToMain } = await getSameGuildAltMaps(supabase, members as any);
 
       // Exemption propagation: leader/deputy chars and their same-guild linked alts
       const exemptIds = new Set<string>();

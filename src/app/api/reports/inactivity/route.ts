@@ -1,3 +1,4 @@
+import { getSameGuildAltMaps } from '@/lib/alt-graph';
 import { loadAwayCover, withAwayEnd } from '@/lib/away';
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
@@ -28,7 +29,7 @@ export async function GET(req: NextRequest) {
 
   const { data: members, error: membersError } = await supabase
     .from('members')
-    .select('id, ign, position, avatar_url, last_seen, first_seen, is_active, discord_id')
+    .select('id, ign, position, avatar_url, last_seen, first_seen, is_active, discord_id, character_id')
     .eq('current_guild_id', guildId)
     .eq('is_active', true);
 
@@ -109,23 +110,9 @@ export async function GET(req: NextRequest) {
     if (shifted) lastActivityMap.set(id, shifted);
   }
 
-  // Fetch alt relationships
-  const { data: altLinks } = await supabase
-    .from('member_alts')
-    .select('member_id, alt_member_id')
-    .in('member_id', memberIds)
-    .not('alt_member_id', 'is', null);
-
+  // Same-guild alt groups from the full account closure (same grouping as /me and auto-warn).
   const memberSet = new Set(memberIds);
-  const altToMain = new Map<string, string>();
-  const mainToAlts = new Map<string, string[]>();
-  for (const link of altLinks ?? []) {
-    if (!link.alt_member_id) continue;
-    altToMain.set(link.alt_member_id, link.member_id);
-    const arr = mainToAlts.get(link.member_id) ?? [];
-    arr.push(link.alt_member_id);
-    mainToAlts.set(link.member_id, arr);
-  }
+  const { mainToAlts, altToMain } = await getSameGuildAltMaps(supabase, members);
 
   // Exemption propagation: if any linked same-guild character is Leader/Deputy,
   // every linked character in this guild is exempt from activity checks.
