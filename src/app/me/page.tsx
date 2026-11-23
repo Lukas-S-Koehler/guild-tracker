@@ -23,6 +23,7 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import type { MeSummary, MeSummaryResult } from '@/lib/me-summary';
 import RankingsCard from '@/components/me/RankingsCard';
+import AchievementsCard from '@/components/me/AchievementsCard';
 
 const fmt = (n: number) => n.toLocaleString('en-US');
 const compact = (n: number) =>
@@ -376,6 +377,8 @@ export default function MePage() {
           </CardContent>
         </Card>
       </div>
+
+      <AchievementsCard />
 
       <RankingsCard />
 

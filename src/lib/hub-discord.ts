@@ -17,6 +17,7 @@ import { GUIDE_SITE_URL } from '@/lib/game-guide';
 import { ASSAULT_ENTRY_GUILD_ID, ASSAULT_TOP_GUILD_ID, ASSAULT_TOP_MIN_CL } from '@/lib/raids';
 import { HOLIDAY_LOG_CHANNEL, MAX_AWAY_DAYS, awayUnix, endAway, getActiveAway, listActiveAway, setAway } from '@/lib/away';
 import { outranks, outrankError, rankOfRole } from '@/lib/role-hierarchy';
+import { achievementsField } from '@/lib/achievement-discord';
 
 const SITE = GUIDE_SITE_URL;
 const CRYSTAL = 0x4cc9f0;
@@ -134,7 +135,10 @@ export function handleMe(i: HubInteraction) {
         components: [row(linkButton('My characters', `${SITE}/account`))],
       };
     }
-    const away = await getActiveAway(supabase, u.id);
+    const [away, ach] = await Promise.all([
+      getActiveAway(supabase, u.id),
+      achievementsField(supabase, s.characters.map((c) => c.member_id), link.user_id).catch(() => null),
+    ]);
     const checked = Math.floor(new Date(s.check.checked_day + 'T11:50:00Z').getTime() / 1000) + 86_400;
     const lines = [
       s.groups.length ? s.groups.map(groupLine).join('\n') : '_None of your characters is in an active Dream guild._',
@@ -145,7 +149,7 @@ export function handleMe(i: HubInteraction) {
     return {
       embeds: [
         {
-          title: `${s.main.ign}${s.main.guild_nickname ? ` · ${s.main.guild_nickname}` : ''}`,
+          title: `${s.main.ign}${ach?.title ? ` · ${ach.title}` : ''}${s.main.guild_nickname ? ` · ${s.main.guild_nickname}` : ''}`,
           url: `${SITE}/me`,
           color: CRYSTAL,
           thumbnail: s.main.avatar_url ? { url: s.main.avatar_url } : undefined,
@@ -155,6 +159,7 @@ export function handleMe(i: HubInteraction) {
             { name: 'Raids', value: fmt(s.tiles.lifetime_raids), inline: true },
             { name: 'Days met', value: `${fmt(s.tiles.days_met)} / ${fmt(s.tiles.days_logged)}`, inline: true },
             ...(s.tiles.assault_runs ? [{ name: 'Assault kills', value: fmt(s.tiles.assault_kills), inline: true }] : []),
+            ...(ach ? [{ name: ach.name, value: ach.value, inline: false }] : []),
             { name: 'Characters', value: s.characters.map((c) => c.ign).join(', ').slice(0, 1000) || '—', inline: false },
           ],
         },

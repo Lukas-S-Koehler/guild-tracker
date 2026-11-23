@@ -16,8 +16,8 @@ interface Item {
   label: string;
   description: string;
   channel: string | null;
-  mode: 'edit' | 'repost';
-  source: 'build' | 'auto-warn' | 'guild-hall';
+  mode: 'edit' | 'repost' | 'append';
+  source: 'build' | 'auto-warn' | 'guild-hall' | 'achievements';
   guild_active?: boolean;
   pings?: boolean;
   buildable: boolean;
@@ -118,7 +118,7 @@ function LiveCard({ item, onChange }: { item: Item; onChange: () => void }) {
                 <Badge variant="secondary">paused</Badge>
               )}
               {item.guild_active === false && <Badge variant="secondary">guild inactive · no reports</Badge>}
-              <Badge variant="outline" className="font-normal">{item.mode === 'edit' ? 'edited in place' : 'reposted daily'}</Badge>
+              <Badge variant="outline" className="font-normal">{item.mode === 'edit' ? 'edited in place' : item.mode === 'append' ? 'new post daily, history kept' : 'reposted daily'}</Badge>
             </CardTitle>
             <CardDescription>{item.description}</CardDescription>
           </div>
@@ -144,10 +144,12 @@ function LiveCard({ item, onChange }: { item: Item; onChange: () => void }) {
           )}
           {item.bound && !moved && (
             <>
-              <Button size="sm" variant="outline" disabled={!!busy} onClick={() => run('publish', { action: 'publish', force: true }, (d) => statusText(d.status))}>
-                {busy === 'publish' ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
-                {item.mode === 'edit' ? 'Update now' : 'Repost last'}
-              </Button>
+              {item.mode !== 'append' && (
+                <Button size="sm" variant="outline" disabled={!!busy} onClick={() => run('publish', { action: 'publish', force: true }, (d) => statusText(d.status))}>
+                  {busy === 'publish' ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+                  {item.mode === 'edit' ? 'Update now' : 'Repost last'}
+                </Button>
+              )}
               <Button size="sm" variant="outline" disabled={!!busy} onClick={() => run('toggle', { action: 'toggle', enabled: !item.enabled }, () => (item.enabled ? 'Paused.' : 'Resumed.'))}>
                 {item.enabled ? <Pause className="h-3 w-3 mr-1" /> : <Play className="h-3 w-3 mr-1" />}
                 {item.enabled ? 'Pause' : 'Resume'}
@@ -187,6 +189,7 @@ function LiveCard({ item, onChange }: { item: Item; onChange: () => void }) {
             {item.message_count} message{item.message_count === 1 ? '' : 's'} · last posted {ago(item.last_published_at)}
             {item.source === 'auto-warn' && ' · updated by the daily activity check'}
             {item.source === 'guild-hall' && ' · updated daily at 15:50 UTC'}
+            {item.source === 'achievements' && ' · new post daily after the activity check'}
           </p>
         )}
         {item.last_error && (

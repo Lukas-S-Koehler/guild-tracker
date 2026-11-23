@@ -57,6 +57,10 @@ schedule message) and F5 (calendar). `raid_reminders` could get a `raid_key` col
 
 ## Phase 2: gamification and community
 
+| # | Step | Status |
+|---|------|--------|
+| 9 | Achievements + badges + #hall-of-fame + titles (D1, D2, D3, D5). Catalogue and decisions in `docs/achievements.md`: 68 achievements, 5 tiers (Bronze → Dream), earned per account (alts pooled), challenge items counted once per item. Migration `database/achievements.sql`; evaluator `src/lib/achievement-eval.ts`, cron `/api/cron/achievements` (daily-activity workflow); feed `hall-of-fame` live key (mode append, silent backfill + one launch post, daily Silver+ digest); `/me` Achievements card + title picker; Discord `/me` shows achievements + title. Also: officer report + auto-warn now group alts by the full account closure (4c gap, `getSameGuildAltMaps`) | done (run migration, create #hall-of-fame, bind) |
+
 - **D1/D2 Achievements + badges:** `achievements` (key, category, name, desc, tier, threshold, metric, xp) + `user_achievements` (member_id, achievement_key, unlocked_at). Daily evaluator cron. ~60–80 tiered achievements: contribution, streak, assault, challenges, loyalty, level, community (bumps), journey.
 - **D3** unlock posts to #hall-of-fame. **D4** achievement/rank Discord roles. **D5** selectable title.
 - **D6 Dream Pass:** `dream_xp_events` ledger, level curve, rank names.

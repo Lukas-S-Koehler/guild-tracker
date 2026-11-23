@@ -96,6 +96,19 @@ jobs:
           echo "HTTP status: $http_code"
 
 
+      - name: Evaluate achievements
+        if: ${{ github.event.inputs.run_backfill != 'true' }}
+        run: |
+          echo "Evaluating achievements + #hall-of-fame digest..."
+          response=$(curl -s -L -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/achievements" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | head -n -1)
+          echo "Response: $body"
+          echo "HTTP status: $http_code"
+
+
       - name: Run backfill
         if: ${{ github.event.inputs.run_backfill == 'true' }}
         run: |

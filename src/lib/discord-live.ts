@@ -7,6 +7,8 @@
  *               Extra payloads are posted, leftover messages deleted, deleted messages re-posted.
  *  - 'repost' : delete the old messages and post fresh ones (daily reports). Keeps one current
  *               copy at the bottom of a busy channel and lets @mentions notify, which edits never do.
+ *  - 'append' : post fresh messages and keep the old ones (feeds like #hall-of-fame). Only the
+ *               latest post is tracked.
  * Unchanged content (same hash, same channel) is skipped unless `force` is set.
  */
 import { createHash } from 'crypto';
@@ -26,7 +28,7 @@ export interface LivePayload {
   flags?: number;
 }
 
-export type LiveMode = 'edit' | 'repost';
+export type LiveMode = 'edit' | 'repost' | 'append';
 
 export interface LiveRow {
   key: string;
@@ -178,6 +180,8 @@ export async function publishLive(
       }
       old = [];
       await saveRow(supabase, key, { message_ids: [] });
+    } else if (opts.mode === 'append') {
+      old = []; // keep earlier posts, just stop tracking them
     }
 
     for (let i = 0; i < payloads.length; i++) {

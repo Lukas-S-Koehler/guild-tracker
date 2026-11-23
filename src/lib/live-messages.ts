@@ -33,6 +33,8 @@ export const CHANNELS = {
   pingRoles: '1444752252899299618',
 } as const;
 
+export const HALL_OF_FAME_KEY = 'hall-of-fame';
+
 export interface LiveDef {
   key: string;
   label: string;
@@ -41,7 +43,7 @@ export interface LiveDef {
   channel: string | null;
   mode: LiveMode;
   pin?: boolean;
-  source: 'build' | 'auto-warn' | 'guild-hall';
+  source: 'build' | 'auto-warn' | 'guild-hall' | 'achievements';
   /** Inactivity reports only: inactive guilds get no report (auto-warn skips them). */
   guild_active?: boolean;
   /** Inactivity reports only: @mention flagged members (guild_config.settings.disable_pings off). */
@@ -86,6 +88,14 @@ export const STATIC_DEFS: LiveDef[] = [
     channel: CHANNELS.dailyCheck,
     mode: 'repost',
     source: 'auto-warn',
+  },
+  {
+    key: HALL_OF_FAME_KEY,
+    label: 'Hall of fame',
+    description: "Daily digest of Silver+ achievement unlocks (plus one launch post). New post each day; earlier ones stay. Bind to the new #hall-of-fame channel.",
+    channel: null,
+    mode: 'append',
+    source: 'achievements',
   },
 ];
 
@@ -272,7 +282,7 @@ export async function publishKey(supabase: SupabaseClient, key: string, force = 
   const def = findStaticDef(key) ?? (await allDefs(supabase)).find((d) => d.key === key);
   if (!def) return { ok: false, status: 'error', message_ids: [], error: `Unknown live message ${key}` };
   const payloads = await payloadsFor(supabase, key);
-  if (!payloads?.length) return { ok: false, status: 'error', message_ids: [], error: def.source === 'guild-hall' ? 'Nothing posted yet: comes with the daily guild hall run (15:50 UTC).' : 'Nothing posted yet: comes with the daily activity check (11:48 UTC).' };
+  if (!payloads?.length) return { ok: false, status: 'error', message_ids: [], error: def.source === 'guild-hall' ? 'Nothing posted yet: comes with the daily guild hall run (15:50 UTC).' : def.source === 'achievements' ? 'Nothing posted yet: comes with the daily achievements run after the activity check.' : 'Nothing posted yet: comes with the daily activity check (11:48 UTC).' };
   return publishLive(supabase, key, payloads, { mode: def.mode, pin: def.pin, force });
 }
 
