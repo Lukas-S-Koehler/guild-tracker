@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { requireUser, isResponse } from '@/lib/user-auth';
 import { getAccountCharacters } from '@/lib/account-service';
-import { PROFILE_COLUMNS } from '@/lib/combat/profile-service';
+import { PROFILE_COLUMNS, canCalibrateStats } from '@/lib/combat/profile-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,7 +19,8 @@ export async function GET(req: NextRequest) {
 
   const supabase = createAdminClient();
   const characters = await getAccountCharacters(user.id, supabase);
-  const [profiles, setups, gear, potions, enemies] = await Promise.all([
+  const [canCalibrate, profiles, setups, gear, potions, enemies] = await Promise.all([
+    canCalibrateStats(user.id, characters, supabase),
     supabase.from('combat_profiles').select(PROFILE_COLUMNS).eq('user_id', auth.user.id).order('created_at'),
     supabase
       .from('combat_setups')
@@ -51,5 +52,6 @@ export async function GET(req: NextRequest) {
     potions: potions.data ?? [],
     enemies: enemies.data ?? [],
     characters,
+    canCalibrate,
   });
 }

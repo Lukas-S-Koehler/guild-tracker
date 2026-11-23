@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { requireUser, isResponse } from '@/lib/user-auth';
 import { getAccountCharacters } from '@/lib/account-service';
-import { fetchCharacterSnapshot, PROFILE_COLUMNS } from '@/lib/combat/profile-service';
+import { fetchCharacterSnapshot, PROFILE_COLUMNS, canCalibrateStats } from '@/lib/combat/profile-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,9 +59,24 @@ export async function PATCH(req: NextRequest) {
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (Array.isArray(body.gear)) patch.gear = body.gear;
-  if (body.settings && typeof body.settings === 'object') patch.settings = body.settings;
-
   const supabase = createAdminClient();
+  if (body.settings && typeof body.settings === 'object') {
+    const settings = { ...body.settings };
+    // Stat calibration is assaulters only: everyone else keeps whatever is stored (normally none).
+    if (!(await canCalibrateStats(user.id, await getAccountCharacters(user.id, supabase), supabase))) {
+      const { data: cur } = await supabase
+        .from('combat_profiles')
+        .select('settings')
+        .eq('id', body.id)
+        .eq('user_id', auth.user.id)
+        .maybeSingle();
+      const stored = (cur?.settings as Record<string, unknown> | null)?.manual;
+      if (stored === undefined) delete settings.manual;
+      else settings.manual = stored;
+    }
+    patch.settings = settings;
+  }
+
   const { data, error } = await supabase
     .from('combat_profiles')
     .update(patch)

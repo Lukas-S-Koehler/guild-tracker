@@ -107,6 +107,17 @@ export default function AchievementsCard() {
           {data?.claimed && (
             <span className="text-sm font-normal text-muted-foreground">
               {data.unlocked} / {data.total} · {data.xp.toLocaleString('en-US')} Dream XP
+              {data.rank && (
+                <>
+                  {' · '}
+                  <span className="text-foreground font-medium">{data.rank.emoji} {data.rank.name}</span>
+                </>
+              )}
+              {data.next_rank && (
+                <span title={`${data.next_rank.emoji} ${data.next_rank.name} at ${data.next_rank.min} Dream XP`}>
+                  {' · '}{(data.next_rank.min - data.xp).toLocaleString('en-US')} to {data.next_rank.name}
+                </span>
+              )}
             </span>
           )}
           {view && view.titles.length > 0 && data?.claimed && (

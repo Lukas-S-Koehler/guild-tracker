@@ -868,3 +868,23 @@ export async function registerMapCommand(): Promise<{ ok: boolean; error?: strin
     return { ok: false, error: String(err) };
   }
 }
+
+export interface DiscordRole { id: string; name: string; color: number; position: number; managed: boolean }
+
+/** All roles of a server. */
+export async function listGuildRoles(guildId: string): Promise<DiscordRole[]> {
+  return discordFetch<DiscordRole[]>(`/guilds/${guildId}/roles`);
+}
+
+/** Create a role (lands at the bottom of the list, below DreamBot's role, so the bot can assign it). */
+export async function createGuildRole(
+  guildId: string,
+  role: { name: string; color?: number; hoist?: boolean; mentionable?: boolean },
+  reason?: string
+): Promise<DiscordRole> {
+  return discordFetch<DiscordRole>(`/guilds/${guildId}/roles`, {
+    method: 'POST',
+    body: JSON.stringify({ hoist: false, mentionable: false, ...role }),
+    headers: reason ? { 'X-Audit-Log-Reason': encodeURIComponent(reason) } : undefined,
+  });
+}

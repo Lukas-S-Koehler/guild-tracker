@@ -10,12 +10,16 @@
  *  - Unmapped people (no character with their discord_id) are never changed, only reported.
  *  - `discord_role_keeps` rows are never removed (e.g. assault staff who aren't officers in game).
  *
+ *  - Achievement rank ladder (D4, src/lib/achievement-ranks.ts): one rank role, the highest reached by
+ *    the person's Dream XP. Managed only once DreamBot has created the rank roles.
+ *
  * The full plan needs the Server Members intent (lists the whole server). Single-user sync
  * (`syncDiscordUser`, after /claim or /map) works without it.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { addGuildMemberRole, getGuildMember, listAllGuildMembers, removeGuildMemberRole, type DiscordGuildMember } from '@/lib/discord-api';
 import { DISCORD_SERVER_ID } from '@/lib/discord-live';
+import { RANKS, loadRankRoles, rankFor, unlockKeysByMember, xpOf } from '@/lib/achievement-ranks';
 
 /** guilds.id → Discord roles. Role ids from the Dream Guilds server (2026-11-23). */
 export const GUILD_ROLES: Record<string, { tag: string; member: string; staff: string }> = {
@@ -62,12 +66,12 @@ export interface RolePlan {
   scanned: number;
 }
 
-type CharRow = { discord_id: string; ign: string; is_active: boolean | null; current_guild_id: string | null; position: string | null };
+type CharRow = { id: string; discord_id: string; ign: string; is_active: boolean | null; current_guild_id: string | null; position: string | null };
 
 async function loadCharacters(supabase: SupabaseClient, discordIds?: string[]): Promise<Map<string, CharRow[]>> {
   const out = new Map<string, CharRow[]>();
   for (let from = 0; ; from += 1000) {
-    let q = supabase.from('members').select('discord_id, ign, is_active, current_guild_id, position').not('discord_id', 'is', null).order('id');
+    let q = supabase.from('members').select('id, discord_id, ign, is_active, current_guild_id, position').not('discord_id', 'is', null).order('id');
     if (discordIds) q = q.in('discord_id', discordIds);
     const { data, error } = await q.range(from, from + 999);
     if (error) throw error;
@@ -81,8 +85,39 @@ async function loadKeeps(supabase: SupabaseClient): Promise<Set<string>> {
   return new Set((data ?? []).map((k) => `${k.discord_id}:${k.role_id}`));
 }
 
+/** Per-run state: keeps, rank role ids and achievement unlocks. */
+interface SyncCtx {
+  keeps: Set<string>;
+  /** rankKey → roleId (only ranks whose role exists). */
+  rankRoles: Record<string, string>;
+  managed: Set<string>;
+  unlocks: Map<string, Set<string>>;
+}
+
+/** Managed role ids → names, including the achievement rank roles that exist. */
+export function roleNames(rankRoles: Record<string, string>): Map<string, string> {
+  const m = new Map(ROLE_NAMES);
+  for (const r of RANKS) if (rankRoles[r.key]) m.set(rankRoles[r.key], `${r.name} (rank)`);
+  return m;
+}
+
+async function loadCtx(supabase: SupabaseClient, chars: Map<string, CharRow[]>): Promise<SyncCtx> {
+  const [keeps, rankRoles] = await Promise.all([loadKeeps(supabase), loadRankRoles(supabase)]);
+  const hasRanks = RANKS.some((r) => rankRoles[r.key]);
+  const memberIds = Array.from(chars.values()).flat().map((c) => c.id);
+  const unlocks = hasRanks ? await unlockKeysByMember(supabase, memberIds) : new Map<string, Set<string>>();
+  return { keeps, rankRoles, managed: new Set(roleNames(rankRoles).keys()), unlocks };
+}
+
+/** Dream XP of a person: union of unlocks over all their characters. */
+export function personXp(chars: CharRow[], unlocks: Map<string, Set<string>>): number {
+  const keys = new Set<string>();
+  for (const c of chars) unlocks.get(c.id)?.forEach((k) => keys.add(k));
+  return xpOf(keys);
+}
+
 /** Roles a known person should hold. */
-export function desiredRoles(chars: CharRow[]): Set<string> {
+export function desiredRoles(chars: CharRow[], ctx?: Pick<SyncCtx, 'rankRoles' | 'unlocks'>): Set<string> {
   const want = new Set<string>();
   for (const c of chars) {
     // Every Dream guild counts, inactive ones too: "inactive" only means no activity requirement /
@@ -94,15 +129,21 @@ export function desiredRoles(chars: CharRow[]): Set<string> {
     if (STAFF_POSITIONS.has((c.position ?? '').toUpperCase())) want.add(g.staff);
   }
   if (want.size === 0) want.add(RETIRED_ROLE);
+  if (ctx) {
+    const rank = rankFor(personXp(chars, ctx.unlocks));
+    const role = rank ? ctx.rankRoles[rank.key] : undefined;
+    if (role) want.add(role);
+  }
   return want;
 }
 
 const displayOf = (m: DiscordGuildMember) => m.nick ?? m.user?.global_name ?? m.user?.username ?? m.user?.id ?? '?';
 
-function diff(member: DiscordGuildMember, chars: CharRow[], keeps: Set<string>): RoleChange | null {
+function diff(member: DiscordGuildMember, chars: CharRow[], ctx: SyncCtx): RoleChange | null {
   const id = member.user!.id;
-  const want = desiredRoles(chars);
-  const have = new Set(member.roles.filter((r) => MANAGED_ROLES.has(r)));
+  const keeps = ctx.keeps;
+  const want = desiredRoles(chars, ctx);
+  const have = new Set(member.roles.filter((r) => ctx.managed.has(r)));
   const add = Array.from(want).filter((r) => !have.has(r));
   const removeAll = Array.from(have).filter((r) => !want.has(r));
   const kept = removeAll.filter((r) => keeps.has(`${id}:${r}`));
@@ -123,18 +164,19 @@ export async function planRoleSync(supabase: SupabaseClient): Promise<RolePlan> 
     }
     throw err;
   }
-  const [chars, keeps] = await Promise.all([loadCharacters(supabase), loadKeeps(supabase)]);
+  const chars = await loadCharacters(supabase);
+  const ctx = await loadCtx(supabase, chars);
   const changes: RoleChange[] = [];
   const unmapped: RolePlan['unmapped'] = [];
   for (const m of members) {
     if (!m.user || m.user.bot) continue;
     const c = chars.get(m.user.id);
     if (!c) {
-      const held = m.roles.filter((r) => MANAGED_ROLES.has(r) && r !== RETIRED_ROLE);
+      const held = m.roles.filter((r) => ctx.managed.has(r) && r !== RETIRED_ROLE);
       if (held.length) unmapped.push({ discord_id: m.user.id, name: displayOf(m), roles: held });
       continue;
     }
-    const d = diff(m, c, keeps);
+    const d = diff(m, c, ctx);
     if (d && (d.add.length || d.remove.length)) changes.push(d);
   }
   changes.sort((a, b) => a.name.localeCompare(b.name));
@@ -172,7 +214,7 @@ export async function syncDiscordUser(supabase: SupabaseClient, discordId: strin
   if (!member?.user) return null;
   const chars = (await loadCharacters(supabase, [discordId])).get(discordId);
   if (!chars?.length) return null;
-  const d = diff(member, chars, await loadKeeps(supabase));
+  const d = diff(member, chars, await loadCtx(supabase, new Map([[discordId, chars]])));
   if (!d || (!d.add.length && !d.remove.length)) return null;
   await applyRoleChanges([d]);
   return d;

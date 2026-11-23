@@ -9,7 +9,8 @@ import { AlertCircle, Loader2, RefreshCw, Shield } from 'lucide-react';
 interface Change { discord_id: string; name: string; characters: string[]; add: string[]; remove: string[]; kept: string[] }
 interface Plan { changes: Change[]; unmapped: { discord_id: string; name: string; roles: string[] }[]; scanned: number }
 interface Keep { discord_id: string; role_id: string; role_name: string; note: string | null }
-interface Data { ok: boolean; error?: string; plan?: Plan; keeps: Keep[]; auto: boolean; names?: Record<string, string> }
+interface RankRow { key: string; name: string; min: number; emoji: string; role_id: string | null; role_name: string | null; exists: boolean | null }
+interface Data { ok: boolean; error?: string; plan?: Plan; keeps: Keep[]; auto: boolean; names?: Record<string, string>; ranks?: RankRow[] }
 
 /**
  * Admin → Discord → Role sync (super admin). In-game guild + position → Member/Staff - <guild>,
@@ -75,7 +76,18 @@ export function RoleSyncPanel() {
     if (d) setData((x) => (x ? { ...x, auto: d.auto } : x));
   }
 
+  async function createRanks() {
+    if (!confirm('Create the missing achievement rank roles in Discord now? They land at the bottom of the role list; rename, recolour or move them afterwards as you like (keep them below DreamBot).')) return;
+    const d = await post({ action: 'create-ranks' }, 'ranks');
+    if (d) {
+      setMsg(d.created.length ? `Created: ${d.created.join(', ')}. Run a dry run to see who gets which rank.` : 'All rank roles already exist.');
+      load();
+    }
+  }
+
   const plan = data?.plan;
+  const ranks = data?.ranks ?? [];
+  const missingRanks = ranks.filter((r) => !r.role_id || r.exists === false).length;
 
   return (
     <div className="space-y-4">
@@ -113,6 +125,40 @@ export function RoleSyncPanel() {
           )}
         </CardContent>
       </Card>
+
+      {ranks.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Achievement ranks</CardTitle>
+            <CardDescription>
+              One role per person: the highest rank their Dream XP reaches (sum of achievement tier XP, alts pooled). Handled by the same
+              sync as guild roles, so Apply / daily auto covers it. Nothing happens until the roles exist.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <ul className="text-sm space-y-1">
+              {ranks.map((r) => (
+                <li key={r.key} className="flex flex-wrap items-center gap-2">
+                  <span>{r.emoji}</span>
+                  <span className="font-medium">{r.name}</span>
+                  <span className="text-xs text-muted-foreground">{r.min.toLocaleString('en-US')} Dream XP</span>
+                  <span className="flex-1" />
+                  {r.role_id && r.exists !== false ? (
+                    <Badge variant="secondary">{r.role_name ? `@${r.role_name}` : r.role_id}</Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-muted-foreground">{r.role_id ? 'deleted in Discord' : 'no role yet'}</Badge>
+                  )}
+                </li>
+              ))}
+            </ul>
+            {missingRanks > 0 && (
+              <Button size="sm" onClick={createRanks} disabled={busy !== null}>
+                {busy === 'ranks' ? <Loader2 className="h-3 w-3 animate-spin" /> : null} Create {missingRanks} missing role{missingRanks === 1 ? '' : 's'}
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {plan && plan.changes.length > 0 && (
         <Card>

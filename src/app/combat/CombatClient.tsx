@@ -156,6 +156,8 @@ interface Bootstrap {
   potions: PotionRow[];
   enemies: Enemy[];
   characters: AccountCharacter[];
+  /** Stat calibration is assaulters only (a character in DE/DI) or super admin. */
+  canCalibrate?: boolean;
 }
 
 export default function CombatClient() {
@@ -401,7 +403,8 @@ function Workbench({
 
   /* ── stats ── */
   const gear = gearSandbox ? sb.gear : profileGear;
-  const manual = settings.manual ?? ZERO_STATS;
+  const canCalibrate = !!boot.canCalibrate;
+  const manual = (canCalibrate && settings.manual) || ZERO_STATS;
   const charInput = (m: StatBlock) => ({
     stats: profile.stats,
     skills: profile.skills,
@@ -529,7 +532,7 @@ function Workbench({
           </PopoverTrigger>
           <PopoverContent className="w-80 text-xs space-y-2">
             <p>
-              <b>Saved to {profile.ign} automatically:</b> My gear + tiers, pet patted, max HP, food and stat calibration. Stats, pet, combat
+              <b>Saved to {profile.ign} automatically:</b> My gear + tiers, pet patted, max HP, food{canCalibrate ? ' and stat calibration' : ''}. Stats, pet, combat
               level, pet mastery and slayer ranks come from Sync.
             </p>
             <p>
@@ -636,6 +639,7 @@ function Workbench({
             char={char}
             buffed={buffed}
             manual={manual}
+            canCalibrate={canCalibrate}
             calibrate={(k, inGame) => {
               const withoutManual = buildCharacterStats(charInput(ZERO_STATS));
               setSetting('manual', { ...manual, [k]: inGame == null ? 0 : inGame - withoutManual[k] });
@@ -750,6 +754,7 @@ function SheetCard({
   char,
   buffed,
   manual,
+  canCalibrate,
   calibrate,
   settings,
   setSetting,
@@ -765,6 +770,7 @@ function SheetCard({
   char: ReturnType<typeof buildCharacterStats>;
   buffed: StatBlock;
   manual: StatBlock;
+  canCalibrate: boolean;
   calibrate: (k: StatKey, inGame: number | null) => void;
   settings: ProfileSettings;
   setSetting: <K extends keyof ProfileSettings>(k: K, v: ProfileSettings[K]) => void;
@@ -779,7 +785,7 @@ function SheetCard({
           <CardTitle className="text-base">Your Sheet</CardTitle>
           <ClassPicker real={realClass} override={classOverride} onChange={onClassOverride} />
         </div>
-        <CardDescription>Stat levels ×2.4 + pet + gear + class talents. Calibrate if a value differs from your in-game sheet. Amber = with buffs.</CardDescription>
+        <CardDescription>Stat levels ×2.4 + pet + gear + class talents. {canCalibrate ? 'Calibrate if a value differs from your in-game sheet. ' : ''}Amber = with buffs.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -790,7 +796,7 @@ function SheetCard({
                 {fmt(char[k])}
                 {buffed[k] !== char[k] && <span className="text-sm text-amber-400 ml-1">→ {fmt(buffed[k])}</span>}
               </div>
-              <Breakdown parts={[['Lv', b.levels[k]], ['Pet', b.pet[k]], ['Gear', b.gear[k]], ['Class', b.classBonus[k]], ['Adj', manual[k]]]} />
+              <Breakdown parts={[['Lv', b.levels[k]], ['Pet', b.pet[k]], ['Gear', b.gear[k]], ['Class', b.classBonus[k]], ...(canCalibrate ? [['Adj', manual[k]] as [string, number]] : [])]} />
               {open && (
                 <Input
                   type="number"
@@ -822,6 +828,7 @@ function SheetCard({
             {char.damageFlat.total > 0 && <span className="text-muted-foreground self-center">+{char.damageFlat.total} flat damage</span>}
           </div>
         )}
+        {canCalibrate ? (
         <div className="flex gap-3">
           <button className="text-xs underline text-muted-foreground" onClick={() => setOpen((v) => !v)}>
             {open ? 'Done calibrating' : 'Calibrate stats'}
@@ -830,6 +837,9 @@ function SheetCard({
             <button className="text-xs underline text-muted-foreground" onClick={() => setSetting('manual', { ...ZERO_STATS })}>Reset calibration</button>
           )}
         </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">Stat calibration is for assault guild members (Dream Engineers / Dream Invaders).</p>
+        )}
         <div className="border-t pt-3">
         <div className="grid grid-cols-2 gap-2">
           <NumField label="Max HP (for food estimate)" value={settings.maxHp} onChange={(v) => setSetting('maxHp', v ?? undefined)} />

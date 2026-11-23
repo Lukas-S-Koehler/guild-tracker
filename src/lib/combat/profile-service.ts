@@ -117,3 +117,20 @@ export async function syncProfile(userId: string, profileId: string, force = fal
   if (error) throw new Error(error.message);
   return data;
 }
+
+/**
+ * Stat calibration (manual sheet adjustments) is for assaulters only: the user must have a
+ * character on their account that is currently in an assault guild (guilds.is_assault: DE, DI),
+ * or be super admin.
+ */
+export async function canCalibrateStats(
+  userId: string,
+  characters: { guild_id: string | null; in_dream_guild: boolean }[],
+  supabase = createAdminClient()
+): Promise<boolean> {
+  if (userId === SUPER_ADMIN_USER_ID) return true;
+  const guildIds = characters.filter((c) => c.in_dream_guild && c.guild_id).map((c) => c.guild_id as string);
+  if (!guildIds.length) return false;
+  const { data } = await supabase.from('guilds').select('id').eq('is_assault', true).in('id', guildIds);
+  return (data?.length ?? 0) > 0;
+}

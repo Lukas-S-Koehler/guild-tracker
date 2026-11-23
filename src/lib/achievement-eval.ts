@@ -9,6 +9,7 @@
  *    First run = silent backfill (no announcements). Then the #hall-of-fame digest (Silver+).
  *  - accountProgress(): one account, for /me and the Discord /me command.
  */
+import { nextRank, rankFor, type Rank } from '@/lib/achievement-ranks';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ACHIEVEMENTS, ACHIEVEMENT_BY_KEY, TIERS, grantsTitle, type Achievement, type Metric } from '@/lib/achievements';
 import { getAccountKeys } from '@/lib/alt-graph';
@@ -555,6 +556,9 @@ export interface AccountAchievements {
   total: number;
   xp: number;
   title: { key: string; name: string } | null;
+  /** Achievement rank ladder (D4): current rank and the next one. */
+  rank: { name: string; emoji: string; min: number } | null;
+  next_rank: { name: string; emoji: string; min: number } | null;
   achievements: AchievementView[];
 }
 
@@ -606,10 +610,14 @@ export async function accountProgress(supabase: SupabaseClient, memberIds: strin
   const got = achievements.filter((a) => a.unlocked_at);
   const titleKey = titleRow?.achievement_key as string | undefined;
   const titleDef = titleKey && unlocked.has(titleKey) ? ACHIEVEMENT_BY_KEY.get(titleKey) : undefined;
+  const xp = got.reduce((s, a) => s + TIERS[a.tier].xp, 0);
+  const pick = (r: Rank | null) => (r ? { name: r.name, emoji: r.emoji, min: r.min } : null);
   return {
     unlocked: got.length,
     total: ACHIEVEMENTS.length,
-    xp: got.reduce((s, a) => s + TIERS[a.tier].xp, 0),
+    xp,
+    rank: pick(rankFor(xp)),
+    next_rank: pick(nextRank(xp)),
     title: titleDef ? { key: titleDef.key, name: titleDef.name } : null,
     achievements,
   };
