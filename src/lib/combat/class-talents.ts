@@ -30,8 +30,10 @@ export const CLASS_TALENTS: Record<string, ClassTalent[]> = {
   ],
   RANGER: [
     { name: 'Piercing Shot', unlockLevel: 10, effect: { kind: 'damageFlat', value: 2 } },
-    { name: 'Eagles Eye', unlockLevel: 35, effect: { kind: 'critChance', value: 3 } },
-    { name: "Nature's Aid", unlockLevel: 70, effect: { kind: 'critDamage', value: 10 } },
+    // In-game values (verified 2026-11-23 on a CL80 char switched to Ranger: 5%→10% chance, 0→15 damage).
+    // The class page text (+3% / +10%) is outdated.
+    { name: 'Eagles Eye', unlockLevel: 35, effect: { kind: 'critChance', value: 5 } },
+    { name: "Nature's Aid", unlockLevel: 70, effect: { kind: 'critDamage', value: 15 } },
   ],
 };
 
