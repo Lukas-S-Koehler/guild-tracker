@@ -714,6 +714,15 @@ export async function registerAssaultCommand(): Promise<{ ok: boolean; error?: s
     name: 'assault',
     description: 'Manage the daily guild assault schedule',
     options: [
+      {
+        name: 'me',
+        type: 1,
+        description: 'Your assault season: EXP, kills, waves, ranks (past season = recap)',
+        options: [
+          seasonOpt('Season (default current)'),
+          { name: 'share', type: 5, description: 'Post it in the channel instead of only showing you', required: false },
+        ],
+      },
       { name: 'status', type: 1, description: 'Show active state + countdowns for both guilds' },
       { name: 'zones', type: 1, description: 'Best finishes per conquest location' },
       { name: 'top', type: 1, description: 'Best Dream assaulters by total XP', options: [seasonOpt('Season (omit for all-time)')] },

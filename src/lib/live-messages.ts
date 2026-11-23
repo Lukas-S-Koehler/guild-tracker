@@ -15,6 +15,7 @@ import { raidCls, req, raidLines } from '@/lib/discord-posts';
 import { buildRaidEmbed, CURSED_DREAMERS_ID } from '@/lib/raid-discord';
 import { GUIDE_SITE_URL } from '@/lib/game-guide';
 import { ASSAULT_ENTRY_GUILD_ID, ASSAULT_TOP_GUILD_ID, ASSAULT_TOP_MIN_CL } from '@/lib/raids';
+import { RECAP_PREFIX, assaultRecapKey, recapPayloadsFor } from '@/lib/assault-recap';
 import { getLiveRow, messageLink, publishLive, textPayloads, type LiveMode, type LivePayload, type PublishResult } from '@/lib/discord-live';
 
 /** Dream Guilds channel ids (see Claude memory reference-discord-channels). */
@@ -43,7 +44,7 @@ export interface LiveDef {
   channel: string | null;
   mode: LiveMode;
   pin?: boolean;
-  source: 'build' | 'auto-warn' | 'guild-hall' | 'achievements';
+  source: 'build' | 'auto-warn' | 'guild-hall' | 'achievements' | 'assault-recap';
   /** Inactivity reports only: inactive guilds get no report (auto-warn skips them). */
   guild_active?: boolean;
   /** Inactivity reports only: @mention flagged members (guild_config.settings.disable_pings off). */
@@ -157,9 +158,26 @@ export async function adoptLegacyGuildHalls(supabase: SupabaseClient) {
   }
 }
 
+/** Season recap per assault guild (step 10): posted once when its season_end has passed. */
+export async function assaultRecapDefs(supabase: SupabaseClient): Promise<LiveDef[]> {
+  const [{ data: guilds }, { data: cfgs }] = await Promise.all([
+    supabase.from('guilds').select('id, name').eq('is_assault', true).order('name'),
+    supabase.from('assault_configs').select('guild_id, announcement_channel_id'),
+  ]);
+  const channel = new Map((cfgs ?? []).map((c: { guild_id: string; announcement_channel_id: string | null }) => [c.guild_id, c.announcement_channel_id]));
+  return (guilds ?? []).map((g: { id: string; name: string }) => ({
+    key: assaultRecapKey(g.id),
+    label: `Season recap · ${g.name}`,
+    description: "End-of-season recap: zone finishes, top EXP and kills, iron attendance, button to each member's own recap. Posted once, the day after the guild's season end date (Admin → Assault). Update now posts the latest season's recap.",
+    channel: channel.get(g.id) ?? null,
+    mode: 'append' as const,
+    source: 'assault-recap' as const,
+  }));
+}
+
 export async function allDefs(supabase: SupabaseClient): Promise<LiveDef[]> {
-  const [inactivity, halls] = await Promise.all([inactivityDefs(supabase), guildHallDefs(supabase)]);
-  return [...STATIC_DEFS, ...inactivity, ...halls];
+  const [inactivity, halls, recaps] = await Promise.all([inactivityDefs(supabase), guildHallDefs(supabase), assaultRecapDefs(supabase)]);
+  return [...STATIC_DEFS, ...inactivity, ...halls, ...recaps];
 }
 
 export const findStaticDef = (key: string) => STATIC_DEFS.find((d) => d.key === key) ?? null;
@@ -257,7 +275,7 @@ async function buildLinksHub(supabase: SupabaseClient): Promise<LivePayload[]> {
     '## 🤖 DreamBot commands',
     '`/claim` link your Discord + claim your character · `/me` daily check and streaks · `/away` holiday',
     '`/guild` any guild at a glance · `/raid` raid times · `/leaderboard` activity ranks',
-    '`/assault checklist` prep checklist · `/assault status` assault countdowns · `/guide show` guide links',
+    '`/assault me` your assault season · `/assault checklist` prep checklist · `/assault status` assault countdowns · `/guide show` guide links',
     '-# `/help` lists every command, including the staff ones.',
   ];
   return textPayloads(lines);
@@ -274,6 +292,7 @@ export const canBuild = (key: string) => key in BUILDERS;
 /** Fresh payloads for a buildable key; for auto-warn keys, the last stored copy (or null). */
 export async function payloadsFor(supabase: SupabaseClient, key: string): Promise<LivePayload[] | null> {
   if (BUILDERS[key]) return BUILDERS[key](supabase);
+  if (key.startsWith(RECAP_PREFIX)) return recapPayloadsFor(supabase, key);
   return (await getLiveRow(supabase, key))?.payloads ?? null;
 }
 
@@ -282,7 +301,7 @@ export async function publishKey(supabase: SupabaseClient, key: string, force = 
   const def = findStaticDef(key) ?? (await allDefs(supabase)).find((d) => d.key === key);
   if (!def) return { ok: false, status: 'error', message_ids: [], error: `Unknown live message ${key}` };
   const payloads = await payloadsFor(supabase, key);
-  if (!payloads?.length) return { ok: false, status: 'error', message_ids: [], error: def.source === 'guild-hall' ? 'Nothing posted yet: comes with the daily guild hall run (15:50 UTC).' : def.source === 'achievements' ? 'Nothing posted yet: comes with the daily achievements run after the activity check.' : 'Nothing posted yet: comes with the daily activity check (11:48 UTC).' };
+  if (!payloads?.length) return { ok: false, status: 'error', message_ids: [], error: def.source === 'guild-hall' ? 'Nothing posted yet: comes with the daily guild hall run (15:50 UTC).' : def.source === 'achievements' ? 'Nothing posted yet: comes with the daily achievements run after the activity check.' : def.source === 'assault-recap' ? 'No assault waves recorded for this guild yet.' : 'Nothing posted yet: comes with the daily activity check (11:48 UTC).' };
   return publishLive(supabase, key, payloads, { mode: def.mode, pin: def.pin, force });
 }
 

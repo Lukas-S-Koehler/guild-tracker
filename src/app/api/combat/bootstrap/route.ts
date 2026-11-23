@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     supabase.from('combat_profiles').select(PROFILE_COLUMNS).eq('user_id', auth.user.id).order('created_at'),
     supabase
       .from('combat_setups')
-      .select('id, profile_id, name, data, updated_at')
+      .select('*') // includes `pinned` once database/assault-personal.sql has run
       .eq('user_id', auth.user.id)
       .order('updated_at', { ascending: false }),
     supabase

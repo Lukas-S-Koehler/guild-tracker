@@ -23,6 +23,7 @@ then the `add-*.sql` feature migrations.
 - Combat: `add-combat-enemies`, `combat-tool`, `combat-tool-v2`
 - Accounts: `account-claims` → `claims-one-per-user`
 - Members: `add-member-combat-level` (lazy-filled on /me)
+- Dream Hub: `discord-live-messages`, `discord-commands-roles`, `achievements`, `assault-personal` (pinned combat setup, season recap state)
 
 ## Scheduled jobs
 | Job | Trigger | Schedule |

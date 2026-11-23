@@ -47,9 +47,9 @@ const TONE_DOT: Record<string, string> = {
 };
 const HEAT = ['bg-muted', 'bg-sky-900', 'bg-sky-600', 'bg-sky-400'];
 
-function Tile({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub?: string }) {
-  return (
-    <Card>
+function Tile({ icon, label, value, sub, href }: { icon: React.ReactNode; label: string; value: string; sub?: string; href?: string }) {
+  const card = (
+    <Card className={href ? 'h-full transition-colors hover:border-crystal/40' : undefined}>
       <CardContent className="p-4 space-y-1">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           {icon}
@@ -60,6 +60,7 @@ function Tile({ icon, label, value, sub }: { icon: React.ReactNode; label: strin
       </CardContent>
     </Card>
   );
+  return href ? <Link href={href} className="block">{card}</Link> : card;
 }
 
 function useCountdown(iso: string | undefined) {
@@ -280,7 +281,7 @@ export default function MePage() {
         <Tile icon={<Coins className="h-3.5 w-3.5" />} label="Lifetime gold" value={compact(tiles.lifetime_gold)} sub={`${compact(tiles.gold_30d)} last 30 days`} />
         <Tile icon={<Target className="h-3.5 w-3.5" />} label="Lifetime raids" value={fmt(tiles.lifetime_raids)} sub={`${fmt(tiles.raids_30d)} last 30 days`} />
         <Tile icon={<CalendarDays className="h-3.5 w-3.5" />} label="Days met" value={fmt(tiles.days_met)} sub={`${metPct}% of ${fmt(tiles.days_logged)} logged days`} />
-        <Tile icon={<Swords className="h-3.5 w-3.5" />} label="Assault kills" value={compact(tiles.assault_kills)} sub={`${fmt(tiles.assault_runs)} runs · ${compact(tiles.assault_experience)} exp`} />
+        <Tile icon={<Swords className="h-3.5 w-3.5" />} label="Assault kills" value={compact(tiles.assault_kills)} sub={`${fmt(tiles.assault_runs)} waves · ${compact(tiles.assault_experience)} exp · details →`} href="/me/assault" />
       </div>
 
       <div className="grid md:grid-cols-3 gap-4">

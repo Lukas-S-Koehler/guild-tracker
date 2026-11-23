@@ -78,6 +78,8 @@ export interface SetupRow {
   name: string;
   data: SandboxState;
   updated_at: string;
+  /** Shown on /me/assault (one per user). */
+  pinned?: boolean;
 }
 
 export interface PetState {

@@ -90,6 +90,7 @@ export default function Navigation() {
           title: 'Live',
           items: [
             { href: '/assault', label: 'Assault hub', desc: 'Next launch, guild status', icon: Swords },
+            { href: '/me/assault', label: 'My assault', desc: 'Your season, waves, ranks, loadout', icon: Gauge },
             { href: '/assault/conquest', label: 'Conquest', desc: 'Every location, every guild', icon: Globe },
             { href: '/assault/stats', label: 'Season stats', desc: 'Standing and waves this season', icon: BarChart3 },
           ],

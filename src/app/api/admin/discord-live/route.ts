@@ -79,7 +79,11 @@ export async function POST(req: NextRequest) {
       if (!channel || !/^\d{17,20}$/.test(channel)) return NextResponse.json({ error: 'Channel id must be a Discord snowflake' }, { status: 400 });
       await bindLive(supabase, key, channel);
       if (!canBuild(key)) {
-        const note = key.startsWith('guild-hall:') ? 'Bound. First post comes with the next guild hall run (15:50 UTC).' : 'Bound. First post comes with the next daily activity check (11:48 UTC).';
+        const note = key.startsWith('guild-hall:')
+          ? 'Bound. First post comes with the next guild hall run (15:50 UTC).'
+          : key.startsWith('assault-recap:')
+            ? "Bound. The recap posts the day after the guild's season end date. Update now posts the latest season's recap."
+            : 'Bound. First post comes with the next daily activity check (11:48 UTC).';
         return NextResponse.json({ ok: true, status: 'bound', note });
       }
       return NextResponse.json(await publishKey(supabase, key, true));

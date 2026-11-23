@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, RefreshCw, Swords, Trash2, UserPlus, Save, FlaskConical, Shield, Info, X } from 'lucide-react';
+import { Loader2, RefreshCw, Swords, Trash2, UserPlus, Save, FlaskConical, Shield, Info, X, Pin } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useApiClient } from '@/lib/api-client';
 import {
@@ -196,8 +196,14 @@ export default function CombatClient() {
       if (!res.ok) return setError(data.error ?? 'Failed to load');
       setBoot(data);
       const chars: AccountCharacter[] = (data.characters ?? []).filter((c: AccountCharacter) => c.in_dream_guild && c.hashed_id);
+      // ?setup=<id> (from /me/assault): open that setup's character.
+      const wanted = new URLSearchParams(window.location.search).get('setup');
+      const wantedProfile = wanted
+        ? data.profiles.find((p: CombatProfile) => p.id === data.setups.find((s: SetupRow) => s.id === wanted)?.profile_id)
+        : null;
+      const fromSetup = wantedProfile ? chars.find((c) => c.hashed_id === wantedProfile.hashed_id) : undefined;
       const withProfile = chars.find((c) => data.profiles.some((p: CombatProfile) => p.hashed_id === c.hashed_id));
-      const first = withProfile ?? chars.find((c) => c.claimed) ?? chars[0];
+      const first = fromSetup ?? withProfile ?? chars.find((c) => c.claimed) ?? chars[0];
       if (first) setMemberId(first.member_id);
     })();
   }, [api]);
@@ -457,6 +463,21 @@ function Workbench({
     setGearSandbox(usesSandboxGear);
     setActiveSetupId(s.id);
   }
+  // ?setup=<id> (from /me/assault): load it once when this character's workbench opens.
+  const urlSetupDone = useRef(false);
+  useEffect(() => {
+    if (urlSetupDone.current) return;
+    urlSetupDone.current = true;
+    const wanted = new URLSearchParams(window.location.search).get('setup');
+    const s = wanted ? boot.setups.find((x) => x.id === wanted && (x.profile_id === profile.id || !x.profile_id)) : null;
+    if (s) loadSetup(s);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  async function togglePin(s: SetupRow) {
+    const res = await api.patch('/api/combat/setups', { id: s.id, pinned: !s.pinned });
+    if (!res.ok) return alert((await res.json().catch(() => ({}))).error ?? 'Could not pin');
+    onSetupsChanged(boot.setups.map((x) => ({ ...x, pinned: x.id === s.id ? !s.pinned : false })));
+  }
   function resetToCharacter() {
     setSb((cur) => ({ ...emptySandbox(), target: cur.target, counts: cur.counts }));
     setGearSandbox(false);
@@ -522,6 +543,7 @@ function Workbench({
         {mySetups.map((s) => (
           <span key={s.id} className={`inline-flex items-center border rounded text-xs ${activeSetupId === s.id ? 'border-primary bg-primary/10' : ''}`}>
             <button className="px-2 py-0.5 hover:bg-muted" onClick={() => loadSetup(s)} title="Load">{s.name}</button>
+            <button className={`px-1 py-0.5 hover:bg-muted ${s.pinned ? 'text-crystal' : 'text-muted-foreground'}`} title={s.pinned ? 'Pinned to My assault · unpin' : 'Pin to My assault'} onClick={() => togglePin(s)}><Pin className="h-3 w-3" /></button>
             <button className="px-1 py-0.5 hover:bg-muted text-muted-foreground" title="Overwrite with current" onClick={() => saveSetup(s)}><Save className="h-3 w-3" /></button>
             <button className="px-1 py-0.5 hover:bg-muted text-muted-foreground" title="Delete" onClick={() => deleteSetup(s)}><Trash2 className="h-3 w-3" /></button>
           </span>

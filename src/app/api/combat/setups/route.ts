@@ -4,7 +4,7 @@ import { requireUser, isResponse } from '@/lib/user-auth';
 
 export const dynamic = 'force-dynamic';
 
-const COLS = 'id, profile_id, name, data, updated_at';
+const COLS = '*'; // keeps `pinned` (assault-personal.sql) in the response
 
 /** POST /api/combat/setups { id?, profile_id, name, data } — create or overwrite a saved setup. */
 export async function POST(req: NextRequest) {
@@ -45,5 +45,22 @@ export async function DELETE(req: NextRequest) {
   const supabase = createAdminClient();
   const { error } = await supabase.from('combat_setups').delete().eq('id', id).eq('user_id', auth.user.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
+}
+
+/** PATCH /api/combat/setups { id, pinned } — pin one setup to /me/assault (one per user). */
+export async function PATCH(req: NextRequest) {
+  const user = await requireUser(req);
+  if (isResponse(user)) return user;
+  const body = await req.json().catch(() => ({}));
+  if (!body.id) return NextResponse.json({ error: 'id required' }, { status: 400 });
+
+  const supabase = createAdminClient();
+  const { error: clearErr } = await supabase.from('combat_setups').update({ pinned: false }).eq('user_id', user.id).eq('pinned', true);
+  if (clearErr) return NextResponse.json({ error: `${clearErr.message} (run database/assault-personal.sql?)` }, { status: 500 });
+  if (body.pinned) {
+    const { error } = await supabase.from('combat_setups').update({ pinned: true }).eq('id', body.id).eq('user_id', user.id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  }
   return NextResponse.json({ ok: true });
 }

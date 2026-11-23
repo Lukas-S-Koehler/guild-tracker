@@ -35,6 +35,7 @@ import { computeLaunchDate, getChecklistTemplate, buildTimedChecklist, type Chec
 import { COLORS, podium, statFields, linkRow, siteUrl, padR, padL } from '@/lib/assault-embed';
 import { formatGold } from '@/lib/utils';
 import { getDiscordChecked, toggleDiscordItem, resetDiscord } from '@/lib/assault-checklist-discord';
+import { handleAssaultMe } from '@/lib/hub-discord';
 
 interface Option {
   name: string;
@@ -150,6 +151,8 @@ export async function handleAssaultCommand(interaction: Interaction) {
   if (!sub) return ephemeral('Missing subcommand.');
 
   switch (sub.name) {
+    case 'me':
+      return handleAssaultMe({ ...interaction, data: { options: sub.options as never } });
     case 'status':
       return handleStatus();
     case 'zones':

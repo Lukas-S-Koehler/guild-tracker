@@ -18,6 +18,8 @@ import { ASSAULT_ENTRY_GUILD_ID, ASSAULT_TOP_GUILD_ID, ASSAULT_TOP_MIN_CL } from
 import { HOLIDAY_LOG_CHANNEL, MAX_AWAY_DAYS, awayUnix, endAway, getActiveAway, listActiveAway, setAway } from '@/lib/away';
 import { outranks, outrankError, rankOfRole } from '@/lib/role-hierarchy';
 import { achievementsField } from '@/lib/achievement-discord';
+import { buildMeAssault } from '@/lib/me-assault';
+import { personalRecapEmbed } from '@/lib/assault-recap';
 
 const SITE = GUIDE_SITE_URL;
 const CRYSTAL = 0x4cc9f0;
@@ -169,6 +171,29 @@ export function handleMe(i: HubInteraction) {
   });
 }
 
+// ─── /assault me [season] [share] (step 10) ──────────────────────────────────
+
+export function handleAssaultMe(i: HubInteraction) {
+  const u = caller(i);
+  if (!u) return ephemeral('Could not identify you.');
+  const share = i.data.options?.find((o) => o.name === 'share')?.value === true;
+  const season = Number(i.data.options?.find((o) => o.name === 'season')?.value) || undefined;
+  return deferred(i, !share, async () => {
+    const supabase = createAdminClient();
+    const link = await resolveDiscordLink(supabase, u.id, u.global_name ?? u.username);
+    if (!link) return { content: 'Your Discord is not linked to a website account yet. Run `/claim` first.' };
+    const a = await buildMeAssault(link.user_id, supabase, { season });
+    if (!a.claimed) return { content: 'No character claimed yet. Run `/claim`.', components: [row(linkButton('My characters', `${SITE}/account`))] };
+    const { data: claim } = await supabase.from('user_characters').select('member:members(ign)').eq('user_id', link.user_id).eq('status', 'approved').limit(1).maybeSingle();
+    const m = (claim as { member?: { ign?: string } | { ign?: string }[] } | null)?.member;
+    const who = (Array.isArray(m) ? m[0]?.ign : m?.ign) ?? u.global_name ?? u.username;
+    return {
+      embeds: [personalRecapEmbed(a, who)],
+      components: [row(linkButton('Open My assault', `${SITE}/me/assault${a.season !== a.current_season ? `?season=${a.season}` : ''}`))],
+    };
+  });
+}
+
 // ─── /guild <tag> ────────────────────────────────────────────────────────────
 
 export async function handleGuildAutocomplete(i: HubInteraction) {
@@ -307,7 +332,7 @@ const MEMBER_HELP: [string, string[]][] = [
   ]],
   ['⚔️ Assault', [
     '`/assault status` countdowns · `/assault last` last result · `/assault plan` kill order',
-    '`/assault checklist` your prep checklist · `/assault potions` pick your loadout · `/assault loadout`',
+    '`/assault me` your assault season + recap · `/assault checklist` your prep checklist · `/assault potions` pick your loadout · `/assault loadout`',
     '`/assault top` · `/assault season` · `/assault zones` rankings',
     '`/assault conquest-info` how conquest works',
   ]],

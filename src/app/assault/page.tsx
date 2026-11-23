@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, MapPin, BookOpen, CheckSquare, BarChart3, Settings, Swords, FlaskConical, Trophy, Clock, Landmark, Medal, Globe, Crown } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { DREAM_BADGE_URL } from '@/lib/dream-badge';
+import MyAssaultStrip from '@/components/assault/MyAssaultStrip';
 
 interface GuildSummary {
   guild_id: string;
@@ -218,6 +219,7 @@ export default function AssaultLandingPage() {
   const pausedGuilds = (guilds ?? []).filter(g => !g.active);
 
   const tools = [
+    { href: '/me/assault', icon: Swords, title: 'My assault', desc: 'Your season, waves, ranks, loadout.' },
     { href: '/assault/stats', icon: BarChart3, title: 'Stats', desc: 'Season standing, member leaderboards.' },
     { href: '/assault/hall-of-fame', icon: Crown, title: 'Hall of Fame', desc: 'Best finishes, all-time top assaulters.' },
     { href: '/assault/leaderboard', icon: Medal, title: 'Leaderboard', desc: 'Member assault rankings.' },
@@ -238,6 +240,8 @@ export default function AssaultLandingPage() {
           <p className="text-sm text-muted-foreground">Schedule, live timers, standings and prep tools.</p>
         </div>
       </div>
+
+      <MyAssaultStrip />
 
       {!guilds && <Loader2 className="h-5 w-5 animate-spin" />}
       {guilds && activeGuilds.length === 0 && (
