@@ -16,6 +16,7 @@
  * page reports the last checked game day instead of pretending to be live.
  * Guild min_level and raid requirements are combat levels (CL), not total level.
  */
+import { loadAwayCover, withAwayEnd } from '@/lib/away';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getAccountCharacters, type AccountCharacter } from '@/lib/account-service';
 import { DAY_BOUNDARY_OFFSET_MINUTES } from '@/lib/activity-processor';
@@ -117,6 +118,8 @@ export interface GuildGroup {
   last_met: string | null;
   warning_level: WarningLevel;
   exempt: boolean;
+  /** Last away day while a /away holiday covers the group (no warnings meanwhile). */
+  away_until: string | null;
   week_end?: string;
   streak: { current: number; best: number; unit: 'day' | 'week' };
 }
@@ -365,6 +368,7 @@ export async function buildMeSummary(
   const reportDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1)).toISOString().slice(0, 10);
 
   // ---- Guild groups
+  const away = await loadAwayCover(supabase, reportDay);
   const groups: GuildGroup[] = [];
   for (const gid of dreamGuildIds) {
     const cfg = cfgs.get(gid);
@@ -399,6 +403,12 @@ export async function buildMeSummary(
     } else {
       for (const l of gLogs) if (l.log_date <= reportDay && l.met_requirement && (!lastMet || l.log_date > lastMet)) lastMet = l.log_date;
     }
+    // Back from /away: count from the last away day. Still away: no warning at all.
+    for (const c of chars) {
+      const shifted = withAwayEnd(lastMet ?? undefined, c.member_id, away);
+      if (shifted) lastMet = shifted;
+    }
+    const awayUntil = chars.map((c) => away.active.get(c.member_id)).filter((x): x is string => !!x).sort().pop() ?? null;
     // Days since join: the earliest-joined character in the group (any of them could have been active)
     const firstSeens = chars.map((c) => memberMap.get(c.member_id)?.first_seen as string | null).filter((x): x is string => !!x);
     const firstSeen = firstSeens.sort()[0];
@@ -447,8 +457,9 @@ export async function buildMeSummary(
       met: noReq || members.some((m) => m.met),
       days_inactive: days,
       last_met: lastMet,
-      warning_level: exempt || noReq ? 'safe' : getWarningInfo(days, cfg.period).warning_level,
+      warning_level: exempt || noReq || awayUntil ? 'safe' : getWarningInfo(days, cfg.period).warning_level,
       exempt,
+      away_until: awayUntil,
       week_end: cfg.period === 'weekly' ? getWeekSunday(wk) : undefined,
       streak,
     });

@@ -4,6 +4,7 @@ import { verifyAuth, isErrorResponse } from '@/lib/auth-helpers';
 import { sendDirectMessage } from '@/lib/discord-api';
 import { messageLink, publishLive, textPayloads } from '@/lib/discord-live';
 import { buildDailyBoard, DAILY_BOARD_KEY, inactivityKey, type BoardGuild, type DmStatus } from '@/lib/live-messages';
+import { loadAwayCover, withAwayEnd, awayUnix } from '@/lib/away';
 import { getWarningInfo, getEffectiveDaysInactive, findLastMetWeek, getISOWeekKey, getWeekSunday, getWeekKeyRange, RequirementPeriod } from '@/lib/warning-calculator';
 
 export const dynamic = 'force-dynamic';
@@ -84,6 +85,9 @@ export async function POST(req: NextRequest) {
   const nextWeeklyResetTs = Math.floor(
     new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + daysUntilMonday, 11, 50)).getTime() / 1000
   );
+
+  // Holidays (/away): active ones are skipped, finished ones count inactivity from their end date.
+  const away = await loadAwayCover(supabase, today.toISOString().split('T')[0]);
 
   for (const config of configs) {
     const { guild_id: guildId, guild_name: guildName, settings, donation_requirement } = config;
@@ -328,6 +332,12 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // Back from holiday: inactivity counts from the last away day, not the last donation.
+      for (const id of memberIds) {
+        const shifted = withAwayEnd(lastActivityMap.get(id), id, away);
+        if (shifted) lastActivityMap.set(id, shifted);
+      }
+
       // Snapshot before shared bank walk — used to detect who gets covered by shared bank
       const preSharedBankMap = new Map(lastActivityMap);
 
@@ -477,9 +487,12 @@ export async function POST(req: NextRequest) {
       const inactiveReport: Array<{ ign: string; daysInactive: number; warning_level: string; discord_id: string | null }> = [];
       const sharedBankCovered: Array<{ ign: string }> = [];
       const boardMembers: BoardGuild['members'] = [];
+      const onHoliday: Array<{ ign: string; until: string }> = [];
 
       for (const member of members) {
         if (exemptIds.has(member.id)) { skipped++; continue; }
+        const awayUntil = away.active.get(member.id);
+        if (awayUntil) { onHoliday.push({ ign: member.ign, until: awayUntil }); skipped++; continue; }
         const lastDate = lastActivityMap.get(member.id);
 
         let daysSinceJoin = 999;
@@ -612,6 +625,7 @@ export async function POST(req: NextRequest) {
 
         if (inactiveReport.length === 0 && sharedBankCovered.length === 0) {
           lines.push(`${headerLine}\n✅ **All members active — no warnings issued!**`);
+          if (onHoliday.length) lines.push(`\n🌴 **On holiday** (${onHoliday.length}): ${onHoliday.map((m) => `**${m.ign}** (back <t:${awayUnix(m.until)}:D>)`).join(' · ')}`);
         } else {
           lines.push(`${headerLine}\n${warningLine}`);
 
@@ -632,6 +646,10 @@ export async function POST(req: NextRequest) {
             sharedBankCovered.forEach((m) => {
               lines.push(`• **${m.ign}**`);
             });
+          }
+          if (onHoliday.length) {
+            lines.push(`\n🌴 **On holiday** (${onHoliday.length}) — skipped until they're back`);
+            onHoliday.forEach((m) => lines.push(`• **${m.ign}** — back <t:${awayUnix(m.until)}:D>`));
           }
         }
 
@@ -664,6 +682,7 @@ export async function POST(req: NextRequest) {
         tag: guildTagMap.get(guildId) ?? null,
         members: boardMembers,
         bankCovered: sharedBankCovered.length,
+        away: onHoliday.length,
         reportUrl,
         order: guildOrderMap.get(guildId) ?? 0,
       });

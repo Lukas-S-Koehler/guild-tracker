@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { findBundleLocks, getActiveClaim, recomputeUserGuildAccess, reviewableGuildIds } from '@/lib/account-service';
 import { requireUser, isResponse } from '@/lib/user-auth';
+import { afterClaimApproved } from '@/lib/discord-link';
 import { grantError, outranks, outrankError, rankInGuild, rankOfRole, rankOfUser } from '@/lib/role-hierarchy';
 
 export const dynamic = 'force-dynamic';
@@ -71,5 +72,6 @@ export async function POST(req: NextRequest) {
   }
 
   const access = await recomputeUserGuildAccess(targetId, supabase);
+  await afterClaimApproved(supabase, targetId);
   return NextResponse.json({ ok: true, access });
 }

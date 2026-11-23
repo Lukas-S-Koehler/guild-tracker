@@ -57,6 +57,19 @@ jobs:
           echo "Response: $body"
           echo "HTTP status: $http_code"
 
+      - name: Sync Discord roles
+        if: ${{ github.event.inputs.run_backfill != 'true' }}
+        run: |
+          echo "Syncing Discord guild roles (no-op unless auto sync is on in Admin → Discord → Role sync)..."
+          response=$(curl -s -L -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/discord-roles" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | head -n -1)
+          echo "Response: $body"
+          echo "HTTP status: $http_code"
+
+
       - name: Auto-warn inactive members
         if: ${{ github.event.inputs.run_backfill != 'true' }}
         run: |

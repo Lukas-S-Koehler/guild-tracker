@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { findBundleLocks, getActiveClaim, recomputeUserGuildAccess, reviewableGuildIds } from '@/lib/account-service';
 import { requireUser, isResponse, displayNameOf } from '@/lib/user-auth';
+import { afterClaimApproved } from '@/lib/discord-link';
 import { RANK, grantError, outranks, outrankError, rankInGuild, rankOfRole, rankOfUser, ranksOf } from '@/lib/role-hierarchy';
 
 export const dynamic = 'force-dynamic';
@@ -118,5 +119,7 @@ export async function POST(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const access = await recomputeUserGuildAccess(claim.user_id, supabase);
+  // Linked Discord: map the bundle and sync guild roles now (src/lib/discord-roles.ts).
+  if (status === 'approved') await afterClaimApproved(supabase, claim.user_id);
   return NextResponse.json({ ok: true, status, access });
 }

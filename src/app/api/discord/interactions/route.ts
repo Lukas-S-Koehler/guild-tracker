@@ -6,6 +6,7 @@ import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registe
 import { handleAssaultCommand, handleAssaultAutocomplete, handleAssaultChecklistComponent, handleAssaultPotionsComponent } from '@/lib/assault-discord';
 import { handleRaidCommand } from '@/lib/raid-discord';
 import { handleGuideCommand } from '@/lib/guide-discord';
+import { handleAway, handleClaim, handleGuild, handleGuildAutocomplete, handleHelp, handleMe, registerHubCommands, type HubInteraction } from '@/lib/hub-discord';
 import { getDiscordProfile, formatCharacterLine } from '@/lib/lookup-service';
 import { switchAccountMain } from '@/lib/alt-switch';
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
@@ -130,6 +131,9 @@ export async function GET(req: NextRequest) {
     const result = await registerLookupCommand();
     return NextResponse.json(result);
   }
+  if (searchParams.get('action') === 'register-hub') {
+    return NextResponse.json(await registerHubCommands());
+  }
   if (searchParams.get('action') === 'register-assault') {
     const result = await registerAssaultCommand();
     return NextResponse.json(result);
@@ -153,6 +157,20 @@ export async function POST(req: NextRequest) {
   // Discord PING — required for endpoint verification
   if (interaction.type === INTERACTION_TYPE_PING) {
     return NextResponse.json({ type: 1 });
+  }
+
+  // Dream Hub step 8: /help, /claim, /me, /guild, /away.
+  {
+    const hub = interaction as HubInteraction;
+    const name = interaction.data?.name;
+    if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && name === 'guild') return handleGuildAutocomplete(hub);
+    if (interaction.type === INTERACTION_TYPE_COMMAND) {
+      if (name === 'help') return handleHelp(hub);
+      if (name === 'claim') return handleClaim(hub);
+      if (name === 'me') return handleMe(hub);
+      if (name === 'guild') return handleGuild(hub);
+      if (name === 'away') return handleAway(hub);
+    }
   }
 
   if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && interaction.data?.name === 'map') {
@@ -522,6 +540,10 @@ async function handleMapCommand(interaction: {
   // Shared-discord-id → auto manual alt links between all members with this discord_id
   const { linkAltsBySharedDiscord } = await import('@/lib/discord-alt-link');
   const linkResult = await linkAltsBySharedDiscord(supabase, targetDiscordId);
+
+  // Guild roles follow the new mapping right away (Member/Staff - <guild>, Retired Member).
+  const { syncDiscordUser } = await import('@/lib/discord-roles');
+  waitUntil(syncDiscordUser(supabase, targetDiscordId).then(() => undefined).catch((e) => console.error('[map] role sync:', e)));
 
   const altNote = allLinkedIds.length > 0 ? ` (+ ${allLinkedIds.length} alt${allLinkedIds.length > 1 ? 's' : ''})` : '';
   const autoLinkNote = linkResult.created > 0 ? ` 🔗 auto-linked ${linkResult.created} alt${linkResult.created > 1 ? 's' : ''} via shared Discord` : '';

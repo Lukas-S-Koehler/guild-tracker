@@ -158,6 +158,8 @@ export function DiscordSwitches() {
             {togglingPings ? <Loader2 className="h-3 w-3 animate-spin" /> : disableGuildPings ? 'Enable Pings' : 'Disable Pings'}
           </Button>
         </div>
+
+        <AutoModWelcomeTexts />
       </CardContent>
     </Card>
   );
@@ -354,5 +356,62 @@ export function AltSyncTools() {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+const GUIDE_CHANNEL = '1573818767505490051';
+
+/**
+ * Copyable texts for the AutoMod welcome message. AutoMod stays the welcomer: it reacts to joins
+ * instantly, DreamBot can't (no gateway). The text points people to /claim, which DreamBot handles.
+ */
+function AutoModWelcomeTexts() {
+  const [site, setSite] = useState('');
+  const [variant, setVariant] = useState('full');
+  const [copied, setCopied] = useState(false);
+  useEffect(() => setSite(process.env.NEXT_PUBLIC_SITE_URL || window.location.origin), []);
+
+  const texts: Record<string, { label: string; text: string }> = {
+    full: {
+      label: 'Full (recommended)',
+      text: [
+        'Welcome to the Dream Guilds, {user}! Please send your character name and combat level, that way leadership can select a guild for you. Or find the guild that fits your CL yourself: ' + site + '/guilds',
+        'In the meantime you can check out <#' + GUIDE_CHANNEL + '> for all the important info on the game.',
+        'Already in a Dream guild? Run `/claim` to link your Discord: your guild roles update automatically and `/me` shows your daily check. `/help` lists every DreamBot command.',
+      ].join('\n'),
+    },
+    short: {
+      label: 'Short',
+      text: 'Welcome to the Dream Guilds, {user}! Send your character name and combat level so leadership can pick a guild for you (or find one: ' + site + '/guilds). Already in a guild? Run `/claim`.',
+    },
+    current: {
+      label: 'Current text + /claim line',
+      text: [
+        'Welcome to the server, {user}! Please send your character name and combat level, that way leadership can select a guild for you. In the meantime you can check out <#' + GUIDE_CHANNEL + '> for all the important info on the game!',
+        'Already in a Dream guild? Run `/claim` to link your Discord to the website.',
+      ].join('\n'),
+    },
+  };
+  const text = texts[variant].text;
+
+  return (
+    <details className="p-3 border rounded-lg bg-background">
+      <summary className="text-sm font-medium cursor-pointer">AutoMod welcome text (#introductions)</summary>
+      <div className="mt-3 space-y-2">
+        <p className="text-xs text-muted-foreground">
+          AutoMod keeps welcoming people because it reacts to joins instantly; DreamBot can&apos;t see joins live. Paste one of these into the AutoMod
+          welcome message. Replace <code>{'{user}'}</code> with AutoMod&apos;s own placeholder for the new member&apos;s mention.
+        </p>
+        <div className="flex items-center gap-2">
+          <select value={variant} onChange={(e) => { setVariant(e.target.value); setCopied(false); }} className="h-8 rounded border bg-background px-2 text-sm">
+            {Object.entries(texts).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </select>
+          <Button size="sm" variant="outline" onClick={async () => { await navigator.clipboard.writeText(text); setCopied(true); }}>
+            {copied ? <Check className="h-3 w-3" /> : null} {copied ? 'Copied' : 'Copy'}
+          </Button>
+        </div>
+        <pre className="whitespace-pre-wrap text-xs bg-muted/50 rounded p-2">{text}</pre>
+      </div>
+    </details>
   );
 }

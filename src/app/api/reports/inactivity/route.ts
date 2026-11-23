@@ -1,3 +1,4 @@
+import { loadAwayCover, withAwayEnd } from '@/lib/away';
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { verifyAuthOrPublic, isErrorResponse } from '@/lib/auth-helpers';
@@ -99,6 +100,13 @@ export async function GET(req: NextRequest) {
         lastActivityMap.set(log.member_id, log.log_date);
       }
     }
+  }
+
+  // Holidays (/away): active = skipped, finished = inactivity counts from the end date.
+  const away = await loadAwayCover(supabase, todayStr);
+  for (const id of memberIds) {
+    const shifted = withAwayEnd(lastActivityMap.get(id), id, away);
+    if (shifted) lastActivityMap.set(id, shifted);
   }
 
   // Fetch alt relationships
@@ -214,7 +222,7 @@ export async function GET(req: NextRequest) {
       if (!m.ign || m.ign.toLowerCase().includes('raw activity') || m.ign.toLowerCase().includes('log')) {
         return false;
       }
-      if (exemptIds.has(m.id)) return false;
+      if (exemptIds.has(m.id) || away.active.has(m.id)) return false;
       return m.category !== 'active';
     })
     .sort((a, b) => b.days_inactive - a.days_inactive);

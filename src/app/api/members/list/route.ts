@@ -97,6 +97,9 @@ export async function PATCH(req: NextRequest) {
     if (update.discord_id) {
       const { linkAltsBySharedDiscord } = await import('@/lib/discord-alt-link');
       await linkAltsBySharedDiscord(supabase, update.discord_id);
+      // Guild roles follow the new mapping right away; un-mappings are picked up by the daily sync.
+      const { syncDiscordUser } = await import('@/lib/discord-roles');
+      await syncDiscordUser(supabase, update.discord_id).catch((e) => console.error('[mapping] role sync:', e));
     }
   }
 

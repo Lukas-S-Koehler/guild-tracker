@@ -32,7 +32,49 @@ async function discordFetch<T>(
     const text = await res.text();
     throw new Error(`Discord API ${res.status}: ${text}`);
   }
+  // Role PUT/DELETE and similar return 204 No Content.
+  if (res.status === 204) return undefined as T;
   return res.json();
+}
+
+export interface DiscordGuildMember {
+  user?: { id: string; username: string; global_name?: string | null; bot?: boolean };
+  nick?: string | null;
+  roles: string[];
+}
+
+/** Every member of a server (needs the Server Members privileged intent). */
+export async function listAllGuildMembers(guildId: string): Promise<DiscordGuildMember[]> {
+  const out: DiscordGuildMember[] = [];
+  let after = '0';
+  for (;;) {
+    const page = await discordFetch<DiscordGuildMember[]>(`/guilds/${guildId}/members?limit=1000&after=${after}`);
+    out.push(...page);
+    if (page.length < 1000) return out;
+    after = page[page.length - 1].user!.id;
+  }
+}
+
+/** One server member, or null when they are not in the server. Works without the members intent. */
+export async function getGuildMember(guildId: string, userId: string): Promise<DiscordGuildMember | null> {
+  try {
+    return await discordFetch<DiscordGuildMember>(`/guilds/${guildId}/members/${userId}`);
+  } catch (err) {
+    if (String(err).includes('Discord API 404')) return null;
+    throw err;
+  }
+}
+
+/** Create or overwrite one global slash command (POST upserts by name). */
+export async function upsertGlobalCommand(command: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+  const appId = process.env.DISCORD_APPLICATION_ID;
+  if (!appId) return { ok: false, error: 'DISCORD_APPLICATION_ID not set' };
+  try {
+    await discordFetch(`/applications/${appId}/commands`, { method: 'POST', body: JSON.stringify(command) });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
 }
 
 /** Open (or fetch existing) DM channel with a Discord user. */

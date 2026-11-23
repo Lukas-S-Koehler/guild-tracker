@@ -312,6 +312,8 @@ export default function MePage() {
                         <span className="flex-1" />
                         {g.exempt ? (
                           <Badge variant="outline" className={WARN_STYLE.safe}>Exempt</Badge>
+                        ) : g.away_until ? (
+                          <Badge variant="outline" className={WARN_STYLE.safe}>On holiday until {prettyDate(g.away_until)}</Badge>
                         ) : (
                           <>
                             <Badge variant="outline" className={g.met ? WARN_STYLE.safe : WARN_STYLE.warn1}>

@@ -43,8 +43,13 @@ export default function AccountPage() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [msg, setMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
+  const [discord, setDiscord] = useState<{ discord_username: string | null } | null | undefined>(undefined);
 
   const load = useCallback(async () => {
+    fetch('/api/account/discord-link', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : { link: null }))
+      .then((d) => setDiscord(d.link ?? null))
+      .catch(() => setDiscord(null));
     const res = await fetch('/api/account/characters', { cache: 'no-store' });
     if (!res.ok) return;
     const data = await res.json();
@@ -93,6 +98,12 @@ export default function AccountPage() {
     await load();
     refreshAccount();
     if (c.status === 'approved') window.location.reload(); // guild access may have changed
+  }
+
+  async function unlinkDiscord() {
+    if (!confirm('Unlink your Discord? /me and /away in Discord stop working for you until you run /claim again. Your guild roles stay as they are.')) return;
+    await fetch('/api/account/discord-link', { method: 'DELETE' });
+    setDiscord(null);
   }
 
   if (loading) return <Loader2 className="h-6 w-6 animate-spin mx-auto mt-16" />;
@@ -157,6 +168,23 @@ export default function AccountPage() {
           )}
         </CardContent>
       </Card>
+
+      {discord !== undefined && (
+        <div className="flex flex-wrap items-center gap-2 border rounded-lg px-3 py-2 text-sm">
+          <span className="font-medium">Discord</span>
+          {discord ? (
+            <>
+              <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/40">linked{discord.discord_username ? ` · ${discord.discord_username}` : ''}</Badge>
+              <span className="text-xs text-muted-foreground">Your guild roles follow your characters; /me and /away work in Discord.</span>
+              <button onClick={unlinkDiscord} className="ml-auto text-xs text-muted-foreground underline hover:text-red-500">Unlink</button>
+            </>
+          ) : (
+            <span className="text-muted-foreground">
+              Not linked. Run <code className="text-xs">/claim</code> in the Dream Guilds Discord and press “Link my account”.
+            </span>
+          )}
+        </div>
+      )}
 
       {pending.length > 0 && (
         <Card>

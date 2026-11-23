@@ -23,6 +23,7 @@ import LiveMessagesPanel from '@/components/admin/LiveMessagesPanel';
 import DataManagementPanel from '@/components/admin/DataManagementPanel';
 import PriceCachePanel from '@/components/admin/PriceCachePanel';
 import { AltSyncTools, DiscordSwitches } from '@/components/admin/SuperAdminTools';
+import { RoleSyncPanel } from '@/components/admin/RoleSyncPanel';
 
 type Role = 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER';
 const LEVEL: Record<Role, number> = { MEMBER: 0, OFFICER: 1, DEPUTY: 2, LEADER: 3 };
@@ -124,6 +125,7 @@ const TABS: HubTab[] = [
       { id: 'ads', label: 'Advertising', access: 'OFFICER', render: () => <AdvertisingPanel /> },
       { id: 'live', label: 'Live messages', access: 'SUPER', render: () => <LiveMessagesPanel /> },
       { id: 'bumps', label: 'Bump tracker', access: 'SUPER', render: () => <BumpsPanel /> },
+      { id: 'roles', label: 'Role sync', access: 'SUPER', render: () => <RoleSyncPanel /> },
       { id: 'mapping', label: 'Member mapping', access: 'OFFICER', render: () => <DiscordMappingPanel /> },
       { id: 'raids', label: 'Raid reminders', access: 'SUPER', render: () => <RaidRemindersPanel /> },
       { id: 'switches', label: 'Switches', access: 'SUPER', render: () => <DiscordSwitches /> },

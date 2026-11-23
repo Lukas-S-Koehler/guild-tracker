@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { ArrowLeft, Loader2 } from 'lucide-react';
+import { nextParam, withNext } from '@/lib/next-param';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -19,7 +20,7 @@ export default function LoginPage() {
   const router = useRouter();
 
   useEffect(() => {
-    if (user) router.push('/');
+    if (user) router.push(nextParam('/'));
   }, [user, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -33,7 +34,7 @@ export default function LoginPage() {
       if (signInError) {
         setError(signInError.message);
       } else {
-        router.push('/');
+        router.push(nextParam('/'));
         router.refresh();
       }
     } catch (err) {
@@ -106,7 +107,7 @@ export default function LoginPage() {
 
             <div className="text-center text-sm">
               <span className="text-muted-foreground">Don&apos;t have an account? </span>
-              <Link href="/signup" className="text-primary hover:underline">
+              <Link href={withNext('/signup')} className="text-primary hover:underline">
                 Sign up
               </Link>
             </div>

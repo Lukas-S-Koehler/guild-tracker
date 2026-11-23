@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { nextParam, withNext } from '@/lib/next-param';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -53,10 +54,10 @@ export default function SignupPage() {
         setError(signUpError.message);
       } else if (signedIn) {
         // Already signed in (no email confirmation) — go straight in; /account shows the claim flow.
-        router.push('/account');
+        router.push(nextParam('/account'));
         router.refresh();
       } else {
-        router.push('/login');
+        router.push(withNext('/login'));
       }
     } catch (err) {
       setError('An unexpected error occurred');
@@ -160,7 +161,7 @@ export default function SignupPage() {
 
             <div className="text-center text-sm">
               <span className="text-muted-foreground">Already have an account? </span>
-              <Link href="/login" className="text-primary hover:underline">
+              <Link href={withNext('/login')} className="text-primary hover:underline">
                 Sign in
               </Link>
             </div>

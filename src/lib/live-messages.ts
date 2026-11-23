@@ -234,7 +234,7 @@ async function buildLinksHub(supabase: SupabaseClient): Promise<LivePayload[]> {
     `• **Combat tool**: <${SITE}/combat>`,
     `• **Assault** live, rankings and prep: <${SITE}/assault>`,
     `• **Leaderboard**: <${SITE}/leaderboard>`,
-    `-# Create an account and claim your character to unlock the member pages.`,
+    `-# Run \`/claim\` to link your Discord and claim your character: unlocks the member pages and keeps your guild roles in sync.`,
     '',
     '## 💬 Channels',
     `• Guild directory: ${directory?.message_ids[0] ? messageLink(directory.channel_id, directory.message_ids[0]) : ch(CHANNELS.guildInfo)}`,
@@ -245,8 +245,10 @@ async function buildLinksHub(supabase: SupabaseClient): Promise<LivePayload[]> {
     `• Giveaways: ${ch(CHANNELS.giveaway)} · suggestions: ${ch(CHANNELS.suggestions)}`,
     '',
     '## 🤖 DreamBot commands',
-    '`/raid` raid times · `/lookup` your linked characters · `/leaderboard` activity ranks',
+    '`/claim` link your Discord + claim your character · `/me` daily check and streaks · `/away` holiday',
+    '`/guild` any guild at a glance · `/raid` raid times · `/leaderboard` activity ranks',
     '`/assault checklist` prep checklist · `/assault status` assault countdowns · `/guide show` guide links',
+    '-# `/help` lists every command, including the staff ones.',
   ];
   return textPayloads(lines);
 }
@@ -305,6 +307,8 @@ export interface BoardGuild {
   tag: string | null;
   members: BoardMember[];
   bankCovered: number;
+  /** Members skipped because of /away. */
+  away?: number;
   reportUrl: string | null;
   /** guilds.display_order, for sorting. */
   order: number;
@@ -336,6 +340,7 @@ export function buildDailyBoard(guilds: BoardGuild[], checkedDayTs: number): Liv
     if (by('warn2').length) lines.push(`⚠️⚠️ ${by('warn2').map(fmt).join(' · ')}`);
     if (by('warn1').length) lines.push(`⚠️ ${by('warn1').map(fmt).join(' · ')}`);
     if (g.bankCovered) lines.push(`-# 🏦 ${g.bankCovered} covered by the shared alt bank`);
+    if (g.away) lines.push(`-# 🌴 ${g.away} on holiday (/away)`);
   }
   if (clear.length) lines.push('', `✅ **All clear:** ${clear.join(', ')}`);
   return textPayloads(lines);
