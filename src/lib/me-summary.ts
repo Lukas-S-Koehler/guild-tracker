@@ -304,6 +304,15 @@ export async function buildMeSummary(
     const ign = (pending?.member as unknown as { ign: string } | null)?.ign;
     return { claimed: false, pending: ign ? { ign } : null };
   }
+  return buildSummaryFor(characters, opts, supabase);
+}
+
+/** Same summary for any account bundle (used by /me and by member profiles /p/[ign]). */
+export async function buildSummaryFor(
+  characters: AccountCharacter[],
+  opts: { memberId?: string | null; guildId?: string | null },
+  supabase: SupabaseClient
+): Promise<MeSummary> {
 
   const main =
     characters.find((c) => c.claimed && c.in_dream_guild) ??

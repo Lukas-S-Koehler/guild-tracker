@@ -1,5 +1,5 @@
 /**
- * Dream Hub Discord commands (step 8): /help, /claim, /me, /guild, /away.
+ * Dream Hub Discord commands (step 8): /help, /claim, /me, /guild, /away; /profile (step 12).
  * Routed from src/app/api/discord/interactions/route.ts. Registered with registerHubCommands().
  */
 import { NextResponse } from 'next/server';
@@ -8,7 +8,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createAdminClient } from '@/lib/supabase-server';
 import { editOriginalInteractionResponse, postToChannel, upsertGlobalCommand } from '@/lib/discord-api';
 import { getActiveClaim } from '@/lib/account-service';
-import { linkUrl, mappedIgns, resolveDiscordLink } from '@/lib/discord-link';
+import { getLinkByDiscord, linkUrl, mappedIgns, resolveDiscordLink } from '@/lib/discord-link';
 import { buildMeSummary, type GuildGroup } from '@/lib/me-summary';
 import { findGuildByTag, loadGuildDirectory } from '@/lib/guild-directory';
 import { raidCls, req } from '@/lib/discord-posts';
@@ -20,6 +20,8 @@ import { outranks, outrankError, rankOfRole } from '@/lib/role-hierarchy';
 import { achievementsField } from '@/lib/achievement-discord';
 import { buildMeAssault } from '@/lib/me-assault';
 import { personalRecapEmbed } from '@/lib/assault-recap';
+import { buildProfile, findProfileAccount } from '@/lib/profile';
+import { profilePath } from '@/lib/profile-path';
 
 const SITE = GUIDE_SITE_URL;
 const CRYSTAL = 0x4cc9f0;
@@ -253,6 +255,91 @@ export function handleGuild(i: HubInteraction) {
   });
 }
 
+// ─── /profile [ign|user] [share] (step 12) ───────────────────────────────────
+
+export async function handleProfileAutocomplete(i: HubInteraction) {
+  const q = String(i.data.options?.find((o) => o.focused)?.value ?? '').trim();
+  const supabase = createAdminClient();
+  let query = supabase.from('members').select('ign, current_guild_id, is_active').order('is_active', { ascending: false }).order('total_level', { ascending: false }).limit(25);
+  if (q) query = query.ilike('ign', `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+  const [{ data }, { data: guilds }] = await Promise.all([query, supabase.from('guilds').select('id, nickname')]);
+  const tag = new Map((guilds ?? []).map((g) => [g.id as string, g.nickname as string | null]));
+  const choices = (data ?? []).map((m) => ({
+    name: `${m.ign}${m.is_active && m.current_guild_id && tag.get(m.current_guild_id) ? ` · ${tag.get(m.current_guild_id)}` : ''}`.slice(0, 100),
+    value: m.ign,
+  }));
+  return NextResponse.json({ type: 8, data: { choices } });
+}
+
+export function handleProfile(i: HubInteraction) {
+  const u = caller(i);
+  if (!u) return ephemeral('Could not identify you.');
+  const opt = (n: string) => i.data.options?.find((o) => o.name === n)?.value;
+  const share = opt('share') === true;
+  const ignOpt = String(opt('ign') ?? '').trim();
+  const target = (opt('user') as string | undefined) ?? (ignOpt ? null : u.id);
+  return deferred(i, !share, async () => {
+    const supabase = createAdminClient();
+    let ign = ignOpt;
+    if (!ign && target) {
+      // Discord user → their claimed main, else any character staff mapped to them.
+      // Only the caller's own link may be auto-created; someone else's is just read.
+      const link = target === u.id ? await resolveDiscordLink(supabase, u.id, u.global_name ?? u.username) : await getLinkByDiscord(supabase, target);
+      const claim = link ? await getActiveClaim(link.user_id, supabase) : null;
+      ign = claim?.status === 'approved' ? claim.ign : (await mappedIgns(supabase, target))[0] ?? '';
+      if (!ign) return { content: target === u.id ? 'You have no linked character yet. Run `/claim`.' : `<@${target}> has no linked character.` };
+    }
+    const account = await findProfileAccount(ign, supabase);
+    if (!account) return { content: `No Dream character called **${ign}**.` };
+    const p = await buildProfile(account, '', supabase);
+    const a = p.achievements;
+    const streaks = p.streaks
+      .filter((g) => g.current > 0 || g.best > 0)
+      .map((g) => `**${g.guild_nickname ?? g.guild_name}** 🔥 ${g.current}${g.unit === 'day' ? 'd' : 'w'} (best ${g.best})`)
+      .join(' · ');
+    const badges = a.achievements
+      .filter((x) => x.unlocked_at)
+      .sort((x, y) => (x.unlocked_at! < y.unlocked_at! ? 1 : -1))
+      .slice(0, 4)
+      .map((x) => `${({ bronze: '🥉', silver: '🥈', gold: '🥇', crystal: '💎', dream: '🌌' } as const)[x.tier]} ${x.name}`)
+      .join(' · ');
+    const m = p.main;
+    const head = [
+      [m.combat_level != null ? `CL ${m.combat_level}` : null, `Lv ${fmt(m.total_level ?? 0)}`, m.class ? m.class.charAt(0) + m.class.slice(1).toLowerCase() : null]
+        .filter(Boolean)
+        .join(' · '),
+      m.in_dream_guild ? `${m.guild_name}${m.position && m.position !== 'MEMBER' ? ` (${m.position.charAt(0) + m.position.slice(1).toLowerCase()})` : ''}` : 'Not in a Dream guild',
+      `${a.rank ? `${a.rank.emoji} **${a.rank.name}** · ` : ''}${fmt(a.xp)} Dream XP · ${a.unlocked}/${a.total} achievements`,
+    ];
+    const url = `${SITE}${profilePath(p.ign)}`;
+    return {
+      embeds: [
+        {
+          title: `${p.ign}${a.title ? ` · ${a.title.name}` : ''}`,
+          url,
+          color: CRYSTAL,
+          thumbnail: m.avatar_url ? { url: m.avatar_url } : undefined,
+          description: head.join('\n'),
+          fields: [
+            { name: 'Lifetime gold', value: fmt(p.tiles.lifetime_gold), inline: true },
+            { name: 'Raids', value: fmt(p.tiles.lifetime_raids), inline: true },
+            { name: 'Days met', value: `${fmt(p.tiles.days_met)} / ${fmt(p.tiles.days_logged)}`, inline: true },
+            ...(p.tiles.assault_runs
+              ? [{ name: 'Assault', value: `${fmt(p.tiles.assault_kills)} kills · ${fmt(p.tiles.assault_runs)} waves`, inline: true }]
+              : []),
+            ...(streaks ? [{ name: 'Streak', value: streaks.slice(0, 1000), inline: false }] : []),
+            ...(badges ? [{ name: 'Latest achievements', value: badges.slice(0, 1000), inline: false }] : []),
+            ...(p.characters.length > 1
+              ? [{ name: 'Characters', value: p.characters.map((c) => c.ign).join(', ').slice(0, 1000), inline: false }]
+              : []),
+          ],
+        },
+      ],
+      components: [row(linkButton('Open profile', url))],
+    };
+  });
+}
+
 // ─── /away ───────────────────────────────────────────────────────────────────
 
 async function rankOfDiscord(supabase: SupabaseClient, discordId: string): Promise<number> {
@@ -319,6 +406,7 @@ const MEMBER_HELP: [string, string[]][] = [
   ['💎 You', [
     '`/claim` link your Discord to the website and claim your character',
     '`/me` your daily check, streaks and stats (`share:True` posts it)',
+    '`/profile ign:` or `user:` someone\'s profile: rank, achievements, stats (no args = yours)',
     '`/away set days:` holiday up to 14 days, the daily check skips you · `/away end` · `/away list`',
     '`/lookup` your linked characters',
   ]],
@@ -400,6 +488,15 @@ export async function registerHubCommands() {
       name: 'me',
       description: 'Your daily check, streaks and stats',
       options: [{ name: 'share', type: 5, description: 'Post it in the channel instead of only showing you', required: false }],
+    },
+    {
+      name: 'profile',
+      description: "A member's profile: rank, achievements, stats (yours if empty)",
+      options: [
+        { name: 'ign', type: 3, description: 'Character name (any character of the account)', required: false, autocomplete: true },
+        { name: 'user', type: 6, description: 'Discord member', required: false },
+        { name: 'share', type: 5, description: 'Post it in the channel instead of only showing you', required: false },
+      ],
     },
     {
       name: 'guild',

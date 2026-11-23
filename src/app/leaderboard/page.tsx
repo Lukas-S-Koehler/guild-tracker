@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+import { profilePath } from '@/lib/profile-path';
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -195,7 +197,7 @@ export default function LeaderboardPage() {
                         </td>
                         <td className="py-3">
                           <div>
-                            <span className="font-medium">{entry.ign}</span>
+                            <Link href={profilePath(entry.ign)} className="font-medium hover:underline underline-offset-4">{entry.ign}</Link>
                             {entry.class && ['banished', 'cursed'].includes(entry.class.toLowerCase()) ? (
                               <span
                                 className="ml-1.5 text-xs text-amber-400"

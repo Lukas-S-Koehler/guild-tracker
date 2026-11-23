@@ -6,7 +6,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { fetchLeaderboard, type LeaderboardPeriod } from '@/lib/leaderboard';
 import { getAssaultLeaderboard, getCurrentSeason } from '@/lib/assault-standings-service';
-import { getAccountCharacters } from '@/lib/account-service';
+import { getAccountCharacters, type AccountCharacter } from '@/lib/account-service';
 
 export interface Rank {
   rank: number;
@@ -64,7 +64,11 @@ async function assaultRank(ids: Set<string>, season?: number): Promise<AssaultRa
 }
 
 export async function buildMeRankings(userId: string, supabase: SupabaseClient): Promise<MeRankings> {
-  const characters = await getAccountCharacters(userId, supabase);
+  return buildRankingsFor(await getAccountCharacters(userId, supabase), supabase);
+}
+
+/** Ranks for any account bundle (used by /me and by member profiles /p/[ign]). */
+export async function buildRankingsFor(characters: AccountCharacter[], supabase: SupabaseClient): Promise<MeRankings> {
   const season = await getCurrentSeason();
   if (characters.length === 0) {
     return { claimed: false, activity: { week: null, month: null, all: null }, guild_week: null, assault: { season, season_rank: null, all_time: null } };

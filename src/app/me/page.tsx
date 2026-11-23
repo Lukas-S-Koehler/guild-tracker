@@ -1,7 +1,7 @@
 'use client';
 
 import { ASSAULT_ENTRY_GUILD_ID } from '@/lib/raids';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -24,6 +24,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import type { MeSummary, MeSummaryResult } from '@/lib/me-summary';
 import RankingsCard from '@/components/me/RankingsCard';
 import AchievementsCard from '@/components/me/AchievementsCard';
+import Heatmap from '@/components/me/Heatmap';
+import { profilePath } from '@/lib/profile-path';
 
 const fmt = (n: number) => n.toLocaleString('en-US');
 const compact = (n: number) =>
@@ -45,7 +47,6 @@ const TONE_DOT: Record<string, string> = {
   warn: 'bg-amber-500',
   info: 'bg-sky-500',
 };
-const HEAT = ['bg-muted', 'bg-sky-900', 'bg-sky-600', 'bg-sky-400'];
 
 function Tile({ icon, label, value, sub, href }: { icon: React.ReactNode; label: string; value: string; sub?: string; href?: string }) {
   const card = (
@@ -74,48 +75,6 @@ function useCountdown(iso: string | undefined) {
   const h = Math.floor(ms / 3_600_000);
   const m = Math.floor((ms % 3_600_000) / 60_000);
   return `${h}h ${m}m`;
-}
-
-function Heatmap({ days }: { days: MeSummary['heatmap'] }) {
-  // Columns = weeks (Mon..Sun), aligned so the last column holds today.
-  const weeks = useMemo(() => {
-    const first = new Date(days[0].date + 'T00:00:00Z').getUTCDay() || 7; // Mon=1
-    const padded: (MeSummary['heatmap'][number] | null)[] = [...Array(first - 1).fill(null), ...days];
-    const cols: (MeSummary['heatmap'][number] | null)[][] = [];
-    for (let i = 0; i < padded.length; i += 7) cols.push(padded.slice(i, i + 7));
-    return cols;
-  }, [days]);
-  const label = ['No activity', 'Some activity', 'Requirement met', 'Met 2× or more'];
-  return (
-    <div className="space-y-2">
-      <div className="overflow-x-auto">
-        <div className="flex gap-[3px] w-max">
-          {weeks.map((w, i) => (
-            <div key={i} className="flex flex-col gap-[3px]">
-              {w.map((d, j) =>
-                d ? (
-                  <div
-                    key={j}
-                    title={`${prettyDate(d.date)}: ${label[d.level]}`}
-                    className={`h-[11px] w-[11px] rounded-[2px] ${HEAT[d.level]}`}
-                  />
-                ) : (
-                  <div key={j} className="h-[11px] w-[11px]" />
-                )
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="flex items-center gap-1 text-xs text-muted-foreground">
-        Less
-        {HEAT.map((c, i) => (
-          <div key={i} className={`h-[11px] w-[11px] rounded-[2px] ${c}`} title={label[i]} />
-        ))}
-        More
-      </div>
-    </div>
-  );
 }
 
 type Scope = { guild_id?: string; member_id?: string } | null;
@@ -255,6 +214,9 @@ export default function MePage() {
                 {status.exempt ? 'Exempt (leadership)' : WARN_LABEL[status.warning_level]}
               </Badge>
             )}
+            <Link href={profilePath(main.ign)} className="text-xs text-sky-100/70 hover:text-white underline-offset-4 hover:underline">
+              Your profile →
+            </Link>
           </div>
         </div>
       </Card>
