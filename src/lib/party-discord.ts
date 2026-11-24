@@ -197,6 +197,7 @@ export function handleParty(i: PartyInteraction) {
       const here = i.channel_id ? await getChannel(i.channel_id) : null;
       if (here?.parent_id === PARTY_FORUM_ID) {
         if (await partyByThread(supabase, here.id)) return { content: 'This thread already belongs to a party: `/party info`.' };
+        await supabase.from('parties').delete().eq('thread_id', here.id).not('closed_at', 'is', null); // old closed party
         const board = await getLiveRow(supabase, PARTY_BOARD_KEY);
         if (board?.channel_id === here.id) return { content: 'Not in the party board 🙂' };
         if (here.owner_id !== u.id && !staff) return { content: `Only the person who opened this thread (<@${here.owner_id}>) or <@&${PARTY_STAFF_ROLE_ID}> can attach it to a party.` };
@@ -256,11 +257,13 @@ export function handleParty(i: PartyInteraction) {
 
     if (sub?.name === 'close') {
       if (!isLeader(p, i)) return { content: 'Only the party leader (or staff) can close the party.' };
-      await supabase.from('parties').update({ closed_at: new Date().toISOString() }).eq('id', p.id);
+      // Card shows "closed" one last time, then the party is deleted: characters and thread are free again.
       p.closed_at = new Date().toISOString();
-      await syncPartyCard(supabase, { ...p, members: p.members, leagues: [] });
+      await syncPartyCard(supabase, { ...p, leagues: [] });
+      const { error } = await supabase.from('parties').delete().eq('id', p.id);
+      if (error) return { content: `❌ ${error.message}` };
       const b = await refreshPartyBoard(supabase);
-      return { content: `🔒 **${p.name}** closed and removed from the board. The thread stays, and its characters are free to join another party.${b.status === 'error' ? `\n-# ⚠️ Board: ${b.error}` : ''}` };
+      return { content: `🔒 **${p.name}** closed and deleted. Its characters are free, and \`/party create\` in this thread starts a new party.${b.status === 'error' ? `\n-# ⚠️ Board: ${b.error}` : ''}` };
     }
 
     if (!canManage(p, i)) return { content: `Only the leader and officers of **${p.name}** can do that.` };
@@ -304,23 +307,8 @@ export function handleParty(i: PartyInteraction) {
     }
 
     if (sub?.name === 'league') {
-      const league = await getLeague(supabase, String(opt('league') ?? ''));
-      if (!league) return { content: 'Pick a league from the list (staff import them with `/league import`).' };
-      const status = String(opt('status') ?? 'planning');
-      if (status === 'drop') {
-        await supabase.from('party_leagues').delete().eq('party_id', p.id).eq('league_id', league.id);
-        return { content: `Dropped **${leagueLabel(league)}** from **${p.name}**.` + (await afterChange(supabase, p)) };
-      }
-      if (leagueState(league) === 'ended') return { content: 'That league has ended.' };
-      const { error } = await supabase
-        .from('party_leagues')
-        .upsert({ party_id: p.id, league_id: league.id, status: status === 'joined' ? 'joined' : 'planning', updated_at: new Date().toISOString() });
-      if (error) return { content: `❌ ${error.message}` };
-      const warn = league.restriction ? `\n-# 🔒 ${league.restriction} league: only ${league.restriction} characters can join.` : '';
-      const open = openSlots(p, league);
-      return {
-        content: `✅ **${p.name}** · ${leagueLabel(league)} · ${status === 'joined' ? 'joined (no more open slots shown)' : `planning${open ? `, ${open} open slot${open === 1 ? '' : 's'} on the board` : ''}`}.${warn}` + (await afterChange(supabase, p)),
-      };
+      const status = opt('status') === 'joined' ? 'joined' : 'planning';
+      return leaguePicker(supabase, p, status);
     }
 
     if (sub?.name === 'edit') {
@@ -366,6 +354,83 @@ export function handlePartyAsk(i: PartyInteraction) {
     });
     return { content: r.ok ? `✅ Asked in <#${p.thread_id}>. The leader will get back to you there.` : `❌ Could not post in the thread: ${r.error}` };
   });
+}
+
+// ─── /party league picker ────────────────────────────────────────────────────
+// One multi-select of all running + upcoming leagues, current ones ticked. Submitting saves the
+// selection: ticked = kept/added with the chosen status, unticked = dropped.
+// custom_id = party:lg:<party id>:<p|j>
+
+const LEAGUE_PICK = 'party:lg:';
+
+async function leaguePicker(supabase: SupabaseClient, p: PartyFull, status: 'planning' | 'joined') {
+  const today = todayUtc();
+  const leagues = (await listLiveLeagues(supabase)).filter((l) => leagueState(l, today) !== 'ended');
+  if (!leagues.length) return { content: 'No leagues imported yet (staff: `/league import`).' };
+  const mine = new Map(p.leagues.map((x) => [x.league_id, x.status]));
+  // Max 25 options: keep the party's current leagues, then the soonest others.
+  const shown = [...leagues.filter((l) => mine.has(l.id)), ...leagues.filter((l) => !mine.has(l.id))].slice(0, 25)
+    .sort((a, b) => a.starts_on.localeCompare(b.starts_on));
+  const options = shown.map((l) => ({
+    label: leagueLabel(l).slice(0, 100),
+    value: l.id,
+    description: `${leagueState(l, today) === 'active' ? 'running' : 'upcoming'}${l.entrants != null ? ` · ${l.entrants} parties` : ''}${mine.get(l.id) === 'joined' ? ' · ✅ joined' : mine.get(l.id) ? ' · planning' : ''}`.slice(0, 100),
+    default: mine.has(l.id),
+  }));
+  return {
+    content: [
+      `**${p.name}**: tick every league you ${status === 'joined' ? '**joined in game**' : '**plan** to join'}, untick to drop.`,
+      status === 'joined'
+        ? '-# Joined = locked in game: the party shows no open slots anywhere while a joined league is upcoming or running.'
+        : '-# New picks are saved as planning; leagues already marked joined stay joined. Run `/party league status:joined` once you registered in game.',
+    ].join('\n'),
+    components: [{ type: 1, components: [{ type: 3, custom_id: `${LEAGUE_PICK}${p.id}:${status === 'joined' ? 'j' : 'p'}`, placeholder: 'Leagues…', min_values: 0, max_values: options.length, options }] }],
+  };
+}
+
+export function handleLeaguePick(i: PartyInteraction) {
+  const u = caller(i);
+  if (!u) return ephemeral('Could not identify you.');
+  const [partyId, flag] = String(i.data.custom_id ?? '').slice(LEAGUE_PICK.length).split(':');
+  const status = flag === 'j' ? 'joined' : 'planning';
+  const picked = new Set(i.data.values ?? []);
+  waitUntil(
+    (async () => {
+      const supabase = createAdminClient();
+      const done = (content: string) => editOriginalInteractionResponse(i.application_id, i.token, { content, components: [], allowed_mentions: { parse: [] } });
+      try {
+        const p = await getParty(supabase, partyId ?? '');
+        if (!p) return void (await done('This party no longer exists.'));
+        if (!canManage(p, i)) return void (await done(`Only the leader and officers of **${p.name}** can do that.`));
+        const today = todayUtc();
+        const live = new Map((await listLiveLeagues(supabase)).map((l) => [l.id, l]));
+        const now = new Date().toISOString();
+        // Drop unticked (only leagues that are still running/upcoming; ended history stays).
+        const drop = p.leagues.filter((x) => !picked.has(x.league_id) && leagueState(x.league, today) !== 'ended').map((x) => x.league_id);
+        if (drop.length) await supabase.from('party_leagues').delete().eq('party_id', p.id).in('league_id', drop);
+        const before = new Map(p.leagues.map((x) => [x.league_id, x.status]));
+        const rows = Array.from(picked)
+          .filter((id) => live.has(id))
+          .map((id) => ({ party_id: p.id, league_id: id, status: status === 'joined' ? 'joined' : (before.get(id) ?? 'planning'), updated_at: now }));
+        if (rows.length) {
+          const { error } = await supabase.from('party_leagues').upsert(rows);
+          if (error) return void (await done(`❌ ${error.message}`));
+        }
+        const note = await afterChange(supabase, p);
+        const restricted = rows.map((r) => live.get(r.league_id)!).filter((l) => l.restriction);
+        await done(
+          [
+            `✅ **${p.name}**: ${rows.length} league${rows.length === 1 ? '' : 's'}${drop.length ? `, ${drop.length} dropped` : ''}.`,
+            ...rows.map((r) => `• ${leagueLabel(live.get(r.league_id)!)} · ${r.status === 'joined' ? '✅ joined' : 'planning'}`),
+            ...restricted.map((l) => `-# 🔒 ${leagueLabel(l, { dates: false })}: only ${l.restriction} characters can join.`),
+          ].join('\n').slice(0, 1900) + note
+        );
+      } catch (err) {
+        await done(`Something went wrong: ${String(err).slice(0, 300)}`);
+      }
+    })()
+  );
+  return NextResponse.json({ type: 6 }); // deferred update of the picker message
 }
 
 // ─── /lfg ────────────────────────────────────────────────────────────────────
@@ -587,6 +652,7 @@ export function routePartyInteraction(type: number, i: PartyInteraction): Promis
   if (type === 2 && name === 'league') return handleLeague(i);
   if (type === 3 && id.startsWith(ASK_PREFIX)) return handlePartyAsk(i);
   if (type === 3 && id === LFG_PICK) return handleLfgPick(i);
+  if (type === 3 && id.startsWith(LEAGUE_PICK)) return handleLeaguePick(i);
   if (type === 5 && id === IMPORT_MODAL) return handleLeagueImport(i);
   return null;
 }
@@ -617,10 +683,9 @@ export const PARTY_COMMAND_DEFS = [
       },
       { name: 'kick', type: 1, description: 'Remove a character (leader/officers)', options: [{ name: 'ign', type: 3, description: 'Character in the party', required: true, autocomplete: true }, partyOpt] },
       {
-        name: 'league', type: 1, description: 'Plan a league, mark it joined, or drop it',
+        name: 'league', type: 1, description: 'Pick the leagues your party plans or joined (one list, tick several)',
         options: [
-          leagueOpt,
-          { name: 'status', type: 3, description: 'planning = still recruiting · joined = registered in game', required: true, choices: [{ name: 'planning (show open slots)', value: 'planning' }, { name: 'joined in game', value: 'joined' }, { name: 'drop it', value: 'drop' }] },
+          { name: 'status', type: 3, description: 'planning = still recruiting · joined = registered in game (party locked)', required: false, choices: [{ name: 'planning (show open slots)', value: 'planning' }, { name: 'joined in game (locked)', value: 'joined' }] },
           partyOpt,
         ],
       },

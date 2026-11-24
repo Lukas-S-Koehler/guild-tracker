@@ -315,7 +315,9 @@ export async function openPartyOfCharacter(supabase: SupabaseClient, ign: string
   return row ? { party_id: row.party_id, name: row.parties.name } : null;
 }
 
-export const openSlots = (p: PartyFull, l?: League) => Math.max(0, (l?.max_size ?? PARTY_MAX) - p.members.length);
+/** In game a party that joined any upcoming/active league can't take new members: locked everywhere. */
+export const isLocked = (p: PartyFull, today = todayUtc()) => p.leagues.some((x) => x.status === 'joined' && leagueState(x.league, today) !== 'ended');
+export const openSlots = (p: PartyFull, l?: League) => (isLocked(p) ? 0 : Math.max(0, (l?.max_size ?? PARTY_MAX) - p.members.length));
 export const ASK_PREFIX = 'party:ask:';
 
 export function partyCardPayload(p: PartyFull): LivePayload {
@@ -329,7 +331,7 @@ export function partyCardPayload(p: PartyFull): LivePayload {
     ...by('leader').map((x) => `👑 ${x}`),
     ...officers.map((x) => `⭐ ${x}`),
     ...members.map((x) => `👤 ${x}`),
-    `**Members:** ${p.members.length}/${PARTY_MAX}${p.members.length < PARTY_MAX ? ` · ${PARTY_MAX - p.members.length} open` : ' · full'}`,
+    `**Members:** ${p.members.length}/${PARTY_MAX}${isLocked(p) ? ' · 🔒 locked (joined a league in game)' : p.members.length < PARTY_MAX ? ` · ${PARTY_MAX - p.members.length} open` : ' · full'}`,
     '',
     '**Leagues**',
     ...(leagues.length
@@ -341,7 +343,7 @@ export function partyCardPayload(p: PartyFull): LivePayload {
     ...(p.members.some((m) => m.ign && !m.member_id) ? ['-# 🌐 = from outside the Dream guilds'] : []),
     '-# Leader/officers: `/party invite ign:` (alts and outside players too) · `/party league` · `/party edit`. Looking to join? Press 🙋 below. All parties: 📋 Party board.',
   ];
-  const canAsk = p.members.length < PARTY_MAX && !p.closed_at;
+  const canAsk = p.members.length < PARTY_MAX && !p.closed_at && !isLocked(p);
   return {
     content: lines.join('\n').slice(0, 1990),
     allowed_mentions: { parse: [] },
@@ -410,7 +412,7 @@ export async function buildPartyBoard(supabase: SupabaseClient): Promise<LivePay
     for (const p of inLeague(l)) {
       const st = p.leagues.find((x) => x.league_id === l.id)!.status;
       const open = openSlots(p, l);
-      lines.push(`└ ${badge(p)}${threadRef(p)} · ${p.members.length}/${l.max_size} · ${st === 'joined' ? '✅ joined' : open ? `**${open} open**` : 'full'}`);
+      lines.push(`└ ${badge(p)}${threadRef(p)} · ${p.members.length}/${l.max_size} · ${st === 'joined' ? '✅ joined' : isLocked(p) ? '🔒 locked' : open ? `**${open} open**` : 'full'}`);
     }
   }
 
@@ -425,7 +427,7 @@ export async function buildPartyBoard(supabase: SupabaseClient): Promise<LivePay
   const quiet = active.filter((l) => !inLeague(l).length);
   if (quiet.length) lines.push(`-# Also running: ${quiet.map((l) => leagueLabel(l, { dates: false })).join(', ')}`);
 
-  const slayer = parties.filter((p) => p.slayer && p.members.length < PARTY_MAX);
+  const slayer = parties.filter((p) => p.slayer && p.members.length < PARTY_MAX && !isLocked(p));
   lines.push('', '## 🗡️ Party Slayer: parties with room');
   lines.push(...(slayer.length ? slayer.map((p) => `${badge(p)}${threadRef(p)} · ${p.members.length}/${PARTY_MAX}${p.note ? ` · ${p.note}` : ''}`) : ['-# None right now. Leaders: `/party edit slayer:open`.']));
 
