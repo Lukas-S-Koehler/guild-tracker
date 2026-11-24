@@ -363,11 +363,12 @@ export async function registerLeaderboardCommand(): Promise<{ ok: boolean; error
     {
       name: 'board',
       type: 3,
-      description: 'Which board (default: activity)',
+      description: 'Which board (default: Dream Pass this month)',
       required: false,
       choices: [
-        { name: 'Activity (raids + gold)', value: 'activity' },
         { name: 'Dream Pass (this month)', value: 'pass' },
+        { name: 'Discord level', value: 'discord' },
+        { name: 'Activity (raids + gold)', value: 'activity' },
         { name: 'Current streak', value: 'streak' },
         { name: 'Longest streak', value: 'best_streak' },
         { name: 'Most improved (this week vs last)', value: 'improved' },
@@ -739,10 +740,7 @@ export async function registerAssaultCommand(): Promise<{ ok: boolean; error?: s
         name: 'me',
         type: 1,
         description: 'Your assault season: EXP, kills, waves, ranks (past season = recap)',
-        options: [
-          seasonOpt('Season (default current)'),
-          { name: 'share', type: 5, description: 'Post it in the channel instead of only showing you', required: false },
-        ],
+        options: [seasonOpt('Season (default current)')],
       },
       { name: 'status', type: 1, description: 'Show active state + countdowns for both guilds' },
       { name: 'zones', type: 1, description: 'Best finishes per conquest location' },

@@ -25,9 +25,9 @@ import { profilePath } from '@/lib/profile-path';
 import { NETWORK_BOARDS, getNetworkBoards, placeOf, type NetworkBoardKey } from '@/lib/network-boards';
 import { KUDOS_PER_WEEK, REASON_MAX, REASON_MIN, discordSafe, giveKudos, giverStatus, memberIdByIgn, receivedKudos } from '@/lib/kudos';
 import { getAccountMemberIds } from '@/lib/alt-graph';
-import { accountPass } from '@/lib/dream-pass-account';
+import { accountDiscordLevel, accountPass } from '@/lib/dream-pass-account';
 import { chatChannels, memberChannels } from '@/lib/discord-chat';
-import { CHAT_COOLDOWN_S, CHAT_DAY_MIN, CHAT_MIN_CHARS, MAX_LEVEL, PASS_SOURCES, SOURCE_ORDER, seasonEnd, seasonLabel, xpForLevel } from '@/lib/dream-pass';
+import { CHAT_COOLDOWN_S, CHAT_DAY_MIN, CHAT_MIN_CHARS, MAX_LEVEL, PASS_SOURCES, PASS_XP, SOURCE_ORDER, currentSeason, seasonEnd, seasonLabel, xpForLevel } from '@/lib/dream-pass';
 
 const SITE = GUIDE_SITE_URL;
 const CRYSTAL = 0x4cc9f0;
@@ -64,6 +64,56 @@ function deferred(i: HubInteraction, ephemeralReply: boolean, work: () => Promis
     })()
   );
   return NextResponse.json({ type: 5, data: ephemeralReply ? { flags: EPHEMERAL } : {} });
+}
+
+// ─── Share button (replaces the old share:True option) ───────────────────────
+// Personal cards reply privately with a "📢 Share" button; clicking it posts the same card publicly.
+// custom_id = hubshare:<card>:<arg> (arg = IGN / season, ≤ 80 chars).
+
+const SHARE_PREFIX = 'hubshare:';
+export const HOW_ID = 'hubhow';
+const howButton = () => ({ type: 2, style: 2, label: 'How it works', emoji: { name: 'ℹ️' }, custom_id: HOW_ID });
+type Payload = Record<string, unknown>;
+
+function withShare(payload: Payload, card: string, arg = ''): Payload {
+  if (!payload.embeds) return payload; // errors / hints stay private, nothing to share
+  const button = { type: 2, style: 2, label: 'Share', emoji: { name: '📢' }, custom_id: `${SHARE_PREFIX}${card}:${arg}`.slice(0, 100) };
+  const rows = ((payload.components as Array<{ type: number; components: unknown[] }> | undefined) ?? []).map((r) => ({ ...r, components: [...r.components] }));
+  if (rows[0] && rows[0].components.length < 5) rows[0].components.push(button);
+  else rows.push(row(button));
+  return { ...payload, components: rows };
+}
+
+/** Private reply with a Share button. */
+function privateCard(i: HubInteraction, card: string, work: () => Promise<{ payload: Payload; arg?: string }>) {
+  return deferred(i, true, async () => {
+    const { payload, arg } = await work();
+    return withShare(payload, card, arg ?? '');
+  });
+}
+
+/** Share button clicked: post the card again, publicly, in the channel. */
+export function handleHubShare(i: HubInteraction) {
+  const u = caller(i);
+  if (!u) return ephemeral('Could not identify you.');
+  const id = String(i.data.custom_id ?? '').slice(SHARE_PREFIX.length);
+  const card = id.split(':')[0]!;
+  const arg = id.slice(card.length + 1);
+  return deferred(i, false, async () => {
+    const supabase = createAdminClient();
+    const { payload } =
+      card === 'me' ? await mePayload(supabase, u)
+      : card === 'assault' ? await assaultMePayload(supabase, u, Number(arg) || undefined)
+      : card === 'profile' ? await profilePayload(supabase, arg)
+      : card === 'pass' ? await passPayload(supabase, arg.split('|')[0]!, arg.split('|')[1] || undefined)
+      : card === 'level' ? await levelPayload(supabase, arg)
+      : { payload: { content: 'This card can no longer be shared.' } };
+    // Public copy: drop the private-only buttons (Share, How it works); keep the links.
+    const rows = ((payload.components as Array<{ type: number; components: Array<{ custom_id?: string }> }> | undefined) ?? [])
+      .map((r) => ({ ...r, components: r.components.filter((c) => !c.custom_id) }))
+      .filter((r) => r.components.length);
+    return { ...payload, components: rows };
+  });
 }
 
 // ─── /claim ──────────────────────────────────────────────────────────────────
@@ -133,9 +183,13 @@ function groupLine(g: GuildGroup): string {
 export function handleMe(i: HubInteraction) {
   const u = caller(i);
   if (!u) return ephemeral('Could not identify you.');
-  const share = i.data.options?.find((o) => o.name === 'share')?.value === true;
-  return deferred(i, !share, async () => {
-    const supabase = createAdminClient();
+  return privateCard(i, 'me', () => mePayload(createAdminClient(), u));
+}
+
+type DiscordUser = { id: string; username: string; global_name?: string | null };
+
+async function mePayload(supabase: SupabaseClient, u: DiscordUser): Promise<{ payload: Payload }> {
+  const out = await (async (): Promise<Payload> => {
     const link = await resolveDiscordLink(supabase, u.id, u.global_name ?? u.username);
     if (!link) return { content: 'Your Discord is not linked to a website account yet. Run `/claim` first.' };
     const s = await buildMeSummary(link.user_id, {}, supabase);
@@ -176,30 +230,33 @@ export function handleMe(i: HubInteraction) {
       ],
       components: [row(linkButton('Open my dashboard', `${SITE}/me`))],
     };
-  });
+  })();
+  return { payload: out };
 }
 
-// ─── /assault me [season] [share] (step 10) ──────────────────────────────────
+// ─── /assault me [season] (step 10) ──────────────────────────────────
 
 export function handleAssaultMe(i: HubInteraction) {
   const u = caller(i);
   if (!u) return ephemeral('Could not identify you.');
-  const share = i.data.options?.find((o) => o.name === 'share')?.value === true;
   const season = Number(i.data.options?.find((o) => o.name === 'season')?.value) || undefined;
-  return deferred(i, !share, async () => {
-    const supabase = createAdminClient();
-    const link = await resolveDiscordLink(supabase, u.id, u.global_name ?? u.username);
-    if (!link) return { content: 'Your Discord is not linked to a website account yet. Run `/claim` first.' };
-    const a = await buildMeAssault(link.user_id, supabase, { season });
-    if (!a.claimed) return { content: 'No character claimed yet. Run `/claim`.', components: [row(linkButton('My characters', `${SITE}/account`))] };
-    const { data: claim } = await supabase.from('user_characters').select('member:members(ign)').eq('user_id', link.user_id).eq('status', 'approved').limit(1).maybeSingle();
-    const m = (claim as { member?: { ign?: string } | { ign?: string }[] } | null)?.member;
-    const who = (Array.isArray(m) ? m[0]?.ign : m?.ign) ?? u.global_name ?? u.username;
-    return {
+  return privateCard(i, 'assault', async () => ({ ...(await assaultMePayload(createAdminClient(), u, season)), arg: season ? String(season) : '' }));
+}
+
+async function assaultMePayload(supabase: SupabaseClient, u: DiscordUser, season?: number): Promise<{ payload: Payload }> {
+  const link = await resolveDiscordLink(supabase, u.id, u.global_name ?? u.username);
+  if (!link) return { payload: { content: 'Your Discord is not linked to a website account yet. Run `/claim` first.' } };
+  const a = await buildMeAssault(link.user_id, supabase, { season });
+  if (!a.claimed) return { payload: { content: 'No character claimed yet. Run `/claim`.', components: [row(linkButton('My characters', `${SITE}/account`))] } };
+  const { data: claim } = await supabase.from('user_characters').select('member:members(ign)').eq('user_id', link.user_id).eq('status', 'approved').limit(1).maybeSingle();
+  const m = (claim as { member?: { ign?: string } | { ign?: string }[] } | null)?.member;
+  const who = (Array.isArray(m) ? m[0]?.ign : m?.ign) ?? u.global_name ?? u.username;
+  return {
+    payload: {
       embeds: [personalRecapEmbed(a, who)],
       components: [row(linkButton('Open My assault', `${SITE}/me/assault${a.season !== a.current_season ? `?season=${a.season}` : ''}`))],
-    };
-  });
+    },
+  };
 }
 
 // ─── /guild <tag> ────────────────────────────────────────────────────────────
@@ -261,7 +318,7 @@ export function handleGuild(i: HubInteraction) {
   });
 }
 
-// ─── /profile [ign|user] [share] (step 12) ───────────────────────────────────
+// ─── /profile [ign|user] (step 12) ───────────────────────────────────
 
 export async function handleProfileAutocomplete(i: HubInteraction) {
   const q = String(i.data.options?.find((o) => o.focused)?.value ?? '').trim();
@@ -281,72 +338,68 @@ export function handleProfile(i: HubInteraction) {
   const u = caller(i);
   if (!u) return ephemeral('Could not identify you.');
   const opt = (n: string) => i.data.options?.find((o) => o.name === n)?.value;
-  const share = opt('share') === true;
   const ignOpt = String(opt('ign') ?? '').trim();
   const target = (opt('user') as string | undefined) ?? (ignOpt ? null : u.id);
-  return deferred(i, !share, async () => {
+  return privateCard(i, 'profile', async () => {
     const supabase = createAdminClient();
-    let ign = ignOpt;
-    if (!ign && target) {
-      // Discord user → their claimed main, else any character staff mapped to them.
-      // Only the caller's own link may be auto-created; someone else's is just read.
-      const link = target === u.id ? await resolveDiscordLink(supabase, u.id, u.global_name ?? u.username) : await getLinkByDiscord(supabase, target);
-      const claim = link ? await getActiveClaim(link.user_id, supabase) : null;
-      ign = claim?.status === 'approved' ? claim.ign : (await mappedIgns(supabase, target))[0] ?? '';
-      if (!ign) return { content: target === u.id ? 'You have no linked character yet. Run `/claim`.' : `<@${target}> has no linked character.` };
-    }
-    const account = await findProfileAccount(ign, supabase);
-    if (!account) return { content: `No Dream character called **${ign}**.` };
-    const p = await buildProfile(account, '', supabase);
-    const a = p.achievements;
-    const streaks = p.streaks
-      .filter((g) => g.current > 0 || g.best > 0)
-      .map((g) => `**${g.guild_nickname ?? g.guild_name}** 🔥 ${g.current}${g.unit === 'day' ? 'd' : 'w'} (best ${g.best})`)
-      .join(' · ');
-    const badges = a.achievements
-      .filter((x) => x.unlocked_at)
-      .sort((x, y) => (x.unlocked_at! < y.unlocked_at! ? 1 : -1))
-      .slice(0, 4)
-      .map((x) => `${({ bronze: '🥉', silver: '🥈', gold: '🥇', crystal: '💎', dream: '🌌' } as const)[x.tier]} ${x.name}`)
-      .join(' · ');
-    const m = p.main;
-    const head = [
-      [m.combat_level != null ? `CL ${m.combat_level}` : null, `Lv ${fmt(m.total_level ?? 0)}`, m.class ? m.class.charAt(0) + m.class.slice(1).toLowerCase() : null]
-        .filter(Boolean)
-        .join(' · '),
-      m.in_dream_guild ? `${m.guild_name}${m.position && m.position !== 'MEMBER' ? ` (${m.position.charAt(0) + m.position.slice(1).toLowerCase()})` : ''}` : 'Not in a Dream guild',
-      `${a.rank ? `${a.rank.emoji} **${a.rank.name}** · ` : ''}${fmt(a.xp)} Dream XP · ${a.unlocked}/${a.total} achievements`,
-    ];
-    const url = `${SITE}${profilePath(p.ign)}`;
-    return {
-      embeds: [
-        {
-          title: `${p.ign}${a.title ? ` · ${a.title.name}` : ''}`,
-          url,
-          color: CRYSTAL,
-          thumbnail: m.avatar_url ? { url: m.avatar_url } : undefined,
-          description: head.join('\n'),
-          fields: [
-            { name: 'Lifetime gold', value: fmt(p.tiles.lifetime_gold), inline: true },
-            { name: 'Raids', value: fmt(p.tiles.lifetime_raids), inline: true },
-            { name: 'Days met', value: `${fmt(p.tiles.days_met)} / ${fmt(p.tiles.days_logged)}`, inline: true },
-            ...(p.tiles.assault_runs
-              ? [{ name: 'Assault', value: `${fmt(p.tiles.assault_kills)} kills · ${fmt(p.tiles.assault_runs)} waves`, inline: true }]
-              : []),
-            ...(streaks ? [{ name: 'Streak', value: streaks.slice(0, 1000), inline: false }] : []),
-            ...(badges ? [{ name: 'Latest achievements', value: badges.slice(0, 1000), inline: false }] : []),
-            ...(p.kudos.total
-              ? [{ name: '💎 Kudos', value: `${fmt(p.kudos.total)} from ${p.kudos.givers} member${p.kudos.givers === 1 ? '' : 's'}${p.kudos.recent[0] ? `\n> “${discordSafe(p.kudos.recent[0].reason)}” · ${discordSafe(p.kudos.recent[0].from_ign)}` : ''}`.slice(0, 1000), inline: false }]
-              : []),
-            ...(p.characters.length > 1
-              ? [{ name: 'Characters', value: p.characters.map((c) => c.ign).join(', ').slice(0, 1000), inline: false }]
-              : []),
-          ],
-        },
-      ],
-      components: [row(linkButton('Open profile', url))],
-    };
+    const acc = await resolveAccount(supabase, u, ignOpt, target);
+    if ('error' in acc) return { payload: { content: acc.error } };
+    return { ...(await profilePayload(supabase, acc.ign)), arg: acc.ign };
   });
+}
+
+async function profilePayload(supabase: SupabaseClient, ign: string): Promise<{ payload: Payload }> {
+    const account = await findProfileAccount(ign, supabase);
+  if (!account) return { payload: { content: `No Dream character called **${ign}**.` } };
+  const p = await buildProfile(account, '', supabase);
+  const a = p.achievements;
+  const streaks = p.streaks
+    .filter((g) => g.current > 0 || g.best > 0)
+    .map((g) => `**${g.guild_nickname ?? g.guild_name}** 🔥 ${g.current}${g.unit === 'day' ? 'd' : 'w'} (best ${g.best})`)
+    .join(' · ');
+  const badges = a.achievements
+    .filter((x) => x.unlocked_at)
+    .sort((x, y) => (x.unlocked_at! < y.unlocked_at! ? 1 : -1))
+    .slice(0, 4)
+    .map((x) => `${({ bronze: '🥉', silver: '🥈', gold: '🥇', crystal: '💎', dream: '🌌' } as const)[x.tier]} ${x.name}`)
+    .join(' · ');
+  const m = p.main;
+  const head = [
+    [m.combat_level != null ? `CL ${m.combat_level}` : null, `Lv ${fmt(m.total_level ?? 0)}`, m.class ? m.class.charAt(0) + m.class.slice(1).toLowerCase() : null]
+      .filter(Boolean)
+      .join(' · '),
+    m.in_dream_guild ? `${m.guild_name}${m.position && m.position !== 'MEMBER' ? ` (${m.position.charAt(0) + m.position.slice(1).toLowerCase()})` : ''}` : 'Not in a Dream guild',
+    `${a.rank ? `${a.rank.emoji} **${a.rank.name}** · ` : ''}${fmt(a.xp)} Dream XP · ${a.unlocked}/${a.total} achievements`,
+  ];
+  const url = `${SITE}${profilePath(p.ign)}`;
+  return { payload: {
+    embeds: [
+      {
+        title: `${p.ign}${a.title ? ` · ${a.title.name}` : ''}`,
+        url,
+        color: CRYSTAL,
+        thumbnail: m.avatar_url ? { url: m.avatar_url } : undefined,
+        description: head.join('\n'),
+        fields: [
+          { name: 'Lifetime gold', value: fmt(p.tiles.lifetime_gold), inline: true },
+          { name: 'Raids', value: fmt(p.tiles.lifetime_raids), inline: true },
+          { name: 'Days met', value: `${fmt(p.tiles.days_met)} / ${fmt(p.tiles.days_logged)}`, inline: true },
+          ...(p.tiles.assault_runs
+            ? [{ name: 'Assault', value: `${fmt(p.tiles.assault_kills)} kills · ${fmt(p.tiles.assault_runs)} waves`, inline: true }]
+            : []),
+          ...(streaks ? [{ name: 'Streak', value: streaks.slice(0, 1000), inline: false }] : []),
+          ...(badges ? [{ name: 'Latest achievements', value: badges.slice(0, 1000), inline: false }] : []),
+          ...(p.kudos.total
+            ? [{ name: '💎 Kudos', value: `${fmt(p.kudos.total)} from ${p.kudos.givers} member${p.kudos.givers === 1 ? '' : 's'}${p.kudos.recent[0] ? `\n> “${discordSafe(p.kudos.recent[0].reason)}” · ${discordSafe(p.kudos.recent[0].from_ign)}` : ''}`.slice(0, 1000), inline: false }]
+            : []),
+          ...(p.characters.length > 1
+            ? [{ name: 'Characters', value: p.characters.map((c) => c.ign).join(', ').slice(0, 1000), inline: false }]
+            : []),
+        ],
+      },
+    ],
+    components: [row(linkButton('Open profile', url))],
+  } };
 }
 
 // ─── /pass (step 15, Dream Pass) ─────────────────────────────────────────────
@@ -372,8 +425,8 @@ async function resolveAccount(supabase: SupabaseClient, u: { id: string; usernam
   return { ids: account.characters.map((c) => c.member_id), ign: hit.ign };
 }
 
-/** `/pass how:True` — how to earn XP + which channels count for chat XP. Always private. */
-function passHow(i: HubInteraction) {
+/** ℹ️ How it works button (custom_id hubhow): how to earn XP + which channels count for chat XP. Always private. */
+export function handlePassHow(i: HubInteraction) {
   return deferred(i, true, async () => {
     const supabase = createAdminClient();
     // Live channel list from Discord; fall back to the channels already being read.
@@ -413,35 +466,57 @@ export function handlePass(i: HubInteraction) {
   const u = caller(i);
   if (!u) return ephemeral('Could not identify you.');
   const opt = (n: string) => i.data.options?.find((o) => o.name === n)?.value;
-  if (opt('how') === true) return passHow(i);
-  const share = opt('share') === true;
   const ignOpt = String(opt('ign') ?? '').trim();
   const target = (opt('user') as string | undefined) ?? (ignOpt ? null : u.id);
-  return deferred(i, !share, async () => {
+  const seasonOpt = String(opt('month') ?? '').trim();
+  const season = /^\d{4}-\d{2}$/.test(seasonOpt) ? seasonOpt : undefined;
+  return privateCard(i, 'pass', async () => {
     const supabase = createAdminClient();
     const acc = await resolveAccount(supabase, u, ignOpt, target);
-    if ('error' in acc) return { content: acc.error };
-    const p = await accountPass(supabase, acc.ids);
-    const lv = p.level;
-    const left = Math.max(0, Math.ceil((Date.parse(`${seasonEnd(p.season)}T00:00:00Z`) - Date.now()) / 86_400_000));
-    const sources = SOURCE_ORDER.filter((k) => (p.breakdown[k] ?? 0) > 0)
-      .sort((a, b) => (p.breakdown[b] ?? 0) - (p.breakdown[a] ?? 0))
-      .map((k) => `${PASS_SOURCES[k].emoji} ${PASS_SOURCES[k].label} **${fmt(p.breakdown[k] ?? 0)}**`);
-    const levelLine = `**Level ${lv.level}**${lv.stars ? ` ★${lv.stars}` : ''} · ${fmt(p.xp)} XP\n${bar(lv.into, lv.need)} ${fmt(lv.need - lv.into)} to ${lv.level >= MAX_LEVEL ? 'next ★' : `level ${lv.level + 1}`}`;
-    const url = `${SITE}${profilePath(acc.ign)}`;
-    return {
+    if ('error' in acc) return { payload: { content: acc.error } };
+    return { ...(await passPayload(supabase, acc.ign, season)), arg: `${acc.ign}|${season ?? ''}` };
+  });
+}
+
+/** Month autocomplete for /pass month: (finished seasons + the running one). */
+export async function handlePassAutocomplete(i: HubInteraction) {
+  const q = String(i.data.options?.find((o) => o.focused)?.value ?? '').toLowerCase();
+  const supabase = createAdminClient();
+  const { data } = await supabase.from('dream_pass_seasons').select('season').order('season', { ascending: false }).limit(24);
+  const seasons = [currentSeason(), ...(data ?? []).map((r) => r.season as string)];
+  const choices = seasons
+    .map((s, idx) => ({ name: `${seasonLabel(s)}${idx === 0 ? ' (this month)' : ''}`, value: s }))
+    .filter((c) => !q || c.name.toLowerCase().includes(q) || c.value.includes(q))
+    .slice(0, 25);
+  return NextResponse.json({ type: 8, data: { choices } });
+}
+
+async function passPayload(supabase: SupabaseClient, ign: string, season?: string): Promise<{ payload: Payload }> {
+  const account = await findProfileAccount(ign, supabase);
+  if (!account) return { payload: { content: `No Dream character called **${ign}**.` } };
+  const p = await accountPass(supabase, account.characters.map((c) => c.member_id), season);
+  const live = p.season === currentSeason();
+  const lv = p.level;
+  const left = Math.max(0, Math.ceil((Date.parse(`${seasonEnd(p.season)}T00:00:00Z`) - Date.now()) / 86_400_000));
+  const sources = SOURCE_ORDER.filter((k) => (p.breakdown[k] ?? 0) > 0)
+    .sort((a, b) => (p.breakdown[b] ?? 0) - (p.breakdown[a] ?? 0))
+    .map((k) => `${PASS_SOURCES[k].emoji} ${PASS_SOURCES[k].label} **${fmt(p.breakdown[k] ?? 0)}**`);
+  const levelLine = `**Level ${lv.level}**${lv.stars ? ` ★${lv.stars}` : ''} · ${fmt(p.xp)} XP${live ? `\n${bar(lv.into, lv.need)} ${fmt(lv.need - lv.into)} to ${lv.level >= MAX_LEVEL ? 'next ★' : `level ${lv.level + 1}`}` : ''}`;
+  const champ = p.champion.find((c) => c.season === p.season);
+  const placeLine = p.place
+    ? `#${p.place} of ${p.players} ${live ? 'this season' : 'that season'}${live && p.place <= 10 ? ' · 🏆 champion pace' : ''}${champ ? ' · 🏆 Season Champion' : ''}`
+    : `_No XP ${live ? 'yet this season' : 'that month'}._`;
+  const url = `${SITE}${profilePath(ign)}`;
+  return {
+    payload: {
       embeds: [
         {
-          title: `🎟️ Dream Pass · ${acc.ign}`,
+          title: `🎟️ Dream Pass · ${ign}`,
           url,
           color: CRYSTAL,
-          description: [
-            `${seasonLabel(p.season)} · ${left} day${left === 1 ? '' : 's'} left`,
-            levelLine,
-            p.place ? `#${p.place} of ${p.players} this season${p.place <= 10 ? ' · 🏆 champion pace' : ''}` : '_No XP yet this season._',
-          ].join('\n'),
+          description: [`${seasonLabel(p.season)}${live ? ` · ${left} day${left === 1 ? '' : 's'} left` : ' · finished'}`, levelLine, placeLine].join('\n'),
           fields: [
-            ...(sources.length ? [{ name: 'This season', value: sources.join('\n').slice(0, 1000), inline: false }] : []),
+            ...(sources.length ? [{ name: live ? 'This season' : 'That season', value: sources.join('\n').slice(0, 1000), inline: false }] : []),
             {
               name: '🌌 Lifetime Dream XP',
               value: `${fmt(p.lifetime)}${p.lifetime_place ? ` (#${p.lifetime_place})` : ''}\n${p.rank ? `${p.rank.emoji} **${p.rank.name}**` : 'No rank yet'}${p.next_rank ? ` · ${fmt(p.next_rank.min - p.lifetime)} to ${p.next_rank.name}` : ''}`,
@@ -449,18 +524,65 @@ export function handlePass(i: HubInteraction) {
             },
             {
               name: '💬 Discord level',
-              value: p.discord.linked ? `**${p.discord.level}** · ${fmt(p.discord.messages)} msgs · ${fmt(p.discord.bumps)} bumps\n${bar(p.discord.into, p.discord.need, 8)}` : 'Not linked: `/claim`',
+              value: p.discord.linked ? `**${p.discord.level}** · \`/level\` for details` : 'Not linked: `/claim`',
               inline: true,
             },
             ...(p.champion.length ? [{ name: '🏆 Season Champion', value: p.champion.map((c) => `${seasonLabel(c.season)} #${c.place}`).join(' · ').slice(0, 1000), inline: false }] : []),
-            ...(p.previous ? [{ name: 'Last season', value: `${seasonLabel(p.previous.season)}: level ${p.previous.level} · ${fmt(p.previous.xp)} XP`, inline: false }] : []),
+            ...(live && p.previous ? [{ name: 'Last season', value: `${seasonLabel(p.previous.season)}: level ${p.previous.level} · ${fmt(p.previous.xp)} XP`, inline: false }] : []),
           ],
-          footer: { text: 'Assaults are worth the most · alts pooled · /pass how:True for rules and chat channels' },
+          footer: { text: 'Assaults are worth the most · alts pooled · ℹ️ How it works for the rules · month: for past months' },
         },
       ],
-      components: [row(linkButton('Open profile', url), linkButton('Season board', `${SITE}/leaderboard`))],
-    };
+      components: [row(linkButton('Open profile', url), linkButton('Season board', `${SITE}/leaderboard`), howButton())],
+    },
+  };
+}
+
+// ─── /level (step 15b, Discord level) ────────────────────────────────────────
+
+export function handleLevel(i: HubInteraction) {
+  const u = caller(i);
+  if (!u) return ephemeral('Could not identify you.');
+  const opt = (n: string) => i.data.options?.find((o) => o.name === n)?.value;
+  const ignOpt = String(opt('ign') ?? '').trim();
+  const target = (opt('user') as string | undefined) ?? (ignOpt ? null : u.id);
+  return privateCard(i, 'level', async () => {
+    const supabase = createAdminClient();
+    const acc = await resolveAccount(supabase, u, ignOpt, target);
+    if ('error' in acc) return { payload: { content: acc.error } };
+    return { ...(await levelPayload(supabase, acc.ign)), arg: acc.ign };
   });
+}
+
+async function levelPayload(supabase: SupabaseClient, ign: string): Promise<{ payload: Payload }> {
+  const account = await findProfileAccount(ign, supabase);
+  if (!account) return { payload: { content: `No Dream character called **${ign}**.` } };
+  const ids = account.characters.map((c) => c.member_id);
+  const d = await accountDiscordLevel(supabase, ids);
+  if (!d.linked) return { payload: { content: `**${ign}** has no Discord linked yet, so no Discord level. Link it with \`/claim\`.` } };
+  const boards = await getNetworkBoards();
+  const key = ids.slice().sort()[0];
+  const idx = boards.boards.discord.findIndex((r) => r.key === key);
+  const place = idx >= 0 ? placeOf(boards.boards.discord, idx) : null;
+  return {
+    payload: {
+      embeds: [
+        {
+          title: `💬 Discord level · ${ign}`,
+          url: `${SITE}${profilePath(ign)}`,
+          color: 0x818cf8,
+          description: [
+            `**Level ${d.level}** · ${fmt(d.xp)} Discord XP${place ? ` · #${place} in the server` : ''}`,
+            `${bar(d.into, d.need)} ${fmt(d.need - d.into)} to level ${d.level + 1}`,
+            '',
+            `💬 ${fmt(d.messages)} counted messages · 📣 ${fmt(d.bumps)} bumps · 📅 ${fmt(d.chat_days_month)} chat days this month (+${fmt(d.chat_days_month * PASS_XP.chatDay)} Dream Pass XP)`,
+          ].join('\n'),
+          footer: { text: `1 XP per message (${CHAT_MIN_CHARS}+ chars, ${CHAT_COOLDOWN_S} s apart) or bump · ℹ️ How it works lists the channels that count` },
+        },
+      ],
+      components: [row(linkButton('Discord level board', `${SITE}/leaderboard`), howButton())],
+    },
+  };
 }
 
 // ─── /leaderboard board: (step 13) ───────────────────────────────────────────
@@ -485,6 +607,8 @@ export function handleNetworkBoard(i: HubInteraction, boardRaw: unknown) {
             ? `${fmt(r.value)} XP${r.rank_emoji ? ` ${r.rank_emoji} ${r.rank_name}` : ''}`
             : board === 'pass'
               ? `Lv ${r.level ?? 0}${r.stars ? ` ★${r.stars}` : ''} · ${fmt(r.value)} XP`
+              : board === 'discord'
+                ? `Lv ${r.level ?? 0} · ${fmt(r.value)} XP`
             : `${r.value} day${r.value === 1 ? '' : 's'}`;
       return `${MEDALS[place - 1] ?? `**${place}.**`} **${r.ign}**${alts}${tag} · ${value}`;
     });
@@ -639,9 +763,11 @@ const ASSAULT_STAFF_ROLES = ['1457858504156250366', '1450584362264563855']; // S
 const MEMBER_HELP: [string, string[]][] = [
   ['💎 You', [
     '`/claim` link your Discord to the website and claim your character',
-    '`/me` your daily check, streaks and stats (`share:True` posts it)',
-    '`/profile ign:` or `user:` someone\'s profile: rank, achievements, stats (no args = yours)',
-    '`/pass` your Dream Pass: season level, XP per source, lifetime Dream XP, Discord level (`ign:`/`user:` for others) · `/pass how:True` how to earn + which channels count',
+    '`/me` your daily check, streaks and stats',
+    '`/profile` someone\'s profile (`ign:` or `user:`, empty = yours): rank, achievements, stats',
+    '`/pass` your Dream Pass: season level and XP per source (`month:` for past months, ℹ️ button: how to earn + which channels count)',
+    '`/level` your Discord level from chatting and bumping',
+    '-# Personal cards reply privately; press 📢 **Share** to post them in the channel.',
     '`/away set days:` holiday up to 14 days, the daily check skips you · `/away end` · `/away list`',
     '`/kudos give user:`/`ign:` `reason:` thank someone (3 per week, weekly shoutout) · `/kudos me` yours',
     '`/lookup` your linked characters',
@@ -650,8 +776,7 @@ const MEMBER_HELP: [string, string[]][] = [
     '`/guild tag:` requirement, raids, leaders and stats of a guild',
     '`/raid` raid times in your local time',
     '`/activity-bank` how the activity bank works',
-    '`/leaderboard` activity ranks (week / month / all time, per guild or class)',
-    '`/leaderboard board:` Dream Pass, current / longest streak, most improved, Dream XP',
+    '`/leaderboard` Dream Pass board of this month · `board:` Discord level, activity (week / month / all time, per guild or class), streaks, most improved, Dream XP',
     '`/guide show` links to the game guide',
   ]],
   ['⚔️ Assault', [
@@ -717,8 +842,7 @@ export async function registerHubCommands() {
     { name: 'claim', description: 'Link your Discord to the Dream Guilds website and claim your character' },
     {
       name: 'me',
-      description: 'Your daily check, streaks and stats',
-      options: [{ name: 'share', type: 5, description: 'Post it in the channel instead of only showing you', required: false }],
+      description: 'Your daily check, streaks and stats (📢 Share button posts it)',
     },
     {
       name: 'profile',
@@ -726,17 +850,23 @@ export async function registerHubCommands() {
       options: [
         { name: 'ign', type: 3, description: 'Character name (any character of the account)', required: false, autocomplete: true },
         { name: 'user', type: 6, description: 'Discord member', required: false },
-        { name: 'share', type: 5, description: 'Post it in the channel instead of only showing you', required: false },
       ],
     },
     {
       name: 'pass',
-      description: 'Dream Pass: season level, XP per source, lifetime Dream XP and Discord level',
+      description: 'Dream Pass: season level, XP per source, lifetime Dream XP (yours if empty)',
       options: [
         { name: 'ign', type: 3, description: 'Character name (any character of the account)', required: false, autocomplete: true },
         { name: 'user', type: 6, description: 'Discord member', required: false },
-        { name: 'share', type: 5, description: 'Post it in the channel instead of only showing you', required: false },
-        { name: 'how', type: 5, description: 'How to earn XP and which channels count for chat XP', required: false },
+        { name: 'month', type: 3, description: 'A past month (default: this month)', required: false, autocomplete: true },
+      ],
+    },
+    {
+      name: 'level',
+      description: 'Discord level: chat messages and bumps in the Dream server (yours if empty)',
+      options: [
+        { name: 'ign', type: 3, description: 'Character name (any character of the account)', required: false, autocomplete: true },
+        { name: 'user', type: 6, description: 'Discord member', required: false },
       ],
     },
     {

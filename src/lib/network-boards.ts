@@ -8,6 +8,7 @@
  *  - improved:    activity score of the last 7 checked game days vs the 7 before
  *                 (score = raids × 1,000 + gold, same as /leaderboard); only accounts active in both
  *  - pass:        this month's Dream Pass XP + level (step 15)
+ *  - discord:     Discord level (counted chat messages + bumps, src/lib/discord-chat.ts)
  *  - dream_xp:    lifetime Dream XP (all Dream Pass seasons) + rank (src/lib/achievement-ranks.ts)
  *
  * Per class lives on the activity board (/leaderboard class filter), since class is per character.
@@ -18,15 +19,21 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createAdminClient } from '@/lib/supabase-server';
 import { getAccountKeys, getDesignatedMainWeights } from '@/lib/alt-graph';
 import { rankFor } from '@/lib/achievement-ranks';
-import { LIFETIME, currentSeason, passLevel, seasonLabel } from '@/lib/dream-pass';
+import { LIFETIME, currentSeason, discordLevel, passLevel, seasonLabel } from '@/lib/dream-pass';
+import { chatStats } from '@/lib/discord-chat';
 
-export type NetworkBoardKey = 'pass' | 'streak' | 'best_streak' | 'improved' | 'dream_xp';
+export type NetworkBoardKey = 'pass' | 'discord' | 'streak' | 'best_streak' | 'improved' | 'dream_xp';
 
 export const NETWORK_BOARDS: Record<NetworkBoardKey, { label: string; emoji: string; description: string }> = {
   pass: {
     label: 'Dream Pass',
     emoji: '🎟️',
     description: `This month's Dream Pass XP (${seasonLabel(currentSeason())}); top 10 at month end become Season Champions`,
+  },
+  discord: {
+    label: 'Discord level',
+    emoji: '💬',
+    description: 'Discord level: 1 XP per counted message in member channels (5+ chars, 60 s apart) and per bump',
   },
   streak: {
     label: 'Current streak',
@@ -61,8 +68,10 @@ export interface NetworkRow {
   /** improved: score before / after. */
   before?: number;
   after?: number;
-  /** pass: season level (+ stars past 20). */
+  /** pass: season level (+ stars past 20); discord: Discord level. */
   level?: number;
+  /** discord: counted messages. */
+  messages?: number;
   stars?: number;
   rank_name?: string | null;
   rank_emoji?: string | null;
@@ -76,6 +85,8 @@ export interface NetworkBoards {
   windows: { before: [string, string]; after: [string, string] };
   boards: Record<NetworkBoardKey, NetworkRow[]>;
   classes: string[];
+  /** Dream Pass months with a board, newest first (current month first). */
+  pass_seasons: string[];
 }
 
 const DAY = 86_400_000;
@@ -100,6 +111,7 @@ interface MemberRow {
   id: string;
   ign: string;
   class: string | null;
+  discord_id: string | null;
   character_id: number | null;
   current_guild_id: string | null;
   is_active: boolean | null;
@@ -140,7 +152,7 @@ export async function buildNetworkBoards(supabase: SupabaseClient): Promise<Netw
   const before: [string, string] = [addDays(day, -13), addDays(day, -7)];
 
   const [members, logs, away, guilds] = await Promise.all([
-    fetchAll<MemberRow>((f, t) => supabase.from('members').select('id, ign, class, character_id, current_guild_id, is_active').order('id').range(f, t)),
+    fetchAll<MemberRow>((f, t) => supabase.from('members').select('id, ign, class, discord_id, character_id, current_guild_id, is_active').order('id').range(f, t)),
     fetchAll<LogRow>((f, t) => supabase.from('daily_logs').select('member_id, log_date, raids, gold_donated, deposits_gold, met_requirement').order('id').range(f, t)),
     fetchAll<AwayRow>((f, t) => supabase.from('away_periods').select('member_ids, starts_on, ends_on, ended_at').range(f, t)),
     supabase.from('guilds').select('id, nickname').then((r) => (r.data ?? []) as Array<{ id: string; nickname: string | null }>),
@@ -176,7 +188,20 @@ export async function buildNetworkBoards(supabase: SupabaseClient): Promise<Netw
   const lifetimeXp = new Map<string, number>();
   for (const r of scoreRows) (r.season === LIFETIME ? lifetimeXp : seasonXp).set(r.member_id, r.xp);
 
-  const boards: Record<NetworkBoardKey, NetworkRow[]> = { pass: [], streak: [], best_streak: [], improved: [], dream_xp: [] };
+  // Discord level: per Discord id (staff mapping on characters + /claim links of the claiming users).
+  const [chat, bumpRows, claimRows, linkRows] = await Promise.all([
+    chatStats(supabase).catch(() => new Map<string, { counted: number }>()),
+    fetchAll<{ discord_id: string | null }>((f, t) => supabase.from('bumps').select('discord_id').range(f, t)),
+    fetchAll<{ user_id: string; member_id: string }>((f, t) => supabase.from('user_characters').select('user_id, member_id').eq('status', 'approved').range(f, t)),
+    fetchAll<{ user_id: string; discord_id: string }>((f, t) => supabase.from('user_discord_links').select('user_id, discord_id').range(f, t)),
+  ]);
+  const bumpsBy = new Map<string, number>();
+  for (const b of bumpRows) if (b.discord_id) bumpsBy.set(b.discord_id, (bumpsBy.get(b.discord_id) ?? 0) + 1);
+  const linkOf = new Map(linkRows.map((l) => [l.user_id, l.discord_id]));
+  const claimDiscord = new Map<string, string>();
+  for (const c of claimRows) { const d = linkOf.get(c.user_id); if (d) claimDiscord.set(c.member_id, d); }
+
+  const boards: Record<NetworkBoardKey, NetworkRow[]> = { pass: [], discord: [], streak: [], best_streak: [], improved: [], dream_xp: [] };
   for (const [key, ms] of Array.from(accounts)) {
     const dream = ms.filter(inDream);
     if (!dream.length) continue;
@@ -227,6 +252,17 @@ export async function buildNetworkBoards(supabase: SupabaseClient): Promise<Netw
       const lv = passLevel(sxp);
       boards.pass.push({ ...base, value: sxp, level: lv.level, stars: lv.stars });
     }
+    const dids = new Set<string>();
+    for (const m of ms) {
+      if (m.discord_id) dids.add(m.discord_id);
+      const c = claimDiscord.get(m.id);
+      if (c) dids.add(c);
+    }
+    let dxp = 0;
+    let msgs = 0;
+    dids.forEach((d) => { msgs += chat.get(d)?.counted ?? 0; dxp += (chat.get(d)?.counted ?? 0) + (bumpsBy.get(d) ?? 0); });
+    if (dxp > 0) boards.discord.push({ ...base, value: dxp, level: discordLevel(dxp).level, messages: msgs });
+
     const xp = Math.max(0, ...ms.map((m) => lifetimeXp.get(m.id) ?? 0));
     if (xp > 0) {
       const r = rankFor(xp);
@@ -240,13 +276,15 @@ export async function buildNetworkBoards(supabase: SupabaseClient): Promise<Netw
   }
 
   const classes = Array.from(new Set(members.filter(inDream).map((m) => m.class).filter(Boolean) as string[])).sort();
-  return { generated_at: new Date().toISOString(), day, windows: { before, after }, boards, classes };
+  const { data: frozen } = await supabase.from('dream_pass_seasons').select('season').order('season', { ascending: false }).limit(24);
+  const pass_seasons = [season, ...((frozen ?? []).map((r) => r.season as string).filter((x) => x !== season))];
+  return { generated_at: new Date().toISOString(), day, windows: { before, after }, boards, classes, pass_seasons };
 }
 
 /** Cached for 30 minutes (boards only move once a day). */
 export const getNetworkBoards = unstable_cache(
   async () => buildNetworkBoards(createAdminClient()),
-  ['network-boards-v2'],
+  ['network-boards-v3'],
   { revalidate: 1800 }
 );
 
@@ -255,4 +293,42 @@ export function placeOf(rows: NetworkRow[], i: number): number {
   let p = i;
   while (p > 0 && rows[p - 1]!.value === rows[i]!.value) p--;
   return p + 1;
+}
+
+/**
+ * Dream Pass board of any month (finished months are frozen). Accounts = rows sharing an account_key in that
+ * month; the is_main row is the one shown. Top LIMIT.
+ */
+export async function passBoard(supabase: SupabaseClient, season: string): Promise<NetworkRow[]> {
+  const rows = await fetchAll<{ member_id: string; account_key: string; is_main: boolean; xp: number; level: number }>((f, t) =>
+    supabase.from('dream_pass_scores').select('member_id, account_key, is_main, xp, level').eq('season', season).gt('xp', 0).order('member_id').range(f, t)
+  );
+  const ids = Array.from(new Set(rows.map((r) => r.member_id)));
+  const members = new Map<string, { ign: string; class: string | null; current_guild_id: string | null; is_active: boolean | null }>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data } = await supabase.from('members').select('id, ign, class, current_guild_id, is_active').in('id', ids.slice(i, i + 200));
+    for (const m of data ?? []) members.set(m.id as string, m as never);
+  }
+  const { data: guilds } = await supabase.from('guilds').select('id, nickname');
+  const tag = new Map((guilds ?? []).map((g) => [g.id as string, g.nickname as string | null]));
+  const byAccount = new Map<string, typeof rows>();
+  for (const r of rows) byAccount.set(r.account_key, [...(byAccount.get(r.account_key) ?? []), r]);
+  const out: NetworkRow[] = [];
+  for (const [key, rs] of Array.from(byAccount)) {
+    const main = rs.find((r) => r.is_main) ?? rs[0]!;
+    const m = members.get(main.member_id);
+    const lv = passLevel(main.xp);
+    out.push({
+      key,
+      ign: m?.ign ?? '?',
+      class: m?.class ?? null,
+      guild_nickname: m?.current_guild_id ? tag.get(m.current_guild_id) ?? null : null,
+      alt_igns: rs.filter((r) => r.member_id !== main.member_id).map((r) => members.get(r.member_id)).filter((x) => x && x.is_active !== false).map((x) => x!.ign),
+      value: main.xp,
+      level: lv.level,
+      stars: lv.stars,
+    });
+  }
+  out.sort((a, b) => b.value - a.value || a.ign.localeCompare(b.ign));
+  return out.slice(0, LIMIT);
 }

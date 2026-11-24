@@ -30,6 +30,8 @@ export interface PassView {
   /** Finished seasons this account placed top 10 in. */
   champion: Array<{ season: string; place: number }>;
   previous: { season: string; xp: number; level: number } | null;
+  /** Months this account has XP in (newest first), plus the current month. */
+  seasons: string[];
 }
 
 /** Pass numbers for the account of `memberIds` (any character works). */
@@ -45,6 +47,8 @@ export async function passFor(supabase: SupabaseClient, memberIds: string[], sea
     const { count } = await supabase.from('dream_pass_scores').select('member_id', { count: 'exact', head: true }).eq('season', s).eq('is_main', true).gt('xp', xp);
     return (count ?? 0) + 1;
   };
+  const { data: mine } = await supabase.from('dream_pass_scores').select('season').in('member_id', memberIds).neq('season', LIFETIME);
+  const months = Array.from(new Set([currentSeason(), ...(mine ?? []).map((r) => r.season as string)])).sort().reverse();
   const [place, lifetimePlace, players, seasons] = await Promise.all([
     placeOf(season, cur?.xp),
     placeOf(LIFETIME, life?.xp),
@@ -69,6 +73,7 @@ export async function passFor(supabase: SupabaseClient, memberIds: string[], sea
     lifetime_place: lifetimePlace,
     champion,
     previous: prevRow ? { season: prev, xp: prevRow.xp, level: prevRow.level } : null,
+    seasons: months,
   };
 }
 

@@ -26,20 +26,22 @@ const daysLeft = (season: string) => Math.max(0, Math.ceil((Date.parse(`${season
 export default function PassCard({ src = '/api/me/pass', readOnly = false }: { src?: string; readOnly?: boolean } = {}) {
   const [data, setData] = useState<Data | null>(null);
   const [failed, setFailed] = useState(false);
+  const [month, setMonth] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    fetch(src, { cache: 'no-store' })
+    fetch(month ? `${src}${src.includes('?') ? '&' : '?'}season=${month}` : src, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((d: Data) => !cancelled && setData(d))
       .catch(() => !cancelled && setFailed(true));
     return () => {
       cancelled = true;
     };
-  }, [src]);
+  }, [src, month]);
 
   if (failed || (data && !data.claimed)) return null;
   const p = data?.claimed ? data : null;
+  const live = p ? p.season === p.seasons[0] : true;
   const lv = p?.level;
   const sources = p ? SOURCE_ORDER.filter((k) => (p.breakdown[k] ?? 0) > 0).sort((a, b) => (p.breakdown[b] ?? 0) - (p.breakdown[a] ?? 0)) : [];
   const unused = p ? SOURCE_ORDER.filter((k) => !(p.breakdown[k] ?? 0)) : [];
@@ -52,8 +54,22 @@ export default function PassCard({ src = '/api/me/pass', readOnly = false }: { s
           Dream Pass
           {p && (
             <span className="text-sm font-normal text-muted-foreground">
-              {seasonLabel(p.season)} · {daysLeft(p.season)} days left
+              {live ? `${daysLeft(p.season)} days left` : 'finished'}
             </span>
+          )}
+          {p && p.seasons.length > 0 && (
+            <select
+              aria-label="Month"
+              className="h-7 rounded-md border bg-background px-2 text-xs font-normal"
+              value={p.season}
+              onChange={(e) => setMonth(e.target.value)}
+            >
+              {p.seasons.map((x, idx) => (
+                <option key={x} value={x}>
+                  {seasonLabel(x)}{idx === 0 ? ' (this month)' : ''}
+                </option>
+              ))}
+            </select>
           )}
           <Link href="/leaderboard" className="ml-auto text-xs font-normal text-muted-foreground hover:text-foreground underline-offset-4 hover:underline">
             Season board
@@ -79,15 +95,15 @@ export default function PassCard({ src = '/api/me/pass', readOnly = false }: { s
                 </div>
                 <div className="flex-1 space-y-1 pb-1">
                   <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>{fmt(p.xp)} XP this season</span>
+                    <span>{fmt(p.xp)} XP {live ? 'this season' : `in ${seasonLabel(p.season)}`}</span>
                     <span>
                       {lv.level >= MAX_LEVEL ? `${fmt(lv.need - lv.into)} to next ★` : `${fmt(lv.need - lv.into)} to level ${lv.level + 1}`}
                     </span>
                   </div>
                   <Bar value={lv.into} max={lv.need} />
                   <p className="text-xs text-muted-foreground">
-                    {p.place ? <>#{p.place} of {p.players} this season{p.place <= 10 ? ' · Season Champion pace 🏆' : ''}</> : 'No XP yet this season'}
-                    {p.previous && <> · {seasonLabel(p.previous.season)}: level {p.previous.level} ({fmt(p.previous.xp)} XP)</>}
+                    {p.place ? <>#{p.place} of {p.players} {live ? 'this season' : 'that month'}{p.place <= 10 ? (live ? ' · Season Champion pace 🏆' : ' · Season Champion 🏆') : ''}</> : live ? 'No XP yet this season' : 'No XP that month'}
+                    {live && p.previous && <> · {seasonLabel(p.previous.season)}: level {p.previous.level} ({fmt(p.previous.xp)} XP)</>}
                   </p>
                 </div>
               </div>
@@ -103,7 +119,7 @@ export default function PassCard({ src = '/api/me/pass', readOnly = false }: { s
                   ))}
                 </ul>
               )}
-              {!readOnly && unused.length > 0 && (
+              {!readOnly && live && unused.length > 0 && (
                 <details className="text-xs text-muted-foreground">
                   <summary className="cursor-pointer select-none">How else to earn XP</summary>
                   <ul className="mt-2 space-y-1">

@@ -6,7 +6,7 @@ import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registe
 import { handleAssaultCommand, handleAssaultAutocomplete, handleAssaultChecklistComponent, handleAssaultPotionsComponent } from '@/lib/assault-discord';
 import { handleRaidCommand } from '@/lib/raid-discord';
 import { handleGuideCommand } from '@/lib/guide-discord';
-import { handleNetworkBoard, handlePass, handleAway, handleKudos, handleKudosAutocomplete, handleClaim, handleGuild, handleGuildAutocomplete, handleHelp, handleMe, handleProfile, handleProfileAutocomplete, registerHubCommands, type HubInteraction } from '@/lib/hub-discord';
+import { handleNetworkBoard, handlePass, handlePassAutocomplete, handlePassHow, handleLevel, handleHubShare, HOW_ID, handleAway, handleKudos, handleKudosAutocomplete, handleClaim, handleGuild, handleGuildAutocomplete, handleHelp, handleMe, handleProfile, handleProfileAutocomplete, registerHubCommands, type HubInteraction } from '@/lib/hub-discord';
 import { getDiscordProfile, formatCharacterLine } from '@/lib/lookup-service';
 import { switchAccountMain } from '@/lib/alt-switch';
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
@@ -164,7 +164,12 @@ export async function POST(req: NextRequest) {
     const hub = interaction as HubInteraction;
     const name = interaction.data?.name;
     if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && name === 'guild') return handleGuildAutocomplete(hub);
-    if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && (name === 'profile' || name === 'pass')) return handleProfileAutocomplete(hub);
+    if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && name === 'pass' && hub.data.options?.find((o) => o.focused)?.name === 'month') return handlePassAutocomplete(hub);
+    if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && (name === 'profile' || name === 'pass' || name === 'level')) return handleProfileAutocomplete(hub);
+    if (interaction.type === INTERACTION_TYPE_COMPONENT && typeof interaction.data?.custom_id === 'string') {
+      if (interaction.data.custom_id.startsWith('hubshare:')) return handleHubShare(hub);
+      if (interaction.data.custom_id === HOW_ID) return handlePassHow(hub);
+    }
     if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && name === 'kudos') return handleKudosAutocomplete(hub);
     if (interaction.type === INTERACTION_TYPE_COMMAND) {
       if (name === 'help') return handleHelp(hub);
@@ -173,6 +178,7 @@ export async function POST(req: NextRequest) {
       if (name === 'guild') return handleGuild(hub);
       if (name === 'profile') return handleProfile(hub);
       if (name === 'pass') return handlePass(hub);
+      if (name === 'level') return handleLevel(hub);
       if (name === 'away') return handleAway(hub);
       if (name === 'kudos') return handleKudos(hub);
     }
@@ -201,8 +207,10 @@ export async function POST(req: NextRequest) {
     interaction.type === INTERACTION_TYPE_COMMAND &&
     (interaction.data?.name === 'leaderboard' || interaction.data?.name === 'lb')
   ) {
-    const board = interaction.data?.options?.find((o: { name: string }) => o.name === 'board')?.value;
-    if (board && board !== 'activity') return handleNetworkBoard(interaction as HubInteraction, board);
+    const opts = interaction.data?.options ?? [];
+    // Default board = Dream Pass; activity-only options (period, guild, class, …) without board mean activity.
+    const board = opts.find((o: { name: string }) => o.name === 'board')?.value ?? (opts.length ? 'activity' : 'pass');
+    if (board !== 'activity') return handleNetworkBoard(interaction as HubInteraction, board);
     return handleLeaderboardCommand(interaction);
   }
 

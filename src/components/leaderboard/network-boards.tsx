@@ -8,7 +8,7 @@ import { useApiClient } from '@/lib/api-client';
 import { profilePath } from '@/lib/profile-path';
 import { formatGold, getRankEmoji } from '@/lib/utils';
 
-export type NetworkBoardKey = 'pass' | 'streak' | 'best_streak' | 'improved' | 'dream_xp';
+export type NetworkBoardKey = 'pass' | 'discord' | 'streak' | 'best_streak' | 'improved' | 'dream_xp';
 
 interface Row {
   key: string;
@@ -21,6 +21,7 @@ interface Row {
   after?: number;
   level?: number;
   stars?: number;
+  messages?: number;
   rank_name?: string | null;
   rank_emoji?: string | null;
 }
@@ -30,12 +31,18 @@ export interface NetworkBoardsData {
   windows: { before: [string, string]; after: [string, string] };
   boards: Record<NetworkBoardKey, Row[]>;
   classes: string[];
+  pass_seasons?: string[];
 }
 
 const BOARDS: Record<NetworkBoardKey, { title: string; description: string; unit: string }> = {
   pass: {
-    title: '🎟️ Dream Pass · this month',
+    title: '🎟️ Dream Pass',
     description: 'Season XP this month (assaults weigh the most, then daily requirement, raids, contribution, community and chat). Resets on the 1st; the top 10 become Season Champions. Alts pooled.',
+    unit: 'XP',
+  },
+  discord: {
+    title: '💬 Discord level',
+    description: 'DreamBot\'s own Discord levels: 1 XP per counted message in member channels (5+ characters, 60 s apart) and per bump. Staff and bot channels don\'t count. Alts and linked Discord accounts pooled.',
     unit: 'XP',
   },
   streak: {
@@ -95,9 +102,25 @@ export function useNetworkBoards() {
   return { data, error };
 }
 
+const monthLabel = (s: string) => new Date(`${s}-01T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+
 export function NetworkBoard({ board, data, error }: { board: NetworkBoardKey; data: NetworkBoardsData | null; error: string | null }) {
+  const api = useApiClient();
   const meta = BOARDS[board];
-  const rows = data?.boards[board] ?? [];
+  const seasons = data?.pass_seasons ?? [];
+  const [season, setSeason] = useState<string | null>(null);
+  const [past, setPast] = useState<{ season: string; rows: Row[] } | null>(null);
+  const pastMonth = board === 'pass' && season && seasons[0] && season !== seasons[0] ? season : null;
+  useEffect(() => {
+    if (!pastMonth || past?.season === pastMonth) return;
+    let live = true;
+    api.get(`/api/leaderboard/pass?season=${pastMonth}`).then((r) => r.json()).then((j) => live && j.rows && setPast({ season: pastMonth, rows: j.rows })).catch(() => {});
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pastMonth]);
+  const rows = pastMonth ? (past?.season === pastMonth ? past.rows : []) : data?.boards[board] ?? [];
   const ranks = places(rows);
   const description =
     board === 'improved' && data
@@ -107,13 +130,31 @@ export function NetworkBoard({ board, data, error }: { board: NetworkBoardKey; d
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{meta.title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1.5">
+            <CardTitle>{meta.title}</CardTitle>
+            <CardDescription>{description}</CardDescription>
+          </div>
+          {board === 'pass' && seasons.length > 0 && (
+            <select
+              aria-label="Month"
+              className="h-9 rounded-md border bg-background px-3 text-sm"
+              value={season ?? seasons[0]}
+              onChange={(e) => setSeason(e.target.value)}
+            >
+              {seasons.map((x, idx) => (
+                <option key={x} value={x}>
+                  {monthLabel(x)}{idx === 0 ? ' (this month)' : ''}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
       </CardHeader>
       <CardContent>
         {error ? (
           <p className="text-center text-muted-foreground py-8">{error}</p>
-        ) : !data ? (
+        ) : !data || (pastMonth && past?.season !== pastMonth) ? (
           <div className="flex justify-center py-8">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
@@ -128,7 +169,8 @@ export function NetworkBoard({ board, data, error }: { board: NetworkBoardKey; d
                   <th className="pb-3">Member</th>
                   <th className="pb-3">Guild</th>
                   {board === 'improved' && <th className="pb-3 text-right hidden sm:table-cell">Before → after</th>}
-                  {board === 'pass' && <th className="pb-3 text-right">Level</th>}
+                  {(board === 'pass' || board === 'discord') && <th className="pb-3 text-right">Level</th>}
+                  {board === 'discord' && <th className="pb-3 text-right hidden sm:table-cell">Messages</th>}
                   <th className="pb-3 text-right">{meta.unit}</th>
                 </tr>
               </thead>
@@ -162,11 +204,14 @@ export function NetworkBoard({ board, data, error }: { board: NetworkBoardKey; d
                         {formatGold(r.before ?? 0)} → {formatGold(r.after ?? 0)}
                       </td>
                     )}
-                    {board === 'pass' && (
+                    {(board === 'pass' || board === 'discord') && (
                       <td className="py-3 text-right font-mono text-sm">
                         {r.level}
                         {r.stars ? <span className="ml-1 text-amber-400">★{r.stars}</span> : null}
                       </td>
+                    )}
+                    {board === 'discord' && (
+                      <td className="py-3 text-right font-mono text-sm text-muted-foreground hidden sm:table-cell">{(r.messages ?? 0).toLocaleString('en-US')}</td>
                     )}
                     <td className="py-3 text-right font-bold text-lg">
                       {board === 'improved' ? `+${formatGold(r.value)}` : r.value.toLocaleString('en-US')}

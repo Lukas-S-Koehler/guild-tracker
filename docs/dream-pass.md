@@ -134,8 +134,21 @@ L50 = 7,850). 1 Discord XP per counted message, +1 per bump.
   people), pass computed and every month before November frozen silently from the dev server (`skip_feed`); the launch
   post goes out on the first daily run on production. Discord levels at launch: 78 people L3+, 23 L10+, 10 L20+, 2
   L30+, top L38.
-- Which channels count is public: **`/pass how:True`** lists the rules and every counted channel (live from Discord),
-  the launch post and every "Discord chat" hint say "member channels, not staff or bot channels".
+- Which channels count is public: the **ℹ️ How it works** button on `/pass` and `/level` lists the rules and every
+  counted channel (live from Discord); the launch post and every "Discord chat" hint say "member channels, not staff
+  or bot channels".
+
+## Follow-up (user, 2026-11-24)
+- Name stays **Dream Pass** (`/pass`).
+- `/leaderboard` page: Dream Pass is the first tab and the default, with a month picker (finished months come from the
+  frozen rows, `GET /api/leaderboard/pass?season=`); new **Discord level** tab. Pass card on `/me` / profiles has a
+  month picker too (`?season=` on `/api/me/pass` and `/api/profile/[ign]/pass`).
+- Discord: `/leaderboard` defaults to the Dream Pass board (activity options without `board:` still mean activity),
+  `board: discord`; **`/pass month:`** (autocomplete) for past months; new **`/level [ign|user]`** (level, XP, place,
+  messages, bumps, chat days this month).
+- `share:` options removed from `/me`, `/profile`, `/pass`, `/assault me`: personal cards reply privately with a
+  **📢 Share** button that posts the same card publicly (custom_id `hubshare:<card>:<arg>`). Discord has no flag-only
+  option type, a boolean always asks True/False. Same for `how:` → ℹ️ button (`hubhow`).
 - Surfaces: Dream Pass card on `/me` and `/p/[ign]` (level, XP per source, season place, lifetime Dream XP + rank,
   Discord level, champion seasons), `/leaderboard` tab **Dream Pass** (this month) + **Dream XP** (lifetime),
   Discord **`/pass [ign|user] [share]`**, `/leaderboard board: pass`.

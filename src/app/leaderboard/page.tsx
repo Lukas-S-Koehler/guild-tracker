@@ -50,7 +50,7 @@ export default function LeaderboardPage() {
   const [filter, setFilter] = useState<Filter>('all');
   const [merged, setMerged] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [board, setBoard] = useState<Board>('activity');
+  const [board, setBoard] = useState<Board>('pass');
   const [classFilter, setClassFilter] = useState<string>('all');
   const api = useApiClient();
   const network = useNetworkBoards();
@@ -120,8 +120,9 @@ export default function LeaderboardPage() {
 
       <Tabs value={board} onValueChange={(v) => setBoard(v as Board)}>
         <TabsList className="h-auto flex-wrap">
-          <TabsTrigger value="activity">🏆 Activity</TabsTrigger>
           <TabsTrigger value="pass">🎟️ Dream Pass</TabsTrigger>
+          <TabsTrigger value="activity">🏆 Activity</TabsTrigger>
+          <TabsTrigger value="discord">💬 Discord level</TabsTrigger>
           <TabsTrigger value="streak">🔥 Streak</TabsTrigger>
           <TabsTrigger value="best_streak">🏔️ Longest streak</TabsTrigger>
           <TabsTrigger value="improved">📈 Most improved</TabsTrigger>
