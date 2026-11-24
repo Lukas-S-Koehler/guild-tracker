@@ -320,14 +320,12 @@ export default function Navigation() {
                           My characters
                         </Link>
                       </DropdownMenuItem>
-                      {isSuperAdmin && (
-                        <DropdownMenuItem asChild>
-                          <Link href="/setup" className="cursor-pointer">
-                            <KeyRound className="h-4 w-4 mr-2" />
-                            API key
-                          </Link>
-                        </DropdownMenuItem>
-                      )}
+                      <DropdownMenuItem asChild>
+                        <Link href="/setup" className="cursor-pointer">
+                          <KeyRound className="h-4 w-4 mr-2" />
+                          API key
+                        </Link>
+                      </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem onClick={() => signOut()}>
                         <LogOut className="h-4 w-4 mr-2" />
