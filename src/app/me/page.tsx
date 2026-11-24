@@ -24,6 +24,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import type { MeSummary, MeSummaryResult } from '@/lib/me-summary';
 import RankingsCard from '@/components/me/RankingsCard';
 import AchievementsCard from '@/components/me/AchievementsCard';
+import PassCard from '@/components/me/PassCard';
 import Heatmap from '@/components/me/Heatmap';
 import { profilePath } from '@/lib/profile-path';
 
@@ -340,6 +341,8 @@ export default function MePage() {
           </CardContent>
         </Card>
       </div>
+
+      <PassCard />
 
       <AchievementsCard />
 

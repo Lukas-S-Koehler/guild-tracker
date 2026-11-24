@@ -7,7 +7,8 @@
  *  - best_streak: longest run ever, same rule
  *  - improved:    activity score of the last 7 checked game days vs the 7 before
  *                 (score = raids × 1,000 + gold, same as /leaderboard); only accounts active in both
- *  - dream_xp:    achievement Dream XP + rank (src/lib/achievement-ranks.ts)
+ *  - pass:        this month's Dream Pass XP + level (step 15)
+ *  - dream_xp:    lifetime Dream XP (all Dream Pass seasons) + rank (src/lib/achievement-ranks.ts)
  *
  * Per class lives on the activity board (/leaderboard class filter), since class is per character.
  * Data only changes once a day (11:48 UTC check), so the result is cached for 30 minutes.
@@ -16,11 +17,17 @@ import { unstable_cache } from 'next/cache';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createAdminClient } from '@/lib/supabase-server';
 import { getAccountKeys, getDesignatedMainWeights } from '@/lib/alt-graph';
-import { rankFor, unlockKeysByMember, xpOf } from '@/lib/achievement-ranks';
+import { rankFor } from '@/lib/achievement-ranks';
+import { LIFETIME, currentSeason, passLevel, seasonLabel } from '@/lib/dream-pass';
 
-export type NetworkBoardKey = 'streak' | 'best_streak' | 'improved' | 'dream_xp';
+export type NetworkBoardKey = 'pass' | 'streak' | 'best_streak' | 'improved' | 'dream_xp';
 
 export const NETWORK_BOARDS: Record<NetworkBoardKey, { label: string; emoji: string; description: string }> = {
+  pass: {
+    label: 'Dream Pass',
+    emoji: '🎟️',
+    description: `This month's Dream Pass XP (${seasonLabel(currentSeason())}); top 10 at month end become Season Champions`,
+  },
   streak: {
     label: 'Current streak',
     emoji: '🔥',
@@ -39,7 +46,7 @@ export const NETWORK_BOARDS: Record<NetworkBoardKey, { label: string; emoji: str
   dream_xp: {
     label: 'Dream XP',
     emoji: '🌌',
-    description: 'Achievement XP: Bronze 10 · Silver 25 · Gold 50 · Crystal 100 · Dream 200',
+    description: 'Lifetime Dream XP: every Dream Pass season added up; sets your rank role',
   },
 };
 
@@ -54,8 +61,9 @@ export interface NetworkRow {
   /** improved: score before / after. */
   before?: number;
   after?: number;
-  /** dream_xp: unlocked count + rank. */
-  unlocked?: number;
+  /** pass: season level (+ stars past 20). */
+  level?: number;
+  stars?: number;
   rank_name?: string | null;
   rank_emoji?: string | null;
 }
@@ -159,9 +167,16 @@ export async function buildNetworkBoards(supabase: SupabaseClient): Promise<Netw
     logsBy.set(l.member_id, a);
   }
 
-  const unlocks = await unlockKeysByMember(supabase);
+  // Dream Pass scores: every character of an account carries the account total.
+  const season = currentSeason();
+  const scoreRows = await fetchAll<{ member_id: string; season: string; xp: number }>((f, t) =>
+    supabase.from('dream_pass_scores').select('member_id, season, xp').in('season', [season, LIFETIME]).order('member_id').order('season').range(f, t)
+  ).catch(() => [] as Array<{ member_id: string; season: string; xp: number }>);
+  const seasonXp = new Map<string, number>();
+  const lifetimeXp = new Map<string, number>();
+  for (const r of scoreRows) (r.season === LIFETIME ? lifetimeXp : seasonXp).set(r.member_id, r.xp);
 
-  const boards: Record<NetworkBoardKey, NetworkRow[]> = { streak: [], best_streak: [], improved: [], dream_xp: [] };
+  const boards: Record<NetworkBoardKey, NetworkRow[]> = { pass: [], streak: [], best_streak: [], improved: [], dream_xp: [] };
   for (const [key, ms] of Array.from(accounts)) {
     const dream = ms.filter(inDream);
     if (!dream.length) continue;
@@ -206,13 +221,16 @@ export async function buildNetworkBoards(supabase: SupabaseClient): Promise<Netw
     }
     if (bLogged && aLogged && b > 0 && a > b) boards.improved.push({ ...base, value: a - b, before: b, after: a });
 
-    // Dream XP (every unlock is written to every character, union = account total)
-    const keysUnlocked = new Set<string>();
-    for (const m of ms) unlocks.get(m.id)?.forEach((k) => keysUnlocked.add(k));
-    const xp = xpOf(keysUnlocked);
+    // Dream Pass: this season + lifetime Dream XP.
+    const sxp = Math.max(0, ...ms.map((m) => seasonXp.get(m.id) ?? 0));
+    if (sxp > 0) {
+      const lv = passLevel(sxp);
+      boards.pass.push({ ...base, value: sxp, level: lv.level, stars: lv.stars });
+    }
+    const xp = Math.max(0, ...ms.map((m) => lifetimeXp.get(m.id) ?? 0));
     if (xp > 0) {
       const r = rankFor(xp);
-      boards.dream_xp.push({ ...base, value: xp, unlocked: keysUnlocked.size, rank_name: r?.name ?? null, rank_emoji: r?.emoji ?? null });
+      boards.dream_xp.push({ ...base, value: xp, rank_name: r?.name ?? null, rank_emoji: r?.emoji ?? null });
     }
   }
 
@@ -228,7 +246,7 @@ export async function buildNetworkBoards(supabase: SupabaseClient): Promise<Netw
 /** Cached for 30 minutes (boards only move once a day). */
 export const getNetworkBoards = unstable_cache(
   async () => buildNetworkBoards(createAdminClient()),
-  ['network-boards-v1'],
+  ['network-boards-v2'],
   { revalidate: 1800 }
 );
 

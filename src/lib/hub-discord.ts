@@ -25,6 +25,8 @@ import { profilePath } from '@/lib/profile-path';
 import { NETWORK_BOARDS, getNetworkBoards, placeOf, type NetworkBoardKey } from '@/lib/network-boards';
 import { KUDOS_PER_WEEK, REASON_MAX, REASON_MIN, discordSafe, giveKudos, giverStatus, memberIdByIgn, receivedKudos } from '@/lib/kudos';
 import { getAccountMemberIds } from '@/lib/alt-graph';
+import { accountPass } from '@/lib/dream-pass-account';
+import { MAX_LEVEL, PASS_SOURCES, SOURCE_ORDER, seasonEnd, seasonLabel } from '@/lib/dream-pass';
 
 const SITE = GUIDE_SITE_URL;
 const CRYSTAL = 0x4cc9f0;
@@ -346,6 +348,82 @@ export function handleProfile(i: HubInteraction) {
   });
 }
 
+// ─── /pass (step 15, Dream Pass) ─────────────────────────────────────────────
+
+const bar = (value: number, max: number, width = 12) => {
+  const n = max > 0 ? Math.round(Math.min(1, value / max) * width) : 0;
+  return '▰'.repeat(n) + '▱'.repeat(width - n);
+};
+
+/** Account (member ids + main IGN) for /profile-style options: ign, user, or the caller. */
+async function resolveAccount(supabase: SupabaseClient, u: { id: string; username: string; global_name?: string | null }, ignOpt: string, target: string | null) {
+  let ign = ignOpt;
+  if (!ign && target) {
+    const link = target === u.id ? await resolveDiscordLink(supabase, u.id, u.global_name ?? u.username) : await getLinkByDiscord(supabase, target);
+    const claim = link ? await getActiveClaim(link.user_id, supabase) : null;
+    ign = claim?.status === 'approved' ? claim.ign : (await mappedIgns(supabase, target))[0] ?? '';
+    if (!ign) return { error: target === u.id ? 'You have no linked character yet. Run `/claim`.' : `<@${target}> has no linked character.` };
+  }
+  const account = await findProfileAccount(ign, supabase);
+  if (!account) return { error: `No Dream character called **${ign}**.` };
+  // Show the name that was asked for, in its stored spelling.
+  const hit = account.characters.find((c) => c.ign.toLowerCase() === ign.toLowerCase()) ?? account.characters[0]!;
+  return { ids: account.characters.map((c) => c.member_id), ign: hit.ign };
+}
+
+export function handlePass(i: HubInteraction) {
+  const u = caller(i);
+  if (!u) return ephemeral('Could not identify you.');
+  const opt = (n: string) => i.data.options?.find((o) => o.name === n)?.value;
+  const share = opt('share') === true;
+  const ignOpt = String(opt('ign') ?? '').trim();
+  const target = (opt('user') as string | undefined) ?? (ignOpt ? null : u.id);
+  return deferred(i, !share, async () => {
+    const supabase = createAdminClient();
+    const acc = await resolveAccount(supabase, u, ignOpt, target);
+    if ('error' in acc) return { content: acc.error };
+    const p = await accountPass(supabase, acc.ids);
+    const lv = p.level;
+    const left = Math.max(0, Math.ceil((Date.parse(`${seasonEnd(p.season)}T00:00:00Z`) - Date.now()) / 86_400_000));
+    const sources = SOURCE_ORDER.filter((k) => (p.breakdown[k] ?? 0) > 0)
+      .sort((a, b) => (p.breakdown[b] ?? 0) - (p.breakdown[a] ?? 0))
+      .map((k) => `${PASS_SOURCES[k].emoji} ${PASS_SOURCES[k].label} **${fmt(p.breakdown[k] ?? 0)}**`);
+    const levelLine = `**Level ${lv.level}**${lv.stars ? ` ★${lv.stars}` : ''} · ${fmt(p.xp)} XP\n${bar(lv.into, lv.need)} ${fmt(lv.need - lv.into)} to ${lv.level >= MAX_LEVEL ? 'next ★' : `level ${lv.level + 1}`}`;
+    const url = `${SITE}${profilePath(acc.ign)}`;
+    return {
+      embeds: [
+        {
+          title: `🎟️ Dream Pass · ${acc.ign}`,
+          url,
+          color: CRYSTAL,
+          description: [
+            `${seasonLabel(p.season)} · ${left} day${left === 1 ? '' : 's'} left`,
+            levelLine,
+            p.place ? `#${p.place} of ${p.players} this season${p.place <= 10 ? ' · 🏆 champion pace' : ''}` : '_No XP yet this season._',
+          ].join('\n'),
+          fields: [
+            ...(sources.length ? [{ name: 'This season', value: sources.join('\n').slice(0, 1000), inline: false }] : []),
+            {
+              name: '🌌 Lifetime Dream XP',
+              value: `${fmt(p.lifetime)}${p.lifetime_place ? ` (#${p.lifetime_place})` : ''}\n${p.rank ? `${p.rank.emoji} **${p.rank.name}**` : 'No rank yet'}${p.next_rank ? ` · ${fmt(p.next_rank.min - p.lifetime)} to ${p.next_rank.name}` : ''}`,
+              inline: true,
+            },
+            {
+              name: '💬 Discord level',
+              value: p.discord.linked ? `**${p.discord.level}** · ${fmt(p.discord.messages)} msgs · ${fmt(p.discord.bumps)} bumps\n${bar(p.discord.into, p.discord.need, 8)}` : 'Not linked: `/claim`',
+              inline: true,
+            },
+            ...(p.champion.length ? [{ name: '🏆 Season Champion', value: p.champion.map((c) => `${seasonLabel(c.season)} #${c.place}`).join(' · ').slice(0, 1000), inline: false }] : []),
+            ...(p.previous ? [{ name: 'Last season', value: `${seasonLabel(p.previous.season)}: level ${p.previous.level} · ${fmt(p.previous.xp)} XP`, inline: false }] : []),
+          ],
+          footer: { text: 'Assaults are worth the most · alts pooled · updates daily after the activity check' },
+        },
+      ],
+      components: [row(linkButton('Open profile', url), linkButton('Season board', `${SITE}/leaderboard`))],
+    };
+  });
+}
+
 // ─── /leaderboard board: (step 13) ───────────────────────────────────────────
 
 const MEDALS = ['🥇', '🥈', '🥉'];
@@ -366,6 +444,8 @@ export function handleNetworkBoard(i: HubInteraction, boardRaw: unknown) {
           ? `+${fmt(r.value)} (${fmt(r.before ?? 0)} → ${fmt(r.after ?? 0)})`
           : board === 'dream_xp'
             ? `${fmt(r.value)} XP${r.rank_emoji ? ` ${r.rank_emoji} ${r.rank_name}` : ''}`
+            : board === 'pass'
+              ? `Lv ${r.level ?? 0}${r.stars ? ` ★${r.stars}` : ''} · ${fmt(r.value)} XP`
             : `${r.value} day${r.value === 1 ? '' : 's'}`;
       return `${MEDALS[place - 1] ?? `**${place}.**`} **${r.ign}**${alts}${tag} · ${value}`;
     });
@@ -522,6 +602,7 @@ const MEMBER_HELP: [string, string[]][] = [
     '`/claim` link your Discord to the website and claim your character',
     '`/me` your daily check, streaks and stats (`share:True` posts it)',
     '`/profile ign:` or `user:` someone\'s profile: rank, achievements, stats (no args = yours)',
+    '`/pass` your Dream Pass: season level, XP per source, lifetime Dream XP, Discord level (`ign:`/`user:` for others)',
     '`/away set days:` holiday up to 14 days, the daily check skips you · `/away end` · `/away list`',
     '`/kudos give user:`/`ign:` `reason:` thank someone (3 per week, weekly shoutout) · `/kudos me` yours',
     '`/lookup` your linked characters',
@@ -531,7 +612,7 @@ const MEMBER_HELP: [string, string[]][] = [
     '`/raid` raid times in your local time',
     '`/activity-bank` how the activity bank works',
     '`/leaderboard` activity ranks (week / month / all time, per guild or class)',
-    '`/leaderboard board:` current / longest streak, most improved, Dream XP',
+    '`/leaderboard board:` Dream Pass, current / longest streak, most improved, Dream XP',
     '`/guide show` links to the game guide',
   ]],
   ['⚔️ Assault', [
@@ -603,6 +684,15 @@ export async function registerHubCommands() {
     {
       name: 'profile',
       description: "A member's profile: rank, achievements, stats (yours if empty)",
+      options: [
+        { name: 'ign', type: 3, description: 'Character name (any character of the account)', required: false, autocomplete: true },
+        { name: 'user', type: 6, description: 'Discord member', required: false },
+        { name: 'share', type: 5, description: 'Post it in the channel instead of only showing you', required: false },
+      ],
+    },
+    {
+      name: 'pass',
+      description: 'Dream Pass: season level, XP per source, lifetime Dream XP and Discord level',
       options: [
         { name: 'ign', type: 3, description: 'Character name (any character of the account)', required: false, autocomplete: true },
         { name: 'user', type: 6, description: 'Discord member', required: false },

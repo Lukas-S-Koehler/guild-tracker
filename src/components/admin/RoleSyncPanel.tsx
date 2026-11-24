@@ -77,7 +77,7 @@ export function RoleSyncPanel() {
   }
 
   async function createRanks() {
-    if (!confirm('Create the missing achievement rank roles in Discord now? They land at the bottom of the role list; rename, recolour or move them afterwards as you like (keep them below DreamBot).')) return;
+    if (!confirm('Create the missing rank / Season Champion roles in Discord now? They land at the bottom of the role list; rename, recolour or move them afterwards as you like (keep them below DreamBot).')) return;
     const d = await post({ action: 'create-ranks' }, 'ranks');
     if (d) {
       setMsg(d.created.length ? `Created: ${d.created.join(', ')}. Run a dry run to see who gets which rank.` : 'All rank roles already exist.');
@@ -129,10 +129,11 @@ export function RoleSyncPanel() {
       {ranks.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Achievement ranks</CardTitle>
+            <CardTitle className="text-sm">Ranks &amp; Season Champion</CardTitle>
             <CardDescription>
-              One role per person: the highest rank their Dream XP reaches (sum of achievement tier XP, alts pooled). Handled by the same
-              sync as guild roles, so Apply / daily auto covers it. Nothing happens until the roles exist.
+              One rank role per person: the highest rank their lifetime Dream XP reaches (Dream Pass, alts pooled). Season Champion = top 10
+              of the newest finished Dream Pass season, until the next season ends. Handled by the same sync as guild roles, so Apply /
+              daily auto covers it. Nothing happens until the roles exist.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
@@ -141,7 +142,7 @@ export function RoleSyncPanel() {
                 <li key={r.key} className="flex flex-wrap items-center gap-2">
                   <span>{r.emoji}</span>
                   <span className="font-medium">{r.name}</span>
-                  <span className="text-xs text-muted-foreground">{r.min.toLocaleString('en-US')} Dream XP</span>
+                  <span className="text-xs text-muted-foreground">{r.min < 0 ? 'top 10 of last season' : `${r.min.toLocaleString('en-US')} Dream XP`}</span>
                   <span className="flex-1" />
                   {r.role_id && r.exists !== false ? (
                     <Badge variant="secondary">{r.role_name ? `@${r.role_name}` : r.role_id}</Badge>

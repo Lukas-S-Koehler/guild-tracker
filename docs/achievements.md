@@ -144,6 +144,13 @@ Pick one in `/me`; it shows in the nav identity, `/me` hero, `/me` Discord comma
 - Known gap: CL achievements need `members.combat_level`, which is only filled when someone opens /me (11 of
   314 characters on 2026-11-23). Fill it in the member sync to unlock them for everyone.
 
+## Added in step 15 (Dream Pass)
+Discord level ladder (chat-1…5: Say Hello L3 · Regular L10 · Chatterbox L20 · Voice of the Dream L30 · Lounge Legend
+L50), Pass Climber / Pass Master (pass level 10 / 20 in a season), Season Champion (top 10) · Podium (top 3) · Dream
+of the Month (#1). They wait for the first Dream Pass run, then get a silent backfill of their own
+(`LATE_BATCHES` in `src/lib/achievements.ts`, setting `achievements_batch_dream-pass`). Tier XP now feeds the Dream
+Pass; "Dream XP" means lifetime Dream Pass XP (see `docs/dream-pass.md`).
+
 ## Decisions (user, 2026-11-23)
 - **Unit = account** (main + alts via the full `member_alts` closure, no claim needed). Sums are pooled across
   characters (gold, raids, challenge items, bumps); levels use the best character; streaks/met days are counted on

@@ -10,8 +10,10 @@
  *  - Unmapped people (no character with their discord_id) are never changed, only reported.
  *  - `discord_role_keeps` rows are never removed (e.g. assault staff who aren't officers in game).
  *
- *  - Achievement rank ladder (D4, src/lib/achievement-ranks.ts): one rank role, the highest reached by
- *    the person's Dream XP. Managed only once DreamBot has created the rank roles.
+ *  - Rank ladder (D4, src/lib/achievement-ranks.ts): one rank role, the highest reached by the person's
+ *    lifetime Dream XP (Dream Pass, step 15). Managed only once DreamBot has created the rank roles.
+ *  - Season Champion (step 15): top 10 of the newest finished Dream Pass season, until the next one ends.
+ *    Its role id is stored next to the rank roles (key CHAMPION_KEY).
  *
  * The full plan needs the Server Members intent (lists the whole server). Single-user sync
  * (`syncDiscordUser`, after /claim or /map) works without it.
@@ -19,7 +21,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { addGuildMemberRole, getGuildMember, listAllGuildMembers, removeGuildMemberRole, type DiscordGuildMember } from '@/lib/discord-api';
 import { DISCORD_SERVER_ID } from '@/lib/discord-live';
-import { RANKS, loadRankRoles, rankFor, unlockKeysByMember, xpOf } from '@/lib/achievement-ranks';
+import { RANKS, loadRankRoles, rankFor } from '@/lib/achievement-ranks';
+import { latestChampions, lifetimeXpByMember } from '@/lib/dream-pass-read';
+
+/** Key of the Season Champion role inside the saved rank roles map. */
+export const CHAMPION_KEY = 'season_champion';
+export const CHAMPION_ROLE = { key: CHAMPION_KEY, name: 'Season Champion', color: 0xfbbf24, emoji: '🏆' };
 
 /** guilds.id → Discord roles. Role ids from the Dream Guilds server (2026-11-23). */
 export const GUILD_ROLES: Record<string, { tag: string; member: string; staff: string }> = {
@@ -85,19 +92,23 @@ async function loadKeeps(supabase: SupabaseClient): Promise<Set<string>> {
   return new Set((data ?? []).map((k) => `${k.discord_id}:${k.role_id}`));
 }
 
-/** Per-run state: keeps, rank role ids and achievement unlocks. */
+/** Per-run state: keeps, rank role ids, lifetime Dream XP and the current Season Champions. */
 interface SyncCtx {
   keeps: Set<string>;
-  /** rankKey → roleId (only ranks whose role exists). */
+  /** rankKey → roleId (only ranks whose role exists; CHAMPION_KEY for the Season Champion role). */
   rankRoles: Record<string, string>;
   managed: Set<string>;
-  unlocks: Map<string, Set<string>>;
+  /** member id → lifetime Dream XP. */
+  lifetime: Map<string, number>;
+  /** Member ids of the newest finished season's top 10 accounts. */
+  champions: Set<string>;
 }
 
 /** Managed role ids → names, including the achievement rank roles that exist. */
 export function roleNames(rankRoles: Record<string, string>): Map<string, string> {
   const m = new Map(ROLE_NAMES);
   for (const r of RANKS) if (rankRoles[r.key]) m.set(rankRoles[r.key], `${r.name} (rank)`);
+  if (rankRoles[CHAMPION_KEY]) m.set(rankRoles[CHAMPION_KEY], CHAMPION_ROLE.name);
   return m;
 }
 
@@ -105,19 +116,19 @@ async function loadCtx(supabase: SupabaseClient, chars: Map<string, CharRow[]>):
   const [keeps, rankRoles] = await Promise.all([loadKeeps(supabase), loadRankRoles(supabase)]);
   const hasRanks = RANKS.some((r) => rankRoles[r.key]);
   const memberIds = Array.from(chars.values()).flat().map((c) => c.id);
-  const unlocks = hasRanks ? await unlockKeysByMember(supabase, memberIds) : new Map<string, Set<string>>();
-  return { keeps, rankRoles, managed: new Set(roleNames(rankRoles).keys()), unlocks };
+  const lifetime = hasRanks ? await lifetimeXpByMember(supabase, memberIds) : new Map<string, number>();
+  const latest = rankRoles[CHAMPION_KEY] ? await latestChampions(supabase) : null;
+  const champions = new Set((latest?.standings ?? []).flatMap((s) => s.member_ids ?? [s.member_id]));
+  return { keeps, rankRoles, managed: new Set(roleNames(rankRoles).keys()), lifetime, champions };
 }
 
-/** Dream XP of a person: union of unlocks over all their characters. */
-export function personXp(chars: CharRow[], unlocks: Map<string, Set<string>>): number {
-  const keys = new Set<string>();
-  for (const c of chars) unlocks.get(c.id)?.forEach((k) => keys.add(k));
-  return xpOf(keys);
+/** Dream XP of a person: every character carries its account's lifetime total; take the highest. */
+export function personXp(chars: CharRow[], lifetime: Map<string, number>): number {
+  return Math.max(0, ...chars.map((c) => lifetime.get(c.id) ?? 0));
 }
 
 /** Roles a known person should hold. */
-export function desiredRoles(chars: CharRow[], ctx?: Pick<SyncCtx, 'rankRoles' | 'unlocks'>): Set<string> {
+export function desiredRoles(chars: CharRow[], ctx?: Pick<SyncCtx, 'rankRoles' | 'lifetime' | 'champions'>): Set<string> {
   const want = new Set<string>();
   for (const c of chars) {
     // Every Dream guild counts, inactive ones too: "inactive" only means no activity requirement /
@@ -130,9 +141,11 @@ export function desiredRoles(chars: CharRow[], ctx?: Pick<SyncCtx, 'rankRoles' |
   }
   if (want.size === 0) want.add(RETIRED_ROLE);
   if (ctx) {
-    const rank = rankFor(personXp(chars, ctx.unlocks));
+    const rank = rankFor(personXp(chars, ctx.lifetime));
     const role = rank ? ctx.rankRoles[rank.key] : undefined;
     if (role) want.add(role);
+    const champ = ctx.rankRoles[CHAMPION_KEY];
+    if (champ && chars.some((c) => ctx.champions.has(c.id))) want.add(champ);
   }
   return want;
 }

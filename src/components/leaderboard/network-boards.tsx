@@ -8,7 +8,7 @@ import { useApiClient } from '@/lib/api-client';
 import { profilePath } from '@/lib/profile-path';
 import { formatGold, getRankEmoji } from '@/lib/utils';
 
-export type NetworkBoardKey = 'streak' | 'best_streak' | 'improved' | 'dream_xp';
+export type NetworkBoardKey = 'pass' | 'streak' | 'best_streak' | 'improved' | 'dream_xp';
 
 interface Row {
   key: string;
@@ -19,7 +19,8 @@ interface Row {
   value: number;
   before?: number;
   after?: number;
-  unlocked?: number;
+  level?: number;
+  stars?: number;
   rank_name?: string | null;
   rank_emoji?: string | null;
 }
@@ -32,6 +33,11 @@ export interface NetworkBoardsData {
 }
 
 const BOARDS: Record<NetworkBoardKey, { title: string; description: string; unit: string }> = {
+  pass: {
+    title: '🎟️ Dream Pass · this month',
+    description: 'Season XP this month (assaults weigh the most, then daily requirement, raids, contribution, community and chat). Resets on the 1st; the top 10 become Season Champions. Alts pooled.',
+    unit: 'XP',
+  },
   streak: {
     title: '🔥 Current streak',
     description: 'Days in a row the requirement was met. Any character of the account counts; holidays pause the streak instead of breaking it.',
@@ -49,7 +55,7 @@ const BOARDS: Record<NetworkBoardKey, { title: string; description: string; unit
   },
   dream_xp: {
     title: '🌌 Dream XP',
-    description: 'Achievement XP: Bronze 10 · Silver 25 · Gold 50 · Crystal 100 · Dream 200. Alts pooled.',
+    description: 'Lifetime Dream XP: every Dream Pass season added up. Sets the rank role (Dreamer 300 · Lucid 1.25k · Visionary 3k · Crystal Mind 6k · Dream Weaver 15k). Alts pooled.',
     unit: 'XP',
   },
 };
@@ -122,7 +128,7 @@ export function NetworkBoard({ board, data, error }: { board: NetworkBoardKey; d
                   <th className="pb-3">Member</th>
                   <th className="pb-3">Guild</th>
                   {board === 'improved' && <th className="pb-3 text-right hidden sm:table-cell">Before → after</th>}
-                  {board === 'dream_xp' && <th className="pb-3 text-right hidden sm:table-cell">Achievements</th>}
+                  {board === 'pass' && <th className="pb-3 text-right">Level</th>}
                   <th className="pb-3 text-right">{meta.unit}</th>
                 </tr>
               </thead>
@@ -156,8 +162,11 @@ export function NetworkBoard({ board, data, error }: { board: NetworkBoardKey; d
                         {formatGold(r.before ?? 0)} → {formatGold(r.after ?? 0)}
                       </td>
                     )}
-                    {board === 'dream_xp' && (
-                      <td className="py-3 text-right font-mono text-sm text-muted-foreground hidden sm:table-cell">{r.unlocked}</td>
+                    {board === 'pass' && (
+                      <td className="py-3 text-right font-mono text-sm">
+                        {r.level}
+                        {r.stars ? <span className="ml-1 text-amber-400">★{r.stars}</span> : null}
+                      </td>
                     )}
                     <td className="py-3 text-right font-bold text-lg">
                       {board === 'improved' ? `+${formatGold(r.value)}` : r.value.toLocaleString('en-US')}

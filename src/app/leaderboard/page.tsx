@@ -121,6 +121,7 @@ export default function LeaderboardPage() {
       <Tabs value={board} onValueChange={(v) => setBoard(v as Board)}>
         <TabsList className="h-auto flex-wrap">
           <TabsTrigger value="activity">🏆 Activity</TabsTrigger>
+          <TabsTrigger value="pass">🎟️ Dream Pass</TabsTrigger>
           <TabsTrigger value="streak">🔥 Streak</TabsTrigger>
           <TabsTrigger value="best_streak">🏔️ Longest streak</TabsTrigger>
           <TabsTrigger value="improved">📈 Most improved</TabsTrigger>

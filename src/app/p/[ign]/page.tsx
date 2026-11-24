@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { CalendarDays, Coins, Flame, History, Loader2, Map as MapIcon, Swords, Target, UserRound, Users } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import AchievementsCard from '@/components/me/AchievementsCard';
+import PassCard from '@/components/me/PassCard';
 import RankingsCard from '@/components/me/RankingsCard';
 import KudosCard from '@/components/profile/KudosCard';
 import Heatmap from '@/components/me/Heatmap';
@@ -147,6 +148,8 @@ export default function ProfilePage() {
         <Tile icon={<CalendarDays className="h-3.5 w-3.5" />} label="Days met" value={fmt(tiles.days_met)} sub={`${metPct}% of ${fmt(tiles.days_logged)} logged days`} />
         <Tile icon={<Swords className="h-3.5 w-3.5" />} label="Assault kills" value={compact(tiles.assault_kills)} sub={`${fmt(tiles.assault_runs)} waves · ${compact(tiles.assault_experience)} exp`} />
       </div>
+
+      <PassCard src={`/api/profile/${ign}/pass`} readOnly />
 
       <AchievementsCard initial={ach} readOnly />
 

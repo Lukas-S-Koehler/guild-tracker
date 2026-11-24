@@ -13,6 +13,7 @@ import { LAUNCH_POST_SETTING, setSetting } from '@/lib/achievement-eval';
 import { getLiveRow, publishLive, textPayloads, type PublishResult } from '@/lib/discord-live';
 import { HALL_OF_FAME_KEY } from '@/lib/live-messages';
 import { nextRank, rankFor } from '@/lib/achievement-ranks';
+import { lifetimeXpByMember } from '@/lib/dream-pass-read';
 
 const PAGE = 1000;
 const tierRank = (a: Achievement) => TIERS[a.tier].rank;
@@ -173,14 +174,15 @@ export async function achievementsField(supabase: SupabaseClient, memberIds: str
   const got = Array.from(latest.entries())
     .map(([k, at]) => ({ a: ACHIEVEMENT_BY_KEY.get(k), at }))
     .filter((x) => x.a) as Array<{ a: Achievement; at: string }>;
-  const xp = got.reduce((s, x) => s + TIERS[x.a.tier].xp, 0);
+  const lifetime = await lifetimeXpByMember(supabase, memberIds);
+  const xp = lifetime.size ? Math.max(...Array.from(lifetime.values())) : got.reduce((s, x) => s + TIERS[x.a.tier].xp, 0);
   const recent = got.sort((x, y) => (x.at < y.at ? 1 : -1)).slice(0, 3).map((x) => badge(x.a)).join(' · ');
   const t = title?.achievement_key ? ACHIEVEMENT_BY_KEY.get(title.achievement_key as string)?.name : null;
   const rank = rankFor(xp);
   const next = nextRank(xp);
   const rankLine = `${rank ? `Rank: ${rank.emoji} **${rank.name}**` : 'Rank: none yet'}${next ? ` · ${next.min - xp} XP to ${next.name}` : ''}`;
   return {
-    name: `🏅 Achievements · ${got.length}/${ACHIEVEMENTS.length} · ${xp} XP`,
+    name: `🏅 Achievements · ${got.length}/${ACHIEVEMENTS.length} · ${xp.toLocaleString('en-US')} Dream XP`,
     value: `${rankLine}\n${t ? `Title: *${t}*\n` : ''}Latest: ${recent}`,
     title: t ?? null,
   };

@@ -1,0 +1,24 @@
+name: Discord Chat Reader
+
+# Dream Pass (step 15): DreamBot reads new member-channel messages every 2 hours (cursor per channel,
+# idempotent). The daily Dream Pass run reads too; this keeps the backlog small and catches messages
+# before they can be deleted.
+on:
+  schedule:
+    - cron: '17 */2 * * *'
+  workflow_dispatch:
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Read Discord chat
+        run: |
+          response=$(curl -s -L -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/dream-pass" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{"chat_only": true}')
+          http_code=$(echo "$response" | tail -1)
+          echo "$response" | head -n -1
+          [ "$http_code" = "200" ] || { echo "ERROR status $http_code"; exit 1; }

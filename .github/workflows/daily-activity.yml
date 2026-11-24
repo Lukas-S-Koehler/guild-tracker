@@ -70,6 +70,19 @@ jobs:
           echo "HTTP status: $http_code"
 
 
+      - name: Dream Pass (chat, XP, hall of fame)
+        if: ${{ github.event.inputs.run_backfill != 'true' }}
+        run: |
+          echo "Reading Discord chat, recomputing Dream Pass XP, posting milestones..."
+          response=$(curl -s -L -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/dream-pass" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | head -n -1)
+          echo "Response: $body"
+          echo "HTTP status: $http_code"
+
+
       - name: Sync Discord roles
         if: ${{ github.event.inputs.run_backfill != 'true' }}
         run: |

@@ -20,6 +20,7 @@ export type Category =
   | 'level'
   | 'community'
   | 'journey'
+  | 'dream_pass'
   | 'hidden';
 
 /** Metric names produced by src/lib/achievement-eval.ts. Flags are 0/1. */
@@ -50,7 +51,12 @@ export type Metric =
   | 'founder'
   | 'top_donor_week'
   | 'network_week_1'
-  | 'comeback';
+  | 'comeback'
+  | 'discord_level'
+  | 'pass_level'
+  | 'season_top10'
+  | 'season_top3'
+  | 'season_top1';
 
 export interface Achievement {
   key: string;
@@ -86,6 +92,7 @@ export const CATEGORIES: Record<Category, string> = {
   level: 'Level',
   community: 'Community',
   journey: 'Journey',
+  dream_pass: 'Dream Pass',
   hidden: 'Hidden',
 };
 
@@ -221,6 +228,14 @@ export const ACHIEVEMENTS: Achievement[] = [
     ['Pillar of the Dream', 50, 'crystal'],
     ['Heart of the Dream', 100, 'dream'],
   ], (t) => (t === 1 ? 'Receive kudos from another member' : `Receive ${t} kudos from other members`)),
+  // Discord level (step 15): DreamBot's own chat levels, 1 XP per counted message + 1 per bump.
+  ...ladder('community', 'discord_level', 'chat', [
+    ['Say Hello', 3, 'bronze'],
+    ['Regular', 10, 'silver'],
+    ['Chatterbox', 20, 'gold'],
+    ['Voice of the Dream', 30, 'crystal'],
+    ['Lounge Legend', 50, 'dream'],
+  ], (t) => `Reach Discord level ${t} (chat in the Dream server)`),
   {
     key: 'linked', category: 'community', name: 'Connected', tier: 'bronze',
     metric: 'discord_linked', threshold: 1, description: 'Link your Discord with /claim',
@@ -251,6 +266,24 @@ export const ACHIEVEMENTS: Achievement[] = [
     metric: 'guilds_visited', threshold: 3, description: 'Be a member of 3 different Dream guilds',
   },
 
+  // Dream Pass (step 15).
+  ...ladder('dream_pass', 'pass_level', 'pass', [
+    ['Pass Climber', 10, 'silver'],
+    ['Pass Master', 20, 'gold'],
+  ], (t) => `Reach Dream Pass level ${t} in one season`),
+  {
+    key: 'season-top10', category: 'dream_pass', name: 'Season Champion', tier: 'gold',
+    metric: 'season_top10', threshold: 1, description: 'Finish a Dream Pass season in the top 10',
+  },
+  {
+    key: 'season-top3', category: 'dream_pass', name: 'Podium', tier: 'crystal',
+    metric: 'season_top3', threshold: 1, description: 'Finish a Dream Pass season in the top 3',
+  },
+  {
+    key: 'season-top1', category: 'dream_pass', name: 'Dream of the Month', tier: 'dream',
+    metric: 'season_top1', threshold: 1, description: 'Win a Dream Pass season',
+  },
+
   {
     key: 'founder', category: 'hidden', name: 'Founding Dreamer', tier: 'gold', hidden: true,
     metric: 'founder', threshold: 1, description: 'Played in a Dream guild before June 2026',
@@ -270,3 +303,15 @@ export const ACHIEVEMENTS: Achievement[] = [
 ];
 
 export const ACHIEVEMENT_BY_KEY = new Map(ACHIEVEMENTS.map((a) => [a.key, a]));
+
+/**
+ * Achievements added after the launch backfill, with the data source they wait for. Each batch gets its
+ * own silent backfill (historical date, never announced) the first time its source is ready.
+ */
+export const LATE_BATCHES: Array<{ id: string; keys: string[]; waitFor: string }> = [
+  {
+    id: 'dream-pass',
+    keys: ACHIEVEMENTS.filter((a) => ['discord_level', 'pass_level', 'season_top10', 'season_top3', 'season_top1'].includes(a.metric)).map((a) => a.key),
+    waitFor: 'dream_pass_launched_at', // app_settings key set by the first Dream Pass run
+  },
+];

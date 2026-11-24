@@ -23,7 +23,7 @@ then the `add-*.sql` feature migrations.
 - Combat: `add-combat-enemies`, `combat-tool`, `combat-tool-v2`
 - Accounts: `account-claims` → `claims-one-per-user`
 - Members: `add-member-combat-level` (lazy-filled on /me)
-- Dream Hub: `discord-live-messages`, `discord-commands-roles`, `achievements`, `assault-personal` (pinned combat setup, season recap state), `kudos`
+- Dream Hub: `discord-live-messages`, `discord-commands-roles`, `achievements`, `assault-personal` (pinned combat setup, season recap state), `kudos`, `dream-pass` (pass scores, frozen seasons, milestones, Discord chat messages + cursors)
 
 ## Scheduled jobs
 | Job | Trigger | Schedule |
@@ -35,7 +35,8 @@ then the `add-*.sql` feature migrations.
 | `/api/cron/combat-enemies-sync` | GitHub | 11:08 UTC daily |
 | `/api/cron/price-cache-sync` | GitHub | 11:18 UTC daily |
 | `/api/cron/unmapped-report` | GitHub | 11:24 UTC daily |
-| `daily-activity`, `members-sync-all`, `auto-warn`, `backfill` | GitHub `daily-activity.yml` | 11:48 UTC daily |
+| `daily-activity`, `members-sync-all`, `achievements`, `dream-pass`, `discord-roles`, `auto-warn`, `discord-live`, `backfill` | GitHub `daily-activity.yml` | 11:48 UTC daily |
+| `/api/cron/dream-pass` `{chat_only}` | GitHub `discord-chat.yml` (reads Discord chat) | every 2 h at :17 |
 | `/api/cron/guild-hall` | GitHub | 15:50 UTC daily |
 | `/api/cron/monthly-bump-king` | GitHub | 00:05 UTC on the 1st |
 

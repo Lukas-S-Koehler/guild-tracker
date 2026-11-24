@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { verifySuperAdmin, isErrorResponse } from '@/lib/auth-helpers';
-import { AUTO_SYNC_SETTING, applyRoleChanges, planRoleSync, roleNames } from '@/lib/discord-roles';
+import { AUTO_SYNC_SETTING, CHAMPION_ROLE, applyRoleChanges, planRoleSync, roleNames } from '@/lib/discord-roles';
 import { RANKS, loadRankRoles, saveRankRoles } from '@/lib/achievement-ranks';
 import { createGuildRole, listGuildRoles } from '@/lib/discord-api';
 import { DISCORD_SERVER_ID } from '@/lib/discord-live';
@@ -15,12 +15,15 @@ async function keepsList(supabase: ReturnType<typeof createAdminClient>, names?:
   return (data ?? []).map((k) => ({ ...k, role_name: n.get(k.role_id) ?? k.role_id }));
 }
 
-/** Achievement rank ladder + whether each Discord role exists (deleted in Discord = missing). */
+/** Rank ladder + Season Champion: lowest first, the champion role last. */
+const LADDER = [...RANKS, { ...CHAMPION_ROLE, min: -1 }];
+
+/** Rank ladder + whether each Discord role exists (deleted in Discord = missing). min -1 = Season Champion. */
 async function rankStatus(supabase: ReturnType<typeof createAdminClient>) {
   const saved = await loadRankRoles(supabase);
   const live = await listGuildRoles(DISCORD_SERVER_ID).catch(() => null);
   const byId = new Map((live ?? []).map((r) => [r.id, r]));
-  return RANKS.map((r) => {
+  return LADDER.map((r) => {
     const id = saved[r.key] ?? null;
     const role = id ? byId.get(id) : undefined;
     return { key: r.key, name: r.name, min: r.min, emoji: r.emoji, role_id: id, role_name: role?.name ?? null, exists: live ? !!role : null };
@@ -79,9 +82,9 @@ export async function POST(req: NextRequest) {
       const live = new Set((await listGuildRoles(DISCORD_SERVER_ID)).map((r) => r.id));
       const created: string[] = [];
       // Highest rank first: each new role lands at the bottom, so the ladder ends up in order (Dreamer lowest).
-      for (const r of [...RANKS].reverse()) {
+      for (const r of [...LADDER].reverse()) {
         if (saved[r.key] && live.has(saved[r.key])) continue;
-        const role = await createGuildRole(DISCORD_SERVER_ID, { name: r.name, color: r.color }, 'Dream Hub achievement rank');
+        const role = await createGuildRole(DISCORD_SERVER_ID, { name: r.name, color: r.color }, r.min < 0 ? 'Dream Pass Season Champion' : 'Dream Hub rank');
         saved[r.key] = role.id;
         created.push(r.name);
         await saveRankRoles(supabase, saved); // save as we go, so a failure halfway never orphans a role

@@ -1,6 +1,7 @@
 /**
- * Achievement rank ladder (Dream Hub step 11, D4). Dream XP = sum of tier XP of every achievement
- * the account has unlocked (Bronze 10 · Silver 25 · Gold 50 · Crystal 100 · Dream 200).
+ * Rank ladder (Dream Hub step 11, D4; re-based in step 15). Dream XP = lifetime Dream Pass XP: every
+ * season's XP added up (activity, assaults, community, chat and achievement unlocks), read from
+ * `dream_pass_scores` (src/lib/dream-pass-eval.ts → lifetimeXpByMember).
  * A person holds exactly one rank role on Discord: the highest rank reached.
  *
  * Role ids are created by DreamBot (Admin → Discord → Role sync → Achievement ranks) and stored in
@@ -19,13 +20,18 @@ export interface Rank {
   emoji: string;
 }
 
-/** Lowest first. Sized on 2026-11-23 data: median account 325, p90 795, top 1930, max 3660. */
+/**
+ * Lowest first. Sized on the 2026-11-24 dry run of lifetime Dream XP (220 accounts with XP): p50 450 ·
+ * p75 1,786 · p90 3,606 · max 12,086. Holders at launch: 122 / 68 / 33 / 12 / 0. Dream Weaver is out of
+ * reach at launch on purpose (a regular assaulter earns ~1k a month). Old ladder (achievements only) was
+ * 100/300/600/1000/1500.
+ */
 export const RANKS: Rank[] = [
-  { key: 'dreamer', name: 'Dreamer', min: 100, color: 0x9ca3af, emoji: '💤' },
-  { key: 'lucid', name: 'Lucid', min: 300, color: 0x60a5fa, emoji: '🌙' },
-  { key: 'visionary', name: 'Visionary', min: 600, color: 0xa78bfa, emoji: '🔮' },
-  { key: 'crystal_mind', name: 'Crystal Mind', min: 1000, color: 0x22d3ee, emoji: '💎' },
-  { key: 'dream_weaver', name: 'Dream Weaver', min: 1500, color: 0xf0abfc, emoji: '🌌' },
+  { key: 'dreamer', name: 'Dreamer', min: 300, color: 0x9ca3af, emoji: '💤' },
+  { key: 'lucid', name: 'Lucid', min: 1250, color: 0x60a5fa, emoji: '🌙' },
+  { key: 'visionary', name: 'Visionary', min: 3000, color: 0xa78bfa, emoji: '🔮' },
+  { key: 'crystal_mind', name: 'Crystal Mind', min: 6000, color: 0x22d3ee, emoji: '💎' },
+  { key: 'dream_weaver', name: 'Dream Weaver', min: 15000, color: 0xf0abfc, emoji: '🌌' },
 ];
 
 export const RANK_ROLES_SETTING = 'achievement_rank_roles';

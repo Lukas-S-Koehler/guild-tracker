@@ -94,7 +94,7 @@ export const STATIC_DEFS: LiveDef[] = [
   {
     key: HALL_OF_FAME_KEY,
     label: 'Hall of fame',
-    description: "Daily digest of Silver+ achievement unlocks (plus one launch post). New post each day; earlier ones stay. Bind to the new #hall-of-fame channel.",
+    description: "Daily digest of Silver+ achievement unlocks and Dream Pass level milestones, monthly Dream Pass results (plus one launch post each). New posts each day; earlier ones stay. Bind to the new #hall-of-fame channel.",
     channel: null,
     mode: 'append',
     source: 'achievements',
@@ -282,7 +282,7 @@ async function buildLinksHub(supabase: SupabaseClient): Promise<LivePayload[]> {
     `• Giveaways: ${ch(CHANNELS.giveaway)} · suggestions: ${ch(CHANNELS.suggestions)}`,
     '',
     '## 🤖 DreamBot commands',
-    '`/claim` link your Discord + claim your character · `/me` daily check and streaks · `/away` holiday',
+    '`/claim` link your Discord + claim your character · `/me` daily check and streaks · `/pass` your Dream Pass · `/away` holiday',
     '`/guild` any guild at a glance · `/raid` raid times · `/leaderboard` activity ranks · `/kudos give` thank someone',
     '`/assault me` your assault season · `/assault checklist` prep checklist · `/assault status` assault countdowns · `/guide show` guide links',
     '-# `/help` lists every command, including the staff ones.',

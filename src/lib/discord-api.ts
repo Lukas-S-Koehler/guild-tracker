@@ -367,10 +367,11 @@ export async function registerLeaderboardCommand(): Promise<{ ok: boolean; error
       required: false,
       choices: [
         { name: 'Activity (raids + gold)', value: 'activity' },
+        { name: 'Dream Pass (this month)', value: 'pass' },
         { name: 'Current streak', value: 'streak' },
         { name: 'Longest streak', value: 'best_streak' },
         { name: 'Most improved (this week vs last)', value: 'improved' },
-        { name: 'Dream XP (achievements)', value: 'dream_xp' },
+        { name: 'Dream XP (lifetime, rank)', value: 'dream_xp' },
       ],
     },
     {
@@ -907,4 +908,33 @@ export async function createGuildRole(
     body: JSON.stringify({ hoist: false, mentionable: false, ...role }),
     headers: reason ? { 'X-Audit-Log-Reason': encodeURIComponent(reason) } : undefined,
   });
+}
+
+export interface DiscordChannel {
+  id: string;
+  type: number;
+  name: string;
+  parent_id?: string | null;
+  permission_overwrites?: Array<{ id: string; type: number; allow: string; deny: string }>;
+}
+
+/** Every channel of a server (categories included). */
+export async function listGuildChannels(guildId: string): Promise<DiscordChannel[]> {
+  return discordFetch<DiscordChannel[]>(`/guilds/${guildId}/channels`);
+}
+
+export interface DiscordMessageLite {
+  id: string;
+  type: number;
+  content: string;
+  timestamp: string;
+  webhook_id?: string;
+  author: { id: string; bot?: boolean };
+  attachments?: unknown[];
+  sticker_items?: unknown[];
+}
+
+/** Up to 100 messages directly after `afterId` (Discord returns them newest first). */
+export async function listMessagesAfter(channelId: string, afterId: string): Promise<DiscordMessageLite[]> {
+  return discordFetch<DiscordMessageLite[]>(`/channels/${channelId}/messages?limit=100&after=${afterId}`);
 }

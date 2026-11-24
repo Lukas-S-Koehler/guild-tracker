@@ -10,8 +10,12 @@
  *  - accountProgress(): one account, for /me and the Discord /me command.
  */
 import { nextRank, rankFor, type Rank } from '@/lib/achievement-ranks';
+import { lifetimeXpByMember } from '@/lib/dream-pass-read';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { ACHIEVEMENTS, ACHIEVEMENT_BY_KEY, TIERS, grantsTitle, type Achievement, type Metric } from '@/lib/achievements';
+import { ACHIEVEMENTS, ACHIEVEMENT_BY_KEY, LATE_BATCHES, TIERS, grantsTitle, type Achievement, type Metric } from '@/lib/achievements';
+import { chatStats, type ChatStats } from '@/lib/discord-chat';
+import { LIFETIME, discordLevel, discordXpForLevel, seasonEnd } from '@/lib/dream-pass';
+import type { Standing } from '@/lib/dream-pass-read';
 import { getAccountKeys } from '@/lib/alt-graph';
 import { getISOWeekKey, getWeekSunday } from '@/lib/warning-calculator';
 import { ASSAULT_ENTRY_GUILD_ID, ASSAULT_TOP_GUILD_ID } from '@/lib/raids';
@@ -75,7 +79,7 @@ const plain = (value: number): MetricValue => ({ value, at: () => null });
 
 // ─── Data ────────────────────────────────────────────────────────────────────
 
-interface MemberRow {
+export interface MemberRow {
   id: string;
   ign: string;
   hashed_id: string | null;
@@ -114,6 +118,12 @@ interface Context {
   guilds: Map<string, GuildRow>;
   claims: Array<{ user_id: string; member_id: string; reviewed_at: string | null; requested_at: string | null }>;
   links: Map<string, { discord_id: string; linked_at: string }>; // user_id → link
+  /** Discord id → counted chat (step 15). */
+  chat: Map<string, ChatStats>;
+  /** member id → best Dream Pass season level. */
+  passLevels: Map<string, number>;
+  /** Finished Dream Pass seasons with their top 10. */
+  passSeasons: Array<{ season: string; standings: Standing[] }>;
   /** Only in full runs (need every account): account key → first week date won. */
   topDonorWeek?: Map<string, string>;
   networkWeek1?: Map<string, string>;
@@ -121,7 +131,7 @@ interface Context {
 
 const MEMBER_COLS = 'id, ign, hashed_id, discord_id, character_id, combat_level, total_level, first_seen, current_guild_id, is_active';
 
-function pickMain(members: MemberRow[]): MemberRow {
+export function pickMain(members: MemberRow[]): MemberRow {
   const byAge = members.slice().sort((a, b) => (a.character_id ?? Infinity) - (b.character_id ?? Infinity));
   return byAge.find((m) => m.is_active !== false && m.current_guild_id) ?? byAge[0]!;
 }
@@ -161,6 +171,24 @@ async function loadContext(supabase: SupabaseClient, members: MemberRow[], full:
       : Promise.all(chunks(ids).map((c) => fetchAll<{ recipient_member_id: string; created_at: string }>((f, t) => supabase.from('kudos').select('recipient_member_id, created_at').in('recipient_member_id', c).order('id').range(f, t)))).then((r) => r.flat()).catch(() => []),
   ]);
 
+  // Discord level + Dream Pass (step 15). Tables may not exist yet: treated as empty.
+  const discordIds = full
+    ? undefined
+    : Array.from(new Set([
+        ...members.map((m) => m.discord_id).filter(Boolean) as string[],
+        ...claims.filter((c) => ids.includes(c.member_id)).map((c) => links.find((l) => l.user_id === c.user_id)?.discord_id).filter(Boolean) as string[],
+      ]));
+  const [chat, passRows, passSeasons] = await Promise.all([
+    discordIds && !discordIds.length ? Promise.resolve(new Map<string, ChatStats>()) : chatStats(supabase, discordIds),
+    (full
+      ? fetchAll<{ member_id: string; level: number }>((f, t) => supabase.from('dream_pass_scores').select('member_id, level').neq('season', LIFETIME).gt('level', 0).order('member_id').order('season').range(f, t))
+      : Promise.all(chunks(ids).map((c) => fetchAll<{ member_id: string; level: number }>((f, t) => supabase.from('dream_pass_scores').select('member_id, level').neq('season', LIFETIME).gt('level', 0).in('member_id', c).order('member_id').order('season').range(f, t)))).then((r) => r.flat())
+    ).catch(() => [] as Array<{ member_id: string; level: number }>),
+    fetchAll<{ season: string; standings: Standing[] }>((f, t) => supabase.from('dream_pass_seasons').select('season, standings').order('season').range(f, t)).catch(() => []),
+  ]);
+  const passLevels = new Map<string, number>();
+  for (const r of passRows) passLevels.set(r.member_id, Math.max(passLevels.get(r.member_id) ?? 0, r.level));
+
   const idSet = new Set(ids);
   const logMap = new Map<string, LogRow[]>();
   for (const l of logs) {
@@ -189,6 +217,9 @@ async function loadContext(supabase: SupabaseClient, members: MemberRow[], full:
     guilds: new Map(guilds.map((g) => [g.id, g])),
     claims,
     links: new Map(links.map((l) => [l.user_id, { discord_id: l.discord_id, linked_at: l.linked_at }])),
+    chat,
+    passLevels,
+    passSeasons,
   };
 }
 
@@ -360,6 +391,25 @@ export function computeMetrics(ctx: Context, acc: Account): Map<Metric, MetricVa
     .filter((b) => (b.member_id && idSet.has(b.member_id)) || (b.discord_id && discord.has(b.discord_id)))
     .map((b) => ({ date: dateOf(b.bumped_at), inc: 1 }))));
 
+  // Discord level: counted chat messages + bumps, per Discord id of the account.
+  const discordXp = series([
+    ...acc.discordIds.flatMap((d) => ctx.chat.get(d)?.times ?? []).map((t) => ({ date: new Date(t).toISOString().slice(0, 10), inc: 1 })),
+    ...ctx.bumps.filter((b) => b.discord_id && discord.has(b.discord_id)).map((b) => ({ date: dateOf(b.bumped_at), inc: 1 })),
+  ]);
+  m.set('discord_level', { value: discordLevel(discordXp.value).level, at: (t) => discordXp.at(discordXpForLevel(t)) });
+
+  // Dream Pass: best season level, finished-season placements.
+  m.set('pass_level', plain(Math.max(0, ...acc.memberIds.map((id) => ctx.passLevels.get(id) ?? 0))));
+  const placed = (n: number) => {
+    for (const s of ctx.passSeasons) {
+      if (s.standings.some((x) => x.place <= n && (x.member_ids ?? [x.member_id]).some((id) => idSet.has(id)))) return addDays(seasonEnd(s.season), -1);
+    }
+    return null;
+  };
+  m.set('season_top10', flag(placed(10)));
+  m.set('season_top3', flag(placed(3)));
+  m.set('season_top1', flag(placed(1)));
+
   m.set('kudos', series(ctx.kudos
     .filter((k) => idSet.has(k.recipient_member_id))
     .map((k) => ({ date: dateOf(k.created_at), inc: 1 }))));
@@ -420,7 +470,7 @@ export function computeMetrics(ctx: Context, acc: Account): Map<Metric, MetricVa
 
 // ─── Accounts ────────────────────────────────────────────────────────────────
 
-async function buildAccounts(supabase: SupabaseClient, members: MemberRow[], ctx: Pick<Context, 'claims' | 'links'>): Promise<Account[]> {
+export async function buildAccounts(supabase: SupabaseClient, members: MemberRow[], ctx: Pick<Context, 'claims' | 'links'>): Promise<Account[]> {
   const keys = await getAccountKeys(supabase, members.map((m) => m.id));
   const groups = new Map<string, MemberRow[]>();
   for (const m of members) {
@@ -480,6 +530,17 @@ export async function runAchievements(supabase: SupabaseClient, opts: { dryRun?:
   weeklyWinners(ctx, accountOf);
 
   const backfill = !(await getSetting(supabase, BACKFILL_SETTING));
+  // Late batches: skipped until their data source exists, then one silent backfill of their own.
+  const skipKeys = new Set<string>();
+  const silentKeys = new Set<string>();
+  const batchesDone: string[] = [];
+  for (const b of LATE_BATCHES) {
+    if (!(await getSetting(supabase, b.waitFor))) { b.keys.forEach((k) => skipKeys.add(k)); continue; }
+    if (!backfill && !(await getSetting(supabase, `achievements_batch_${b.id}`))) {
+      b.keys.forEach((k) => silentKeys.add(k));
+      batchesDone.push(b.id);
+    }
+  }
   const existing = await fetchAll<UnlockRow>((f, t) =>
     supabase.from('achievement_unlocks').select('member_id, achievement_key, unlocked_at, backfilled, announced_at').range(f, t)
   ).catch((e) => {
@@ -509,16 +570,18 @@ export async function runAchievements(supabase: SupabaseClient, opts: { dryRun?:
     const earned = new Map<string, UnlockRow>();
     for (const a of ACHIEVEMENTS) {
       if (had.has(a.key)) { earned.set(a.key, had.get(a.key)!); continue; }
+      if (skipKeys.has(a.key)) continue;
       const mv = metrics.get(a.metric);
       if (!mv || mv.value < a.threshold) continue;
       const at = mv.at(a.threshold);
+      const silent = backfill || silentKeys.has(a.key);
       const row: UnlockRow = {
         member_id: '',
         achievement_key: a.key,
         // Backfill keeps the historical date; later unlocks are dated when recorded.
-        unlocked_at: backfill && at ? `${at}T12:00:00Z` : now,
-        backfilled: backfill,
-        announced_at: backfill ? now : null,
+        unlocked_at: silent && at ? `${at}T12:00:00Z` : now,
+        backfilled: silent,
+        announced_at: silent ? now : null,
       };
       earned.set(a.key, row);
       fresh.push({ account: acc, achievement: a });
@@ -541,6 +604,7 @@ export async function runAchievements(supabase: SupabaseClient, opts: { dryRun?:
       if (error) throw new Error(error.message);
     }
     if (backfill) await setSetting(supabase, BACKFILL_SETTING, now);
+    for (const id of batchesDone) await setSetting(supabase, `achievements_batch_${id}`, now);
   }
 
   return { accounts: accounts.length, new_unlocks: fresh.length, backfill, by_tier: byTier, fresh };
@@ -564,7 +628,10 @@ export interface AchievementView {
 export interface AccountAchievements {
   unlocked: number;
   total: number;
+  /** Lifetime Dream XP (Dream Pass): drives the rank. */
   xp: number;
+  /** XP from achievement unlocks alone (part of xp). */
+  achievement_xp: number;
   title: { key: string; name: string } | null;
   /** Achievement rank ladder (D4): current rank and the next one. */
   rank: { name: string; emoji: string; min: number } | null;
@@ -620,12 +687,16 @@ export async function accountProgress(supabase: SupabaseClient, memberIds: strin
   const got = achievements.filter((a) => a.unlocked_at);
   const titleKey = titleRow?.achievement_key as string | undefined;
   const titleDef = titleKey && unlocked.has(titleKey) ? ACHIEVEMENT_BY_KEY.get(titleKey) : undefined;
-  const xp = got.reduce((s, a) => s + TIERS[a.tier].xp, 0);
+  const achievementXp = got.reduce((s, a) => s + TIERS[a.tier].xp, 0);
+  // Dream XP = lifetime Dream Pass XP (step 15); before the first pass run, fall back to achievement XP.
+  const lifetime = await lifetimeXpByMember(supabase, memberIds);
+  const xp = lifetime.size ? Math.max(...Array.from(lifetime.values())) : achievementXp;
   const pick = (r: Rank | null) => (r ? { name: r.name, emoji: r.emoji, min: r.min } : null);
   return {
     unlocked: got.length,
     total: ACHIEVEMENTS.length,
     xp,
+    achievement_xp: achievementXp,
     rank: pick(rankFor(xp)),
     next_rank: pick(nextRank(xp)),
     title: titleDef ? { key: titleDef.key, name: titleDef.name } : null,
