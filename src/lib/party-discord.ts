@@ -12,7 +12,7 @@ import { bindLive, getLiveRow, messageLink } from '@/lib/discord-live';
 import {
   ASK_PREFIX, LEAGUE_SKILLS, PARTY_BOARD_KEY, PARTY_FORUM_ID, PARTY_MAX, PARTY_STAFF_ROLE_ID, RESTRICTIONS, SEEKER_DAYS, SLAYER_SKILL,
   activeSeekers, discordInfo, getLeague, getParty, importLeagues, isPartyStaff, leagueLabel, leagueState, listLiveLeagues, loadParties,
-  maybeRestricted, openSlots, parseLeagueList, partiesOf, partyByThread, refreshPartyBoard, syncPartyCard, todayUtc,
+  maybeRestricted, memberLabel, openPartyOfCharacter, openSlots, parseLeagueList, partiesOf, partyByThread, refreshPartyBoard, syncPartyCard, todayUtc,
   type PartyFull, type Restriction,
 } from '@/lib/party';
 
@@ -85,9 +85,38 @@ async function resolveParty(supabase: SupabaseClient, i: PartyInteraction, party
   return `You are in ${mine.length} parties (${mine.map((p) => p.name).join(', ')}). Pick one with \`party:\` or run it inside the party thread.`;
 }
 
-const rankIn = (p: PartyFull, id: string) => p.members.find((m) => m.discord_id === id)?.rank ?? null;
+/** Caller's best rank in the party over all their characters. */
+const rankIn = (p: PartyFull, discordId: string) => {
+  const ranks = p.members.filter((m) => m.discord_id === discordId).map((m) => m.rank);
+  return ranks.includes('leader') ? 'leader' : ranks.includes('officer') ? 'officer' : ranks.length ? 'member' : null;
+};
 const canManage = (p: PartyFull, i: PartyInteraction) => ['leader', 'officer'].includes(rankIn(p, caller(i)!.id) ?? '') || isPartyStaff(i.member?.roles);
 const isLeader = (p: PartyFull, i: PartyInteraction) => p.leader_discord_id === caller(i)!.id || isPartyStaff(i.member?.roles);
+const findChar = (p: PartyFull, ign: string) => p.members.find((m) => m.ign?.toLowerCase() === ign.trim().toLowerCase()) ?? null;
+
+/** A character by IGN: a Dream character when we know it (canonical name, Discord), else the typed name. */
+async function resolveCharacter(supabase: SupabaseClient, raw: string) {
+  const ign = raw.trim().replace(/[^A-Za-z0-9 _-]/g, '').slice(0, 40);
+  if (!ign) return null;
+  const { data } = await supabase.from('members').select('id, ign, discord_id').ilike('ign', ign.replace(/[%_\\]/g, '\\$&')).eq('is_active', true).limit(1);
+  const m = data?.[0];
+  return m ? { ign: m.ign as string, member_id: m.id as string, discord_id: (m.discord_id as string | null) ?? null } : { ign, member_id: null, discord_id: null };
+}
+
+/** Add a character, or fill a legacy "character not set" row of the same Discord user. */
+async function addCharacter(supabase: SupabaseClient, p: PartyFull, ch: { ign: string; member_id: string | null; discord_id: string | null }, rank: 'leader' | 'member'): Promise<string | null> {
+  if (findChar(p, ch.ign)) return `**${ch.ign}** is already in **${p.name}**.`;
+  const other = await openPartyOfCharacter(supabase, ch.ign);
+  if (other && other.party_id !== p.id) return `**${ch.ign}** is already in **${other.name}**. A character can be in one party at a time: \`/party leave ign:${ch.ign}\` there first.`;
+  const legacy = ch.discord_id ? p.members.find((m) => !m.ign && m.discord_id === ch.discord_id) : undefined;
+  if (legacy) {
+    const { error } = await supabase.from('party_members').update({ ign: ch.ign, member_id: ch.member_id }).eq('id', legacy.id);
+    return error ? `❌ ${error.message}` : null;
+  }
+  if (p.members.length >= PARTY_MAX) return `**${p.name}** is full (${PARTY_MAX}/${PARTY_MAX}).`;
+  const { error } = await supabase.from('party_members').insert({ party_id: p.id, ign: ch.ign, member_id: ch.member_id, discord_id: ch.discord_id, rank });
+  return error ? `❌ ${error.message}` : null;
+}
 
 // ─── Autocomplete ────────────────────────────────────────────────────────────
 
@@ -106,8 +135,31 @@ export async function handlePartyAutocomplete(i: PartyInteraction) {
     choices = (await loadParties(supabase))
       .map((p) => ({ name: `${p.verified ? '💤 ' : ''}${p.name} (${p.members.length}/${PARTY_MAX})`, value: p.id }))
       .filter((c) => c.name.toLowerCase().includes(q));
+  } else if (focused?.name === 'ign' && ['kick', 'rank', 'leave'].includes(sub?.name ?? '')) {
+    // Characters already in the party (leave: only your own).
+    const p = await resolveParty(supabase, i, sub?.options?.find((o) => o.name === 'party')?.value);
+    if (typeof p !== 'string') {
+      choices = p.members
+        .filter((m) => m.ign && (sub?.name !== 'leave' || m.discord_id === caller(i)?.id))
+        .map((m) => ({ name: `${m.ign} (${m.rank})`, value: m.ign! }))
+        .filter((c) => c.name.toLowerCase().includes(q));
+    }
+  } else if (focused?.name === 'ign') {
+    // Any Dream character; your own first. Free text (non-Dream characters) is allowed too.
+    const me = caller(i)?.id;
+    const { data } = await supabase
+      .from('members')
+      .select('ign, discord_id, combat_level')
+      .eq('is_active', true)
+      .ilike('ign', `%${q.replace(/[%_\\]/g, '\\$&')}%`)
+      .order('ign')
+      .limit(50);
+    choices = (data ?? [])
+      .sort((a, b) => Number(b.discord_id === me) - Number(a.discord_id === me))
+      .map((m) => ({ name: `${m.ign}${m.combat_level ? ` · CL ${m.combat_level}` : ''}${m.discord_id === me ? ' · you' : ''}`, value: m.ign as string }));
+    if (q && !choices.some((c) => c.value.toLowerCase() === q)) choices.unshift({ name: `${String(focused?.value)} (not a Dream character)`, value: String(focused?.value) });
   }
-  return NextResponse.json({ type: 8, data: { choices: choices.slice(0, 25).map((c) => ({ name: c.name.slice(0, 100), value: c.value })) } });
+  return NextResponse.json({ type: 8, data: { choices: choices.slice(0, 25).map((c) => ({ name: c.name.slice(0, 100), value: c.value.slice(0, 100) })) } });
 }
 
 // ─── /party ──────────────────────────────────────────────────────────────────
@@ -129,6 +181,17 @@ export function handleParty(i: PartyInteraction) {
       if (leaderOpt && leaderOpt !== u.id && !staff) return { content: `Only <@&${PARTY_STAFF_ROLE_ID}> can create a party for someone else.` };
       const leader = leaderOpt ?? u.id;
 
+      // Leader character: ign option, else the leader's only Dream character.
+      let ch = opt('ign') ? await resolveCharacter(supabase, String(opt('ign'))) : null;
+      if (!ch) {
+        const { data: own } = await supabase.from('members').select('id, ign').eq('discord_id', leader).eq('is_active', true);
+        if ((own ?? []).length !== 1) return { content: `Which character leads the party? Add \`ign:\`${own?.length ? ` (${own.map((c) => c.ign).join(', ')})` : ''}.` };
+        ch = { ign: own![0]!.ign as string, member_id: own![0]!.id as string, discord_id: leader };
+      }
+      ch.discord_id = ch.discord_id ?? leader;
+      const busy = await openPartyOfCharacter(supabase, ch.ign);
+      if (busy) return { content: `**${ch.ign}** is already in **${busy.name}**. A character can be in one party at a time.` };
+
       // Inside a #league-party-find thread: adopt it (its creator or staff only).
       let threadId: string | null = null;
       const here = i.channel_id ? await getChannel(i.channel_id) : null;
@@ -146,13 +209,13 @@ export function handleParty(i: PartyInteraction) {
         .select('id')
         .single();
       if (error) return { content: `❌ ${error.message}` };
-      await supabase.from('party_members').insert({ party_id: data.id, discord_id: leader, rank: 'leader' });
+      await supabase.from('party_members').insert({ party_id: data.id, ign: ch.ign, member_id: ch.member_id, discord_id: ch.discord_id, rank: 'leader' });
       const p = (await getParty(supabase, data.id as string))!;
       const note = await afterChange(supabase, p);
       return {
         content: [
-          `✅ Party **${name}** ${threadId ? 'attached to this thread' : `created: <#${p.thread_id}>`} with <@${leader}> as leader.`,
-          'Next: `/party invite user:` your members, `/party league` the leagues you plan, `/party edit slayer:open` if you do party Slayer.',
+          `✅ Party **${name}** ${threadId ? 'attached to this thread' : `created: <#${p.thread_id}>`}, led by **${ch.ign}** (<@${ch.discord_id}>).`,
+          'Next: `/party invite ign:` each character (alts too), `/party league` the leagues you plan, `/party edit slayer:open` if you do party Slayer.',
         ].join('\n') + note,
       };
     }
@@ -166,7 +229,7 @@ export function handleParty(i: PartyInteraction) {
       return {
         content: [
           `**${p.verified ? '💤 ' : ''}${p.name}**${p.thread_id ? ` · <#${p.thread_id}>` : ''}`,
-          p.members.map((m) => `${m.rank === 'leader' ? '👑' : m.rank === 'officer' ? '⭐' : '👤'} <@${m.discord_id}>`).join(' · '),
+          ...p.members.map((m) => `${m.rank === 'leader' ? '👑' : m.rank === 'officer' ? '⭐' : '👤'} ${memberLabel(m)}`),
           `${p.members.length}/${PARTY_MAX}${p.slayer ? ' · 🗡️ party Slayer' : ''}`,
           ...leagues.map((x) => `• ${leagueLabel(x.league)} · ${x.status === 'joined' ? '✅ joined' : 'planning'}`),
           p.note ? `📝 ${p.note}` : '',
@@ -175,11 +238,14 @@ export function handleParty(i: PartyInteraction) {
     }
 
     if (sub?.name === 'leave') {
-      const r = rankIn(p, u.id);
-      if (!r) return { content: `You are not in **${p.name}**.` };
-      if (r === 'leader') return { content: 'Leaders can\'t leave (same as in game): `/party close` instead.' };
-      await supabase.from('party_members').delete().eq('party_id', p.id).eq('discord_id', u.id);
-      return { content: `👋 You left **${p.name}**.` + (await afterChange(supabase, p)) };
+      const ign = opt('ign') as string | undefined;
+      const mine = p.members.filter((m) => m.discord_id === u.id && (!ign || m.ign?.toLowerCase() === ign.toLowerCase()));
+      if (!mine.length) return { content: ign ? `**${safe(ign)}** is not one of your characters in **${p.name}**.` : `You have no characters in **${p.name}**.` };
+      const leaving = mine.filter((m) => m.rank !== 'leader');
+      if (!leaving.length) return { content: 'The leader character can\'t leave (same as in game): `/party close` instead.' };
+      for (const m of leaving) await supabase.from('party_members').delete().eq('id', m.id);
+      const kept = mine.length - leaving.length;
+      return { content: `👋 ${leaving.map((m) => m.ign ?? 'your character').join(', ')} left **${p.name}**.${kept ? ' (Your leader character stays.)' : ''}` + (await afterChange(supabase, p)) };
     }
 
     if (sub?.name === 'verify') {
@@ -194,47 +260,47 @@ export function handleParty(i: PartyInteraction) {
       p.closed_at = new Date().toISOString();
       await syncPartyCard(supabase, { ...p, members: p.members, leagues: [] });
       const b = await refreshPartyBoard(supabase);
-      return { content: `🔒 **${p.name}** closed and removed from the board. The thread stays.${b.status === 'error' ? `\n-# ⚠️ Board: ${b.error}` : ''}` };
+      return { content: `🔒 **${p.name}** closed and removed from the board. The thread stays, and its characters are free to join another party.${b.status === 'error' ? `\n-# ⚠️ Board: ${b.error}` : ''}` };
     }
 
     if (!canManage(p, i)) return { content: `Only the leader and officers of **${p.name}** can do that.` };
 
     if (sub?.name === 'invite') {
-      const target = String(opt('user') ?? '');
-      if (rankIn(p, target)) return { content: `<@${target}> is already in **${p.name}**.` };
-      if (p.members.length >= PARTY_MAX) return { content: `**${p.name}** is full (${PARTY_MAX}/${PARTY_MAX}).` };
-      const { error } = await supabase.from('party_members').insert({ party_id: p.id, discord_id: target, rank: 'member' });
-      if (error) return { content: `❌ ${error.message}` };
-      await supabase.from('party_seekers').delete().eq('discord_id', target); // found a party
+      const ch = await resolveCharacter(supabase, String(opt('ign') ?? ''));
+      if (!ch) return { content: 'Which character? `ign:`' };
+      const userOpt = opt('user') as string | undefined;
+      if (userOpt) ch.discord_id = userOpt;
+      const err = await addCharacter(supabase, p, ch, 'member');
+      if (err) return { content: err };
+      if (ch.discord_id) await supabase.from('party_seekers').delete().eq('discord_id', ch.discord_id); // found a party
       const note = await afterChange(supabase, p);
+      const who = ch.discord_id ? `**${ch.ign}** (<@${ch.discord_id}>)` : `**${ch.ign}**`;
       if (p.thread_id) {
         await postToChannelRich(p.thread_id, {
-          content: `👋 <@${target}> joined **${p.name}** (added by <@${u.id}>). Don't forget the in-game invite!`,
-          allowed_mentions: { users: [target] },
+          content: `👋 ${who} joined **${p.name}** (added by <@${u.id}>). Don't forget the in-game invite!`,
+          allowed_mentions: { users: ch.discord_id && ch.discord_id !== u.id ? [ch.discord_id] : [] },
         });
       }
-      return { content: `✅ Added <@${target}> to **${p.name}**.` + note };
+      return { content: `✅ Added ${who} to **${p.name}**.${ch.member_id ? '' : '\n-# Not a Dream character we know: add `user:` so the card shows who plays it.'}` + note };
     }
 
     if (sub?.name === 'kick') {
-      const target = String(opt('user') ?? '');
-      const r = rankIn(p, target);
-      if (!r) return { content: `<@${target}> is not in **${p.name}**.` };
-      if (r === 'leader') return { content: 'The leader can\'t be removed. Close the party instead.' };
-      if (r === 'officer' && !isLeader(p, i)) return { content: 'Only the leader can remove an officer.' };
-      await supabase.from('party_members').delete().eq('party_id', p.id).eq('discord_id', target);
-      return { content: `Removed <@${target}> from **${p.name}**.` + (await afterChange(supabase, p)) };
+      const m = findChar(p, String(opt('ign') ?? ''));
+      if (!m) return { content: `No character **${safe(String(opt('ign') ?? ''))}** in **${p.name}**.` };
+      if (m.rank === 'leader') return { content: 'The leader can\'t be removed. Close the party instead.' };
+      if (m.rank === 'officer' && !isLeader(p, i)) return { content: 'Only the leader can remove an officer.' };
+      await supabase.from('party_members').delete().eq('id', m.id);
+      return { content: `Removed **${m.ign}** from **${p.name}**.` + (await afterChange(supabase, p)) };
     }
 
     if (sub?.name === 'rank') {
       if (!isLeader(p, i)) return { content: 'Only the leader can change ranks (same as in game).' };
-      const target = String(opt('user') ?? '');
-      const r = rankIn(p, target);
-      if (!r) return { content: `<@${target}> is not in **${p.name}**.` };
-      if (r === 'leader') return { content: 'Leadership can\'t be handed over (same as in game).' };
+      const m = findChar(p, String(opt('ign') ?? ''));
+      if (!m) return { content: `No character **${safe(String(opt('ign') ?? ''))}** in **${p.name}**.` };
+      if (m.rank === 'leader') return { content: 'Leadership can\'t be handed over (same as in game).' };
       const rank = opt('rank') === 'officer' ? 'officer' : 'member';
-      await supabase.from('party_members').update({ rank }).eq('party_id', p.id).eq('discord_id', target);
-      return { content: `<@${target}> is now ${rank === 'officer' ? 'an ⭐ officer' : 'a member'} of **${p.name}**.` + (await afterChange(supabase, p)) };
+      await supabase.from('party_members').update({ rank }).eq('id', m.id);
+      return { content: `**${m.ign}** is now ${rank === 'officer' ? 'an ⭐ officer' : 'a member'} of **${p.name}**.` + (await afterChange(supabase, p)) };
     }
 
     if (sub?.name === 'league') {
@@ -288,14 +354,14 @@ export function handlePartyAsk(i: PartyInteraction) {
     const supabase = createAdminClient();
     const p = await getParty(supabase, id);
     if (!p || p.closed_at) return { content: 'This party is closed.' };
-    if (rankIn(p, u.id)) return { content: 'You are already in this party.' };
+    if (rankIn(p, u.id)) return { content: 'You already have a character in this party (leaders add alts with `/party invite ign:`).' };
     if (p.members.length >= PARTY_MAX) return { content: 'This party is full.' };
     if (!p.thread_id) return { content: 'This party has no thread.' };
-    const staffIds = p.members.filter((m) => m.rank !== 'member').map((m) => m.discord_id);
+    const staffIds = Array.from(new Set(p.members.filter((m) => m.rank !== 'member' && m.discord_id).map((m) => m.discord_id!)));
     const info = (await discordInfo(supabase, [u.id])).get(u.id);
     const about = [info?.cl ? `CL ${info.cl}` : null, info?.tags.length ? info.tags.join('/') : null].filter(Boolean).join(' · ');
     const r = await postToChannelRich(p.thread_id, {
-      content: `🙋 <@${u.id}>${about ? ` (${about})` : ''} would like to join **${p.name}**. ${staffIds.map((d) => `<@${d}>`).join(' ')}\n-# Leader/officers: \`/party invite user:\` after inviting them in game.`,
+      content: `🙋 <@${u.id}>${about ? ` (${about})` : ''} would like to join **${p.name}**. ${staffIds.map((d) => `<@${d}>`).join(' ')}\n-# Leader/officers: \`/party invite ign:\` after inviting them in game.`,
       allowed_mentions: { users: staffIds },
     });
     return { content: r.ok ? `✅ Asked in <#${p.thread_id}>. The leader will get back to you there.` : `❌ Could not post in the thread: ${r.error}` };
@@ -537,11 +603,19 @@ export const PARTY_COMMAND_DEFS = [
         name: 'create', type: 1, description: 'List your in-game party (run inside your #league-party-find thread to use it)',
         options: [
           { name: 'name', type: 3, description: 'Party name', required: true, max_length: 60 },
+          { name: 'ign', type: 3, description: 'Leader character (default: your only character)', required: false, autocomplete: true },
           { name: 'leader', type: 6, description: 'Staff: attach for someone else (default: you)', required: false },
         ],
       },
-      { name: 'invite', type: 1, description: 'Add a member (leader/officers)', options: [{ name: 'user', type: 6, description: 'Discord member', required: true }, partyOpt] },
-      { name: 'kick', type: 1, description: 'Remove a member (leader/officers)', options: [{ name: 'user', type: 6, description: 'Discord member', required: true }, partyOpt] },
+      {
+        name: 'invite', type: 1, description: 'Add a character, alts too (leader/officers)',
+        options: [
+          { name: 'ign', type: 3, description: 'Character name', required: true, autocomplete: true },
+          { name: 'user', type: 6, description: 'Who plays it (only needed for non-Dream characters)', required: false },
+          partyOpt,
+        ],
+      },
+      { name: 'kick', type: 1, description: 'Remove a character (leader/officers)', options: [{ name: 'ign', type: 3, description: 'Character in the party', required: true, autocomplete: true }, partyOpt] },
       {
         name: 'league', type: 1, description: 'Plan a league, mark it joined, or drop it',
         options: [
@@ -559,9 +633,9 @@ export const PARTY_COMMAND_DEFS = [
           partyOpt,
         ],
       },
-      { name: 'rank', type: 1, description: 'Make someone officer or member (leader)', options: [{ name: 'user', type: 6, description: 'Discord member', required: true }, { name: 'rank', type: 3, description: 'Rank', required: true, choices: [{ name: 'officer', value: 'officer' }, { name: 'member', value: 'member' }] }, partyOpt] },
+      { name: 'rank', type: 1, description: 'Make a character officer or member (leader)', options: [{ name: 'ign', type: 3, description: 'Character in the party', required: true, autocomplete: true }, { name: 'rank', type: 3, description: 'Rank', required: true, choices: [{ name: 'officer', value: 'officer' }, { name: 'member', value: 'member' }] }, partyOpt] },
       { name: 'info', type: 1, description: 'Show a party', options: [partyOpt] },
-      { name: 'leave', type: 1, description: 'Leave a party', options: [partyOpt] },
+      { name: 'leave', type: 1, description: 'Take your character(s) out of a party', options: [{ name: 'ign', type: 3, description: 'Which character (default: all of yours except a leader)', required: false, autocomplete: true }, partyOpt] },
       { name: 'close', type: 1, description: 'Close the party (leader)', options: [partyOpt] },
       { name: 'verify', type: 1, description: 'Staff: mark / unmark as a verified Dream party', options: [partyOpt] },
     ],

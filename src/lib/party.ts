@@ -52,7 +52,15 @@ export interface Party {
   closed_at: string | null;
 }
 
-export interface PartyMember { party_id: string; discord_id: string; rank: 'leader' | 'officer' | 'member' }
+/** One CHARACTER in a party (alts of one person are separate rows). ign NULL = legacy row, character not set yet. */
+export interface PartyMember {
+  id: string;
+  party_id: string;
+  discord_id: string | null;
+  ign: string | null;
+  member_id: string | null;
+  rank: 'leader' | 'officer' | 'member';
+}
 export interface PartyLeague { party_id: string; league_id: string; status: 'planning' | 'joined' }
 export interface Seeker { discord_id: string; skills: string[]; note: string | null; expires_at: string }
 
@@ -234,7 +242,7 @@ export async function loadParties(supabase: SupabaseClient, filter: { ids?: stri
   if (!parties.length) return [];
   const ids = parties.map((p) => p.id);
   const [mem, pl] = await Promise.all([
-    supabase.from('party_members').select('party_id, discord_id, rank, joined_at').in('party_id', ids).order('joined_at'),
+    supabase.from('party_members').select('id, party_id, discord_id, ign, member_id, rank, joined_at').in('party_id', ids).order('joined_at'),
     supabase.from('party_leagues').select('party_id, league_id, status').in('party_id', ids),
   ]);
   const leagueIds = Array.from(new Set((pl.data ?? []).map((r) => r.league_id as string)));
@@ -293,18 +301,33 @@ export async function discordInfo(supabase: SupabaseClient, discordIds: string[]
 
 // ─── Party card (in the party's own thread) ──────────────────────────────────
 
+/** "**Ign** (<@discord>)"; legacy rows without a character: "<@discord> (character not set)". */
+export function memberLabel(m: Pick<PartyMember, 'ign' | 'discord_id'>): string {
+  if (!m.ign) return m.discord_id ? `<@${m.discord_id}> (character not set)` : '?';
+  return m.discord_id ? `**${m.ign}** (<@${m.discord_id}>)` : `**${m.ign}**`;
+}
+
+/** Open party a character is in right now (one party per character). */
+export async function openPartyOfCharacter(supabase: SupabaseClient, ign: string): Promise<{ party_id: string; name: string } | null> {
+  const { data } = await supabase.from('party_members').select('party_id, ign, parties!inner(name, closed_at)').ilike('ign', ign.replace(/[%_\\]/g, '\\$&')).is('parties.closed_at', null).limit(1);
+  const row = data?.[0] as unknown as { party_id: string; parties: { name: string } } | undefined;
+  return row ? { party_id: row.party_id, name: row.parties.name } : null;
+}
+
 export const openSlots = (p: PartyFull, l?: League) => Math.max(0, (l?.max_size ?? PARTY_MAX) - p.members.length);
 export const ASK_PREFIX = 'party:ask:';
 
 export function partyCardPayload(p: PartyFull): LivePayload {
   const today = todayUtc();
-  const by = (r: PartyMember['rank']) => p.members.filter((m) => m.rank === r).map((m) => `<@${m.discord_id}>`);
+  const by = (r: PartyMember['rank']) => p.members.filter((m) => m.rank === r).map(memberLabel);
   const officers = by('officer');
   const members = by('member');
   const leagues = p.leagues.filter((x) => leagueState(x.league, today) !== 'ended');
   const lines = [
     `## ${p.closed_at ? '🔒' : '🎉'} ${p.name}${p.verified ? ' · 💤 Dream party' : ''}${p.closed_at ? ' (closed)' : ''}`,
-    [`👑 ${by('leader').join(' ') || `<@${p.leader_discord_id}>`}`, officers.length && `⭐ ${officers.join(' ')}`, members.length && `👤 ${members.join(' ')}`].filter(Boolean).join(' · '),
+    ...by('leader').map((x) => `👑 ${x}`),
+    ...officers.map((x) => `⭐ ${x}`),
+    ...members.map((x) => `👤 ${x}`),
     `**Members:** ${p.members.length}/${PARTY_MAX}${p.members.length < PARTY_MAX ? ` · ${PARTY_MAX - p.members.length} open` : ' · full'}`,
     '',
     '**Leagues**',
@@ -314,7 +337,7 @@ export function partyCardPayload(p: PartyFull): LivePayload {
     ...(p.slayer ? ['', '🗡️ **Open for party Slayer**'] : []),
     ...(p.note ? ['', `📝 ${p.note}`] : []),
     '',
-    '-# Leader/officers: `/party invite` · `/party league` · `/party edit`. Looking to join? Press 🙋 below. All parties: 📋 Party board.',
+    '-# Leader/officers: `/party invite ign:` (alts too) · `/party league` · `/party edit`. Looking to join? Press 🙋 below. All parties: 📋 Party board.',
   ];
   const canAsk = p.members.length < PARTY_MAX && !p.closed_at;
   return {

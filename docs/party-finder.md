@@ -81,3 +81,10 @@ Read-only `/parties` page mirroring the board, for members.
 - `/league board` creates the forum post, locks it, pins it to the top of the forum and binds live key `party-board`. Every change refreshes the board, and so does the daily `discord-live` cron, which drops ended leagues and expired seekers.
 - `/party invite` only updates the Discord roster. The in-game invite still has to be sent in the game. Adding someone also removes their /lfg listing.
 - The website `/parties` page has not been built (optional).
+
+## 16b: members are characters (user, 2026-11-24)
+
+- A party member is a **character** (IGN), not a Discord user. One person can put several alts in the same party (each is its own row), and **a character can be in only one open party at a time**. A closed party frees its characters.
+- Migration `database/party-characters.sql`: `party_members` gets `id` (new PK), `ign`, `member_id`, and `discord_id` becomes nullable. Existing rows are backfilled when the Discord user has exactly one active character. Otherwise the card shows "character not set" until `/party invite ign:` fills that row.
+- `/party create ign:` (leader character, defaults to your only character), `/party invite ign: [user:]` (Dream characters autocomplete with your own first, other names allowed with `user:` for who plays them), `/party kick ign:`, `/party rank ign:`, `/party leave [ign:]` (no ign = all your characters except a leader).
+- The card lists one line per character: `👑 **Ign** (@user)`.
