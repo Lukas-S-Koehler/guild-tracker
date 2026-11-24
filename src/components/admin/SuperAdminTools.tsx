@@ -359,6 +359,7 @@ export function AltSyncTools() {
   );
 }
 
+const GUIDE_CHANNEL = '1573818767505490051';
 const GUILD_INFO_CHANNEL = '1444861407978979459';
 
 /**
@@ -374,6 +375,7 @@ function AutoModWelcomeTexts() {
       label: 'Full (recommended)',
       text: [
         'Welcome to the Dream Guilds, {user_mention}! Please send your character name and combat level, that way leadership can select a guild for you. Or find the guild that fits your CL yourself in <#' + GUILD_INFO_CHANNEL + '>.',
+        'In the meantime you can check out <#' + GUIDE_CHANNEL + '> for all the important info on the game.',
         'Already in a Dream guild? Run `/claim` so your guild roles update automatically and `/me` shows your daily check. `/help` lists every DreamBot command.',
       ].join('\n'),
     },
