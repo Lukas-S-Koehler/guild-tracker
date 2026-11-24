@@ -524,7 +524,7 @@ export async function registerBumpsCommand(): Promise<{ ok: boolean; error?: str
 
   const command = {
     name: 'bumps',
-    description: 'Show the bump leaderboard',
+    description: 'Staff: show the bump leaderboard',
     options: [
       {
         name: 'period',
@@ -863,17 +863,17 @@ export async function registerMapCommand(): Promise<{ ok: boolean; error?: strin
     description: 'Link a Discord user to a guild member',
     options: [
       {
-        name: 'user',
-        type: 6, // USER type
-        description: 'Discord user to link',
-        required: true,
-      },
-      {
         name: 'ign',
         type: 3, // STRING type
         description: 'In-game name of the member to link to',
         required: true,
         autocomplete: true,
+      },
+      {
+        name: 'user',
+        type: 6, // USER type
+        description: 'Discord user to link',
+        required: true,
       },
     ],
   };

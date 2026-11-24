@@ -37,7 +37,7 @@ const INTERACTION_TYPE_COMPONENT = 3;
 const INTERACTION_TYPE_AUTOCOMPLETE = 4;
 const INTERACTION_TYPE_MODAL_SUBMIT = 5;
 
-// Role allowed to run staff-only commands (/warn, /whip, /map, /make-main).
+// Role allowed to run staff-only commands (/warn, /whip, /map, /make-main, /bumps).
 const STAFF_ROLE_ID = '1444749350285611038';
 
 function denyIfMissingStaffRole(roles: string[] | undefined) {
@@ -666,6 +666,7 @@ type BumpInteraction = {
   member?: {
     nick?: string | null;
     user?: { id: string; username: string; global_name?: string };
+    roles?: string[];
   };
   user?: { id: string; username: string; global_name?: string };
   data?: { options?: Array<{ name: string; value: string | number }>; custom_id?: string };
@@ -799,6 +800,9 @@ async function processBump(interaction: BumpInteraction) {
 }
 
 async function handleBumpsCommand(interaction: BumpInteraction) {
+  // Staff only: only Leadership can see the bump channel, so only they bump.
+  const deny = denyIfMissingStaffRole(interaction.member?.roles);
+  if (deny) return deny;
   const supabase = createAdminClient();
 
   const options = interaction.data?.options ?? [];

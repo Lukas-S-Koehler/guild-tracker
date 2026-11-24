@@ -437,6 +437,7 @@ export function handleKudos(i: HubInteraction) {
     const ign = String(opt('ign') ?? '').trim();
     const userOpt = opt('user') as string | undefined;
     if (!ign && !userOpt) return { content: 'Pick who gets the kudos: `user:` or `ign:`.' };
+    if (!String(opt('reason') ?? '').trim()) return { content: 'Add a `reason:`: what are you thanking them for?' };
     const target = await kudosTarget(supabase, ign, userOpt);
     if (!target) return { content: ign ? `No Dream character called **${discordSafe(ign)}**.` : `<@${userOpt}> has no linked character yet.` };
 
@@ -531,7 +532,6 @@ const MEMBER_HELP: [string, string[]][] = [
     '`/activity-bank` how the activity bank works',
     '`/leaderboard` activity ranks (week / month / all time, per guild or class)',
     '`/leaderboard board:` current / longest streak, most improved, Dream XP',
-    '`/bumps` bump leaderboard',
     '`/guide show` links to the game guide',
   ]],
   ['⚔️ Assault', [
@@ -545,10 +545,11 @@ const MEMBER_HELP: [string, string[]][] = [
 const STAFF_HELP: [string, string[]][] = [
   [`🛡️ Leadership role <@&${LEADERSHIP_ROLE_ID}>`, [
     '`/warn user: reason:` warn and DM (only people ranked below you in game)',
-    '`/map user: ign:` link a Discord user to a character (also syncs their guild roles)',
+    '`/map ign: user:` link a character to a Discord user (also syncs their guild roles)',
     '`/make-main ign:` set the main of an alt account',
     '`/lookup user:` anyone\'s linked characters',
     '`/guide publish` post or refresh the guide in this channel',
+    '`/bumps` bump leaderboard',
     '`/whip target:` 🔥',
   ]],
   ['🗓️ Officer+ in game', [
@@ -568,7 +569,6 @@ const section = ([name, lines]: [string, string[]]) => ({ name, value: lines.joi
 export function handleHelp(i: HubInteraction) {
   const roles = i.member?.roles ?? [];
   const isStaff = roles.includes(LEADERSHIP_ROLE_ID) || ASSAULT_STAFF_ROLES.some((r) => roles.includes(r));
-  const all = i.data.options?.find((o) => o.name === 'staff')?.value === true;
   const embeds: Record<string, unknown>[] = [
     {
       title: '🤖 DreamBot commands',
@@ -577,15 +577,14 @@ export function handleHelp(i: HubInteraction) {
       fields: MEMBER_HELP.map(section),
     },
   ];
-  if (isStaff || all) {
+  // Staff section only for people with the Leadership or an assault staff role.
+  if (isStaff) {
     embeds.push({
       title: '🔒 Staff commands',
       color: 0xf59e0b,
       description: 'Staff actions only work on people ranked below you (super admin > leader > deputy > officer > member).',
       fields: STAFF_HELP.map(section),
     });
-  } else {
-    embeds[0].footer = { text: 'Staff commands: /help staff:True' };
   }
   return reply({ embeds, flags: EPHEMERAL });
 }
@@ -594,11 +593,7 @@ export function handleHelp(i: HubInteraction) {
 
 export async function registerHubCommands() {
   const commands = [
-    {
-      name: 'help',
-      description: 'Every DreamBot command, and which ones are for staff',
-      options: [{ name: 'staff', type: 5, description: 'Also show the staff commands', required: false }],
-    },
+    { name: 'help', description: 'Every DreamBot command (staff see their commands too)' },
     { name: 'claim', description: 'Link your Discord to the Dream Guilds website and claim your character' },
     {
       name: 'me',
@@ -628,9 +623,11 @@ export async function registerHubCommands() {
           type: 1,
           description: 'Give someone kudos (3 per week, one per person)',
           options: [
-            { name: 'reason', type: 3, description: 'What are you thanking them for?', required: true, min_length: REASON_MIN, max_length: REASON_MAX },
-            { name: 'user', type: 6, description: 'Discord member', required: false },
+            // All optional so Discord keeps this order (required options always come first);
+            // the handler insists on a target and giveKudos on the reason.
+            { name: 'user', type: 6, description: 'Discord member to thank', required: false },
             { name: 'ign', type: 3, description: 'Or their character name', required: false, autocomplete: true },
+            { name: 'reason', type: 3, description: 'What are you thanking them for? (required)', required: false, min_length: REASON_MIN, max_length: REASON_MAX },
           ],
         },
         { name: 'me', type: 1, description: 'Kudos you have left this week and the ones you received' },

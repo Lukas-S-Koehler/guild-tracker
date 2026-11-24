@@ -37,7 +37,7 @@ export default function ConquestLocationsPage() {
   const [season, setSeason] = useState<number | null>(null);
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
-  const [dreamOnly, setDreamOnly] = useState(true);
+  const [dreamOnly, setDreamOnly] = useState(false);
 
   // ?season=N&zone=ID deep link (e.g. from best finishes)
   const [focusZone, setFocusZone] = useState<number | null>(null);
