@@ -5,8 +5,8 @@
  * The feed is timestamped, so a late or missed run is caught up by the next one; until then the
  * game days nobody read are "gap days":
  *  - streaks pause on them (neither count nor break), like /away holidays
- *  - the watchdog (assault-scheduler tick, pg_cron every minute) alerts staff on Discord when the
- *    daily run is missing or a guild's fetch keeps failing (e.g. API key rejected)
+ *  - the watchdog (assault-scheduler tick, pg_cron every minute) alerts staff on Discord when a
+ *    guild's fetch keeps failing (e.g. API key rejected)
  * Days before a guild's first recorded run count as covered (no history to judge them by).
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -121,36 +121,24 @@ async function alertOnce(supabase: SupabaseClient, day: string, key: string, tex
 }
 
 /**
- * Cheap check, safe to call every minute. After 12:30 UTC:
- *  - no cron run since 11:30 UTC today → "daily check hasn't run"
- *  - a guild whose latest run failed, or whose last ok run is 26 h+ old → per-guild alert
+ * Cheap check, safe to call every minute. After 12:30 UTC, once per day per guild: a guild whose
+ * latest run failed, or whose last ok run is 50 h+ old. No alert for a merely late daily run: the
+ * GitHub cron lands hours late every day and the next run catches up anyway.
  */
 export async function runFetchWatchdog(supabase: SupabaseClient, now = new Date()): Promise<{ alerts: string[] }> {
   const alerts: string[] = [];
   const minutes = now.getUTCHours() * 60 + now.getUTCMinutes();
   if (minutes < 12 * 60 + 30) return { alerts };
   const today = now.toISOString().slice(0, 10);
-  const since = `${today}T11:30:00Z`;
 
   const { data: recent, error } = await supabase
     .from('activity_fetch_runs')
     .select('guild_id, run_at, ok, source, error')
-    .gte('run_at', new Date(now.getTime() - 3 * DAY).toISOString())
+    .gte('run_at', new Date(now.getTime() - 4 * DAY).toISOString())
     .order('run_at', { ascending: false })
     .limit(2000);
   if (error) return { alerts }; // table not migrated yet
   const runs = recent ?? [];
-
-  if (!runs.some((r) => r.source === 'cron' && r.run_at >= since)) {
-    const sent = await alertOnce(
-      supabase,
-      today,
-      'daily-missing',
-      '⚠️ **Daily activity check has not run yet today** (due 11:48 UTC). The GitHub cron is late or down.\n' +
-        'Run **Daily Guild Activity Fetch** by hand in GitHub Actions. Nothing is lost: the next run reads the missed events, and streaks pause on unchecked days meanwhile.'
-    );
-    if (sent) alerts.push('daily-missing');
-  }
 
   const { data: cfgs } = await supabase.from('guild_config').select('guild_id, guild_name, api_key').not('api_key', 'is', null).neq('api_key', 'placeholder');
   for (const c of cfgs ?? []) {
@@ -158,14 +146,14 @@ export async function runFetchWatchdog(supabase: SupabaseClient, now = new Date(
     if (!mine.length) continue; // no recent history to judge by
     const latest = mine[0]!;
     const lastOk = mine.find((r) => r.ok);
-    const stale = !lastOk || now.getTime() - Date.parse(lastOk.run_at) > 26 * 3600_000;
+    const stale = !lastOk || now.getTime() - Date.parse(lastOk.run_at) > 50 * 3600_000;
     if (latest.ok && !stale) continue;
     const err = String(latest.error ?? '');
     const why = /\b403\b|unauthori/i.test(err)
       ? 'the API key was rejected (403). A leader of the guild needs to set a new key in Admin → Guilds.'
       : err
         ? `the last fetch failed: \`${err.slice(0, 200)}\``
-        : 'no successful fetch in over 26 hours.';
+        : 'no successful fetch in over 2 days.';
     const sent = await alertOnce(
       supabase,
       today,
