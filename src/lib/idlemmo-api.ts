@@ -250,10 +250,13 @@ export class IdleMMOApi {
     return data.characters ?? [];
   }
 
+  /**
+   * The character's own class. Not from /characters: that endpoint lists the account's OTHER
+   * characters and never the one asked about, so reading it gave an alt's class.
+   */
   async getCharacterClass(hashedCharId: string): Promise<string | null> {
-    const chars = await this.getCharacterAlts(hashedCharId);
-    const self = chars.find((c) => c.hashed_id === hashedCharId);
-    return self?.class ?? chars[0]?.class ?? null;
+    const info = await this.getCharacterInformation(hashedCharId);
+    return info?.class ?? null;
   }
 
   async getGuildMembers(guildId: string, page = 1): Promise<GuildMembersResponse> {

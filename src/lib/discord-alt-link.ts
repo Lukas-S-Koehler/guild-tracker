@@ -2,7 +2,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 /**
  * Ensure manual alt links exist for every pair of tracked members sharing a discord_id.
- * Representative = member with lowest character_id. Other members become alts of the representative.
+ * Representative = the hand-set main if there is one, else the member with the lowest character_id.
+ * Other members become alts of the representative.
  *
  * Returns the number of manual rows created (or already present).
  */
@@ -22,7 +23,19 @@ export async function linkAltsBySharedDiscord(
   const group = members ?? [];
   if (group.length < 2) return { created: 0, representative_id: group[0]?.id ?? null, account_size: group.length };
 
-  const sorted = [...group].sort((a, b) => (a.character_id ?? Infinity) - (b.character_id ?? Infinity));
+  // Keep a main set by hand (member_id of manual rows); else the oldest character.
+  const { data: manualMains } = await supabase
+    .from('member_alts')
+    .select('member_id')
+    .eq('source', 'manual')
+    .in('member_id', group.map((g) => g.id));
+  const manualCount = new Map<string, number>();
+  for (const r of manualMains ?? []) manualCount.set(r.member_id, (manualCount.get(r.member_id) ?? 0) + 1);
+  const sorted = [...group].sort(
+    (a, b) =>
+      (manualCount.get(b.id) ?? 0) - (manualCount.get(a.id) ?? 0) ||
+      (a.character_id ?? Infinity) - (b.character_id ?? Infinity)
+  );
   const rep = sorted[0];
 
   // Remove any conflicting sync rows between members of this group (either direction)

@@ -157,3 +157,45 @@ export async function getSameGuildAltMaps(
   }
   return { mainToAlts, altToMain };
 }
+
+/**
+ * The account's main: the `member_id` side of its member_alts rows (what set-main writes).
+ * Rows with source='manual' win over synced ones; among equals the most-linked main wins.
+ * Returns null when no character of the bundle has alt rows (single-character accounts).
+ */
+export async function getDesignatedMainId(
+  supabase: SupabaseClient,
+  bundleIds: string[]
+): Promise<string | null> {
+  if (bundleIds.length === 0) return null;
+  const { data } = await supabase
+    .from('member_alts')
+    .select('member_id, source')
+    .in('member_id', bundleIds);
+  const score = new Map<string, number>();
+  for (const r of data ?? []) {
+    const id = r.member_id as string;
+    score.set(id, (score.get(id) ?? 0) + (r.source === 'manual' ? 1000 : 1));
+  }
+  let best: string | null = null;
+  for (const [id, s] of Array.from(score)) if (best === null || s > score.get(best)!) best = id;
+  return best;
+}
+
+/** Every designated main (member_alts.member_id) with a weight: manual rows count far more. */
+export async function getDesignatedMainWeights(supabase: SupabaseClient): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  for (let from = 0; ; from += 1000) {
+    const { data } = await supabase
+      .from('member_alts')
+      .select('member_id, source')
+      .order('id')
+      .range(from, from + 999);
+    for (const r of data ?? []) {
+      const id = r.member_id as string;
+      out.set(id, (out.get(id) ?? 0) + (r.source === 'manual' ? 1000 : 1));
+    }
+    if (!data || data.length < 1000) break;
+  }
+  return out;
+}

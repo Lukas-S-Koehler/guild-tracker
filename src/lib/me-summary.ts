@@ -21,6 +21,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getAccountCharacters, type AccountCharacter } from '@/lib/account-service';
 import { DAY_BOUNDARY_OFFSET_MINUTES } from '@/lib/activity-processor';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
+import { getDesignatedMainId } from '@/lib/alt-graph';
 import { ASSAULT_ENTRY_GUILD_ID, ASSAULT_TOP_MIN_CL, ASSAULT_TOP_GUILD_ID, bestRaidFor, guildRaids, type Raid } from '@/lib/raids';
 import {
   findLastMetWeek,
@@ -235,12 +236,18 @@ async function loadCombatLevels(
       try {
         const info = await new IdleMMOApi(key).getCharacterInformation(c.hashed_id);
         const cl = info.skills?.combat?.level;
+        // Same call carries the class, so a class change in game shows up within a day.
+        const cls = info.class ?? null;
+        const classChanged = !!cls && cls !== c.class;
+        if (classChanged) c.class = cls;
         if (typeof cl === 'number' && cl > 0) {
           out.set(c.member_id, cl);
           await supabase
             .from('members')
-            .update({ combat_level: cl, combat_level_synced_at: new Date().toISOString() })
+            .update({ combat_level: cl, combat_level_synced_at: new Date().toISOString(), ...(classChanged ? { class: cls } : {}) })
             .eq('id', c.member_id);
+        } else if (classChanged) {
+          await supabase.from('members').update({ class: cls }).eq('id', c.member_id);
         }
       } catch (e) {
         console.warn('[me-summary] combat level fetch failed for', c.ign, e);
@@ -314,7 +321,11 @@ export async function buildSummaryFor(
   supabase: SupabaseClient
 ): Promise<MeSummary> {
 
+  // The account's main is the one set on the alts admin (member_alts representative), so
+  // profile, /me and leaderboards all show the same character and class.
+  const designatedId = await getDesignatedMainId(supabase, characters.map((c) => c.member_id));
   const main =
+    characters.find((c) => c.member_id === designatedId) ??
     characters.find((c) => c.claimed && c.in_dream_guild) ??
     characters.find((c) => c.in_dream_guild) ??
     characters.find((c) => c.claimed) ??

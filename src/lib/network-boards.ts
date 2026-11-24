@@ -15,7 +15,7 @@
 import { unstable_cache } from 'next/cache';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createAdminClient } from '@/lib/supabase-server';
-import { getAccountKeys } from '@/lib/alt-graph';
+import { getAccountKeys, getDesignatedMainWeights } from '@/lib/alt-graph';
 import { rankFor, unlockKeysByMember, xpOf } from '@/lib/achievement-ranks';
 
 export type NetworkBoardKey = 'streak' | 'best_streak' | 'improved' | 'dream_xp';
@@ -141,7 +141,10 @@ export async function buildNetworkBoards(supabase: SupabaseClient): Promise<Netw
   const inDream = (m: MemberRow) => m.is_active !== false && !!m.current_guild_id && tag.has(m.current_guild_id);
 
   // Accounts: only those with a character in a Dream guild right now.
-  const keys = await getAccountKeys(supabase, members.map((m) => m.id));
+  const [keys, mainWeight] = await Promise.all([
+    getAccountKeys(supabase, members.map((m) => m.id)),
+    getDesignatedMainWeights(supabase),
+  ]);
   const accounts = new Map<string, MemberRow[]>();
   for (const m of members) {
     const k = keys.get(m.id) ?? m.id;
@@ -162,12 +165,18 @@ export async function buildNetworkBoards(supabase: SupabaseClient): Promise<Netw
   for (const [key, ms] of Array.from(accounts)) {
     const dream = ms.filter(inDream);
     if (!dream.length) continue;
-    // Display character: oldest character in a Dream guild.
-    const main = dream.slice().sort((a, b) => (a.character_id ?? Infinity) - (b.character_id ?? Infinity))[0]!;
+    // Display character: the account's set main when it is in a Dream guild, else the oldest
+    // Dream character. Class always comes from the set main.
+    const designated = ms
+      .filter((m) => mainWeight.has(m.id))
+      .sort((a, b) => mainWeight.get(b.id)! - mainWeight.get(a.id)!)[0];
+    const main =
+      (designated && inDream(designated) ? designated : undefined) ??
+      dream.slice().sort((a, b) => (a.character_id ?? Infinity) - (b.character_id ?? Infinity))[0]!;
     const base = {
       key,
       ign: main.ign,
-      class: main.class,
+      class: (designated ?? main).class,
       guild_nickname: tag.get(main.current_guild_id!) ?? null,
       alt_igns: ms.filter((m) => m.id !== main.id && m.is_active !== false).map((m) => m.ign),
     };

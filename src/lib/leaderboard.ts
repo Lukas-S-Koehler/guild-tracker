@@ -177,6 +177,16 @@ export async function fetchLeaderboard({
     groups.set(canonical, group);
   }
 
+  // The union root is the account's main (member_alts.member_id). On a guild-filtered board
+  // the main can live in another guild; the row then shows the local character, but the
+  // account's class is still the main's.
+  const offBoardMains = Array.from(groups.keys()).filter((id) => !memberIds.includes(id));
+  const mainClass = new Map<string, string | null>();
+  if (offBoardMains.length > 0) {
+    const { data } = await supabase.from('members').select('id, class').in('id', offBoardMains);
+    for (const m of data ?? []) mainClass.set(m.id as string, (m.class as string | null) ?? null);
+  }
+
   const merged_entries: LeaderboardEntry[] = Array.from(groups.entries()).map(([canonicalId, group]) => {
     const main = group.find((e) => e.id === canonicalId) ?? group[0];
     const alts = group.filter((e) => e.id !== main.id);
@@ -194,6 +204,7 @@ export async function fetchLeaderboard({
 
     return {
       ...main,
+      class: mainClass.has(canonicalId) ? (mainClass.get(canonicalId) ?? main.class) : main.class,
       total_raids: group.reduce((s, e) => s + (e.total_raids ?? 0), 0),
       total_gold: group.reduce((s, e) => s + (e.total_gold ?? 0), 0),
       activity_score: group.reduce((s, e) => s + (e.activity_score ?? 0), 0),

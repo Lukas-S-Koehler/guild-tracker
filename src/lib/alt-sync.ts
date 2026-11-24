@@ -177,16 +177,32 @@ export async function runAltSync(args: RunAltSyncArgs): Promise<AltSyncResult> {
 
     if (scopeGuildId && !allTracked.some((m) => m.current_guild_id === scopeGuildId)) continue;
 
-    // Representative = tracked member with lowest numeric character_id
+    const trackedIds = allTracked.map((m) => m.id);
+
+    // Representative = the main someone set by hand (member_id of manual rows), so a sync never
+    // undoes set-main. Otherwise the tracked member with the lowest numeric character_id.
+    const { data: manualMains } = await supabase
+      .from('member_alts')
+      .select('member_id')
+      .eq('source', 'manual')
+      .in('member_id', trackedIds);
+    const manualCount = new Map<string, number>();
+    for (const r of manualMains ?? []) manualCount.set(r.member_id, (manualCount.get(r.member_id) ?? 0) + 1);
     let representative: Member | undefined;
-    let lowestId = Infinity;
+    let bestManual = 0;
     for (const m of allTracked) {
-      const info = charInfoMap.get(m.hashed_id!);
-      const numId = info?.id ?? m.character_id ?? Infinity;
-      if (numId < lowestId) { lowestId = numId; representative = m; }
+      const n = manualCount.get(m.id) ?? 0;
+      if (n > bestManual) { bestManual = n; representative = m; }
+    }
+    if (!representative) {
+      let lowestId = Infinity;
+      for (const m of allTracked) {
+        const info = charInfoMap.get(m.hashed_id!);
+        const numId = info?.id ?? m.character_id ?? Infinity;
+        if (numId < lowestId) { lowestId = numId; representative = m; }
+      }
     }
     if (!representative) representative = allTracked[0];
-    const trackedIds = allTracked.map((m) => m.id);
 
     // Delete sync rows for all tracked members in this component (both directions)
     await Promise.all([

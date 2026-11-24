@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { recomputeAllClaimedUsers } from '@/lib/account-service';
+import { IdleMMOApi } from '@/lib/idlemmo-api';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 300;
+
+/** New members get their class here, a few per run (the guild members list has no class). */
+const CLASS_FILL_PER_RUN = 15;
 
 function verifyCronSecret(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -133,6 +138,31 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Fill missing classes. /information is public, so any guild's key works.
+  let classes_filled = 0;
+  const anyKey = guilds.find((g) => g.api_key)?.api_key as string | undefined;
+  if (anyKey) {
+    const { data: missing } = await supabase
+      .from('members')
+      .select('id, hashed_id')
+      .eq('is_active', true)
+      .is('class', null)
+      .not('hashed_id', 'is', null)
+      .limit(CLASS_FILL_PER_RUN);
+    const api = new IdleMMOApi(anyKey);
+    for (const m of missing ?? []) {
+      try {
+        const cls = await api.getCharacterClass(m.hashed_id as string);
+        if (cls) {
+          await supabase.from('members').update({ class: cls }).eq('id', m.id);
+          classes_filled++;
+        }
+      } catch (err) {
+        console.warn('[members-sync-all] class fetch failed', m.id, err);
+      }
+    }
+  }
+
   // Guild moves, promotions and leaves → update derived website access.
   let access: { users: number; changed: number } | { error: string };
   try {
@@ -141,5 +171,5 @@ export async function POST(req: NextRequest) {
     access = { error: String(err) };
   }
 
-  return NextResponse.json({ success: true, results, access });
+  return NextResponse.json({ success: true, results, classes_filled, access });
 }

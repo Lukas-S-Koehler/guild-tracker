@@ -1,6 +1,7 @@
 // Backfill members.class from IdleMMO API.
 // Run: SUPABASE_SERVICE_ROLE_KEY=... node scripts/backfill-member-classes.mjs [--all]
-// --all: refresh even members whose class is already set.
+// --all: refresh even members whose class is already set (inactive members included).
+// Public endpoint: any guild's key works, so members without a keyed guild use a fallback key.
 // API key pulled from guild_config.api_key per member's current guild.
 
 const SUPABASE_URL = 'https://twdgajldsmmmliehjxxp.supabase.co';
@@ -31,7 +32,9 @@ async function sbPatch(path, body) {
 }
 
 async function fetchClass(hashedId, apiKey, retries = 3) {
-  const url = `https://api.idle-mmo.com/v1/character/${hashedId}/characters`;
+  // /information has the character's own class. /characters lists only the account's OTHER
+  // characters, so it gave every member an alt's class.
+  const url = `https://api.idle-mmo.com/v1/character/${hashedId}/information`;
   const res = await fetch(url, {
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -47,9 +50,7 @@ async function fetchClass(hashedId, apiKey, retries = 3) {
   }
   if (!res.ok) throw new Error(`IdleMMO ${res.status}`);
   const data = await res.json();
-  const chars = data.characters ?? [];
-  const self = chars.find((c) => c.hashed_id === hashedId);
-  return self?.class ?? chars[0]?.class ?? null;
+  return data.character?.class ?? null;
 }
 
 async function main() {
@@ -59,14 +60,14 @@ async function main() {
   console.log(`Loaded API keys for ${keyByGuild.size} guilds`);
 
   const filter = REFRESH_ALL
-    ? '?select=id,ign,hashed_id,current_guild_id&hashed_id=not.is.null&is_active=eq.true'
+    ? '?select=id,ign,hashed_id,current_guild_id&hashed_id=not.is.null'
     : '?select=id,ign,hashed_id,current_guild_id&hashed_id=not.is.null&is_active=eq.true&class=is.null';
   const members = await sbGet(`/members${filter}`);
   console.log(`Backfilling class for ${members.length} members`);
 
   let ok = 0, fail = 0, skip = 0;
   for (const m of members) {
-    const apiKey = keyByGuild.get(String(m.current_guild_id));
+    const apiKey = keyByGuild.get(String(m.current_guild_id)) ?? keyByGuild.values().next().value;
     if (!apiKey) {
       skip++;
       console.log(`- ${m.ign} (no api_key for guild ${m.current_guild_id})`);
