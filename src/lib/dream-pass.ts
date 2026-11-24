@@ -64,7 +64,7 @@ export const PASS_SOURCES: Record<PassSource, { label: string; emoji: string; hi
   contribution: { label: 'Contribution', emoji: '💰', hint: 'challenge items + stockpile by value: 5k → 2 … 150k → 10 per day' },
   kudos: { label: 'Kudos', emoji: '💎', hint: `${PASS_XP.kudosReceived} received, ${PASS_XP.kudosGiven} given` },
   bumps: { label: 'Bumps', emoji: '📣', hint: `${PASS_XP.bump} per bump` },
-  chat: { label: 'Discord chat', emoji: '💬', hint: `${PASS_XP.chatDay} per day with 3+ messages` },
+  chat: { label: 'Discord chat', emoji: '💬', hint: `${PASS_XP.chatDay} per day with 3+ messages in member channels (not staff or bot channels)` },
   achievements: { label: 'Achievements', emoji: '🏆', hint: 'Bronze 10 · Silver 25 · Gold 50 · Crystal 100 · Dream 200' },
 };
 

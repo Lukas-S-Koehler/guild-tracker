@@ -26,7 +26,8 @@ import { NETWORK_BOARDS, getNetworkBoards, placeOf, type NetworkBoardKey } from 
 import { KUDOS_PER_WEEK, REASON_MAX, REASON_MIN, discordSafe, giveKudos, giverStatus, memberIdByIgn, receivedKudos } from '@/lib/kudos';
 import { getAccountMemberIds } from '@/lib/alt-graph';
 import { accountPass } from '@/lib/dream-pass-account';
-import { MAX_LEVEL, PASS_SOURCES, SOURCE_ORDER, seasonEnd, seasonLabel } from '@/lib/dream-pass';
+import { chatChannels, memberChannels } from '@/lib/discord-chat';
+import { CHAT_COOLDOWN_S, CHAT_DAY_MIN, CHAT_MIN_CHARS, MAX_LEVEL, PASS_SOURCES, SOURCE_ORDER, seasonEnd, seasonLabel, xpForLevel } from '@/lib/dream-pass';
 
 const SITE = GUIDE_SITE_URL;
 const CRYSTAL = 0x4cc9f0;
@@ -371,10 +372,48 @@ async function resolveAccount(supabase: SupabaseClient, u: { id: string; usernam
   return { ids: account.characters.map((c) => c.member_id), ign: hit.ign };
 }
 
+/** `/pass how:True` — how to earn XP + which channels count for chat XP. Always private. */
+function passHow(i: HubInteraction) {
+  return deferred(i, true, async () => {
+    const supabase = createAdminClient();
+    // Live channel list from Discord; fall back to the channels already being read.
+    const live = await memberChannels().then((c) => c.map((x) => ({ id: x.id, name: x.name }))).catch(() => null);
+    const channels = live ?? (await chatChannels(supabase));
+    const mentions = channels.map((c) => `<#${c.id}>`).join(' ');
+    return {
+      embeds: [
+        {
+          title: '🎟️ How the Dream Pass works',
+          color: CRYSTAL,
+          description: [
+            `Every calendar month is a season: earn XP, climb ${MAX_LEVEL} levels (${fmt(xpForLevel(MAX_LEVEL))} XP), then ⭐ every 100 XP. Your alts count as one account. Top 10 at month end = **Season Champion** role. Everything also adds to lifetime **Dream XP**, which sets your rank role.`,
+            '',
+            ...SOURCE_ORDER.map((k) => `${PASS_SOURCES[k].emoji} **${PASS_SOURCES[k].label}** · ${PASS_SOURCES[k].hint}`),
+          ].join('\n'),
+          fields: [
+            {
+              name: '💬 Chat XP rules',
+              value: [
+                `A message counts if it has ${CHAT_MIN_CHARS}+ characters (or an image/sticker), ${CHAT_COOLDOWN_S} s after your last counted one (any channel).`,
+                `${CHAT_DAY_MIN}+ counted messages in a day = a chat day (5 pass XP). Every counted message + every bump = 1 Discord XP for your Discord level.`,
+                'Your Discord must be linked (`/claim`) for it to reach your pass; messages are kept and join once you link.',
+              ].join('\n'),
+              inline: false,
+            },
+            { name: `📍 Channels that count (${channels.length})`, value: mentions.slice(0, 1024) || '_none yet_', inline: false },
+          ],
+          footer: { text: 'Staff, bot and other-game channels do not count · XP updates daily after the activity check' },
+        },
+      ],
+    };
+  });
+}
+
 export function handlePass(i: HubInteraction) {
   const u = caller(i);
   if (!u) return ephemeral('Could not identify you.');
   const opt = (n: string) => i.data.options?.find((o) => o.name === n)?.value;
+  if (opt('how') === true) return passHow(i);
   const share = opt('share') === true;
   const ignOpt = String(opt('ign') ?? '').trim();
   const target = (opt('user') as string | undefined) ?? (ignOpt ? null : u.id);
@@ -416,7 +455,7 @@ export function handlePass(i: HubInteraction) {
             ...(p.champion.length ? [{ name: '🏆 Season Champion', value: p.champion.map((c) => `${seasonLabel(c.season)} #${c.place}`).join(' · ').slice(0, 1000), inline: false }] : []),
             ...(p.previous ? [{ name: 'Last season', value: `${seasonLabel(p.previous.season)}: level ${p.previous.level} · ${fmt(p.previous.xp)} XP`, inline: false }] : []),
           ],
-          footer: { text: 'Assaults are worth the most · alts pooled · updates daily after the activity check' },
+          footer: { text: 'Assaults are worth the most · alts pooled · /pass how:True for rules and chat channels' },
         },
       ],
       components: [row(linkButton('Open profile', url), linkButton('Season board', `${SITE}/leaderboard`))],
@@ -602,7 +641,7 @@ const MEMBER_HELP: [string, string[]][] = [
     '`/claim` link your Discord to the website and claim your character',
     '`/me` your daily check, streaks and stats (`share:True` posts it)',
     '`/profile ign:` or `user:` someone\'s profile: rank, achievements, stats (no args = yours)',
-    '`/pass` your Dream Pass: season level, XP per source, lifetime Dream XP, Discord level (`ign:`/`user:` for others)',
+    '`/pass` your Dream Pass: season level, XP per source, lifetime Dream XP, Discord level (`ign:`/`user:` for others) · `/pass how:True` how to earn + which channels count',
     '`/away set days:` holiday up to 14 days, the daily check skips you · `/away end` · `/away list`',
     '`/kudos give user:`/`ign:` `reason:` thank someone (3 per week, weekly shoutout) · `/kudos me` yours',
     '`/lookup` your linked characters',
@@ -697,6 +736,7 @@ export async function registerHubCommands() {
         { name: 'ign', type: 3, description: 'Character name (any character of the account)', required: false, autocomplete: true },
         { name: 'user', type: 6, description: 'Discord member', required: false },
         { name: 'share', type: 5, description: 'Post it in the channel instead of only showing you', required: false },
+        { name: 'how', type: 5, description: 'How to earn XP and which channels count for chat XP', required: false },
       ],
     },
     {

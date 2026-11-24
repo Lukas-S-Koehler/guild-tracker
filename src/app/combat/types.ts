@@ -117,6 +117,8 @@ export interface SandboxState {
   buffs: BuffState;
   target: TargetState;
   counts: Record<number, number>;
+  /** Sandbox slayer % per enemy_id (DE/DI only). Missing = your synced slayer rank. */
+  slayer?: Record<number, number>;
 }
 
 export type { GearItem };

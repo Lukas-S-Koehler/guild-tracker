@@ -48,6 +48,7 @@ export async function buildLaunchPost(supabase: SupabaseClient): Promise<string[
     ...SOURCE_ORDER.map((k) => `${PASS_SOURCES[k].emoji} **${PASS_SOURCES[k].label}** · ${PASS_SOURCES[k].hint}`),
     '',
     'Assaults are worth the most. The top 10 of each month become **Season Champions** (role until the next season ends).',
+    '💬 Chat XP counts in member channels (guild chats, community, guides, shops), not in staff or bot channels. **/pass how:True** lists them all, with the rules. Chatting also builds your own **Discord level**.',
     ...(last ? ['', `### 🏆 ${seasonLabel(last.season as string)} champions`, ...standingLines((last.standings ?? []) as Standing[])] : []),
     ...(top.length ? ['', `### 🔥 ${seasonLabel(season)} so far`, ...standingLines(top)] : []),
     '',

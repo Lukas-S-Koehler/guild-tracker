@@ -73,7 +73,7 @@ interface PassData {
   away: AwayRow[];
   bumps: Array<{ discord_id: string | null; member_id: string | null; bumped_at: string }>;
   kudos: Array<{ giver_member_id: string | null; recipient_member_id: string; created_at: string }>;
-  unlocks: Array<{ member_id: string; achievement_key: string; unlocked_at: string }>;
+  unlocks: Array<{ member_id: string; achievement_key: string; unlocked_at: string; backfilled: boolean | null }>;
   chat: Map<string, ChatStats>;
 }
 
@@ -87,7 +87,7 @@ async function loadData(supabase: SupabaseClient): Promise<PassData> {
     fetchAll<AwayRow>((f, t) => supabase.from('away_periods').select('member_ids, starts_on, ends_on, ended_at').range(f, t), true),
     fetchAll<PassData['bumps'][number]>((f, t) => supabase.from('bumps').select('discord_id, member_id, bumped_at').range(f, t), true),
     fetchAll<PassData['kudos'][number]>((f, t) => supabase.from('kudos').select('giver_member_id, recipient_member_id, created_at').order('id').range(f, t), true),
-    fetchAll<PassData['unlocks'][number]>((f, t) => supabase.from('achievement_unlocks').select('member_id, achievement_key, unlocked_at').order('member_id').order('achievement_key').range(f, t), true),
+    fetchAll<PassData['unlocks'][number]>((f, t) => supabase.from('achievement_unlocks').select('member_id, achievement_key, unlocked_at, backfilled').order('member_id').order('achievement_key').range(f, t), true),
     chatStats(supabase),
   ]);
   return { logs, runs, contribs, seasonContribs, standings, away, bumps, kudos, unlocks, chat };
@@ -267,20 +267,21 @@ export function computeAll(accounts: Account[], data: PassData, members: Array<{
     for (const d of Array.from(days)) addXp(xpOf(a.key), d, 'chat', PASS_XP.chatDay);
   }
 
-  // ── Achievements: tier XP of each unlock (account union, earliest date).
-  const firstUnlock = new Map<string, Map<string, string>>();
+  // ── Achievements: tier XP of each unlock (account union, earliest date). Unlocks from a silent launch
+  // backfill have unreliable dates (many were stamped "now"), so they count for lifetime only.
+  const firstUnlock = new Map<string, Map<string, { at: string; backfilled: boolean }>>();
   for (const u of data.unlocks) {
     const acc = accountOf.get(u.member_id);
     if (!acc) continue;
-    const m = firstUnlock.get(acc) ?? new Map<string, string>();
+    const m = firstUnlock.get(acc) ?? new Map<string, { at: string; backfilled: boolean }>();
     const prev = m.get(u.achievement_key);
-    if (!prev || u.unlocked_at < prev) m.set(u.achievement_key, u.unlocked_at);
+    if (!prev || u.unlocked_at < prev.at) m.set(u.achievement_key, { at: u.unlocked_at, backfilled: !!u.backfilled });
     firstUnlock.set(acc, m);
   }
   for (const [acc, m] of Array.from(firstUnlock)) {
-    for (const [key, at] of Array.from(m)) {
+    for (const [key, u] of Array.from(m)) {
       const a = ACHIEVEMENT_BY_KEY.get(key);
-      if (a) addXp(xpOf(acc), dateOf(at), 'achievements', TIERS[a.tier].xp);
+      if (a) addXp(xpOf(acc), u.backfilled ? HISTORY : dateOf(u.at), 'achievements', TIERS[a.tier].xp);
     }
   }
 

@@ -13,7 +13,7 @@ export const maxDuration = 300;
 //  2. Recompute season + lifetime XP for every account, record level milestones, freeze ended seasons.
 //  3. #hall-of-fame: launch post (once), season results, level milestones.
 // Body: { dry_run: true } previews without writing; { skip_chat: true } skips step 1;
-// { chat_only: true } only reads chat (Admin → Discord button, backfill).
+// { chat_only: true } only reads chat (workflow discord-chat.yml, backfill); { skip_feed: true } posts nothing.
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get('Authorization');
   if (!process.env.CRON_SECRET || authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     if (body?.chat_only) return NextResponse.json({ ok: true, chat });
     const run = await runDreamPass(supabase, { dryRun });
     if (dryRun) return NextResponse.json({ ok: true, dry_run: true, ...run });
-    const feed = await postDreamPass(supabase);
+    const feed = body?.skip_feed ? 'skipped' : await postDreamPass(supabase);
     return NextResponse.json({ ok: true, chat, ...run, feed });
   } catch (err) {
     console.error('[cron/dream-pass]', err);

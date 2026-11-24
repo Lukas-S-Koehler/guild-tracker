@@ -448,9 +448,18 @@ function Workbench({
     // API HP for the real level; scaled mobs use the calibrated HP curve (citadel mobs have their own).
     const hp = level === e.level ? e.health : estimateHP(HP_TARGETS[e.name] ? e.name : 'Standard Mob', level);
     const override = e.id === sb.target.enemyId && sb.target.customHp ? sb.target.customHp : null;
-    return { level, hp: override ?? hp, slayerPct: slayer[e.id] ?? 0 };
+    return { level, hp: override ?? hp, slayerPct: sb.slayer?.[e.id] ?? slayer[e.id] ?? 0 };
   };
   const target = enemy ? resolveEnemy(enemy) : null;
+  // Slayer sandbox: assaulters only (same rule as stat calibration). Matching your real rank clears the override.
+  const setSlayer = (id: number, pct: number | null) =>
+    setSb((s) => {
+      const next = { ...(s.slayer ?? {}) };
+      if (pct == null || pct === (slayer[id] ?? 0)) delete next[id];
+      else next[id] = pct;
+      return { ...s, slayer: next };
+    });
+  const slayerSandboxed = Object.keys(sb.slayer ?? {}).length > 0;
   const result = target ? matchup(fighter, target, target.slayerPct) : null;
 
   /* ── setups ── */
@@ -516,7 +525,7 @@ function Workbench({
   const activeSetup = mySetups.find((s) => s.id === activeSetupId) ?? null;
   const pickedIds = potionIdsOf(sb.buffs, boot.potions);
   const potionsDiffer = pickedIds == null || potionKey(pickedIds) !== potionKey(loadoutIds);
-  const sandboxActive = gearSandbox || sb.pet.mode === 'sandbox' || !!sb.classOverride || potionsDiffer || !!activeSetup;
+  const sandboxActive = gearSandbox || sb.pet.mode === 'sandbox' || !!sb.classOverride || potionsDiffer || slayerSandboxed || !!activeSetup;
   const setPotionIds = (ids: number[]) => setSb((s) => ({ ...s, buffs: withPotions(s.buffs, ids, potionById) }));
 
   return (
@@ -597,6 +606,8 @@ function Workbench({
         scaledLevel={sb.target.scaledLevel}
         onScale={(v) => patchTarget({ scaledLevel: v })}
         combatLevel={char.combatLevel}
+        realSlayer={slayer}
+        onSlayer={canCalibrate ? setSlayer : undefined}
         detail={
           enemy && target && result ? (
             <BreakpointsPanel
@@ -1426,6 +1437,66 @@ function BreakpointsPanel({
   );
 }
 
+/** Slayer % in the zone table. Assaulters can click it to try another value (sandbox, amber). */
+function SlayerCell({ pct, real, onChange }: { pct: number; real: number; onChange?: (v: number | null) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const sandboxed = pct !== real;
+  const label = pct ? `+${pct}%` : '—';
+  if (!onChange) return <>{label}</>;
+  const commit = () => {
+    setEditing(false);
+    const n = draft.trim() === '' ? null : Number(draft);
+    onChange(n == null || !Number.isFinite(n) ? null : Math.max(0, Math.min(1000, n)));
+  };
+  if (editing) {
+    return (
+      <span className="inline-flex items-center animate-in fade-in duration-100" onClick={(e) => e.stopPropagation()}>
+        <span className="text-muted-foreground">+</span>
+        <input
+          autoFocus
+          type="number"
+          min={0}
+          step="any"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onFocus={(e) => e.target.select()}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commit();
+            if (e.key === 'Escape') setEditing(false);
+          }}
+          className="w-10 bg-transparent text-sm outline-none border-b border-amber-500/50 text-amber-400 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        />
+        <span className="text-muted-foreground">%</span>
+      </span>
+    );
+  }
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      title={sandboxed ? `Sandbox slayer (yours: ${real ? `+${real}%` : 'none'}). Click to edit, clear to reset.` : 'Click to try another slayer %'}
+      onClick={(e) => {
+        e.stopPropagation();
+        setDraft(String(pct || ''));
+        setEditing(true);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.stopPropagation();
+          setDraft(String(pct || ''));
+          setEditing(true);
+        }
+      }}
+      className={`cursor-text rounded px-0.5 -mx-0.5 transition-colors decoration-dotted underline-offset-2 hover:underline hover:decoration-muted-foreground/60 ${sandboxed ? 'text-amber-400 underline decoration-amber-500/50' : ''}`}
+    >
+      {label}
+    </span>
+  );
+}
+
 type Resolver = (e: Enemy) => { level: number; hp: number; slayerPct: number };
 
 /**
@@ -1512,9 +1583,14 @@ function ZoneSweep({
   scaledLevel,
   onScale,
   combatLevel,
+  realSlayer,
+  onSlayer,
   detail,
 }: {
   detail?: React.ReactNode;
+  realSlayer: Record<number, number>;
+  /** Present = slayer % is sandboxable (DE/DI). */
+  onSlayer?: (enemyId: number, pct: number | null) => void;
   zones: [number, string][];
   zoneId: number | null;
   onZone: (zid: number) => void;
@@ -1589,7 +1665,9 @@ function ZoneSweep({
                   <td className="pr-2">{m.hitChance.toFixed(1)}</td>
                   <td className="pr-2">{fmt(m.enemyDamage)}</td>
                   <td className="pr-2">{m.enemyHitChance.toFixed(1)}</td>
-                  <td className="pr-2">{t.slayerPct ? `+${t.slayerPct}%` : '—'}</td>
+                  <td className="pr-2">
+                    <SlayerCell pct={t.slayerPct} real={realSlayer[e.id] ?? 0} onChange={onSlayer && ((v) => onSlayer(e.id, v))} />
+                  </td>
                   <td className="text-xs text-muted-foreground">
                     {nextAp != null ? `+${fmt(nextAp)} AP` : m.hits != null && m.hits <= 2 ? <span className="text-green-500">✓ capped</span> : ''}
                   </td>

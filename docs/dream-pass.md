@@ -76,7 +76,9 @@ assault data, bumps, kudos, achievements; Discord chat from the start of the ser
 **Assault seasons before per-wave tracking (≤ 12)** were all imported on 2026-11-21, so their real dates are unknown.
 Their XP (estimated waves from season EXP, ~20k EXP per wave, max 9, plus finish bonuses) goes to a `history`
 bucket: it counts for lifetime Dream XP and ranks, never for a monthly season. Seasons with wave data (13+) are dated
-normally (waves by start time, finish bonuses by the season's last snapshot).
+normally (waves by start time, finish bonuses by the season's last snapshot). Same for **achievement unlocks from a
+silent backfill** (the step 9 launch and later batches): many were stamped "now", so they count for lifetime only;
+unlocks earned live count for their month.
 
 Dry run 2026-11-24 (220 accounts with XP, chat not yet read): lifetime p50 450 · p75 1,786 · p90 3,606 · max 12,086.
 Monthly seasons May–Nov: p50 45–320 · p90 420–640 · max 1.0–1.4k.
@@ -126,7 +128,14 @@ L50 = 7,850). 1 Discord XP per counted message, +1 per bump.
 - Cron `POST /api/cron/dream-pass` (daily-activity workflow, after achievements, before the role sync):
   read chat → recompute → milestones → freeze → #hall-of-fame (launch post once, season results, level
   milestones 5/10/15/20, highest new level per person). `{ "dry_run": true }` previews with distribution stats,
-  `{ "chat_only": true }` only reads chat (workflow `discord-chat.yml`, every 2 h).
+  `{ "chat_only": true }` only reads chat (workflow `discord-chat.yml`, every 2 h), `{ "skip_feed": true }` posts
+  nothing.
+- Launch 2026-11-24: chat backfilled (41 member channels, 62.7k messages, 43.2k counted after the cooldown, 291
+  people), pass computed and every month before November frozen silently from the dev server (`skip_feed`); the launch
+  post goes out on the first daily run on production. Discord levels at launch: 78 people L3+, 23 L10+, 10 L20+, 2
+  L30+, top L38.
+- Which channels count is public: **`/pass how:True`** lists the rules and every counted channel (live from Discord),
+  the launch post and every "Discord chat" hint say "member channels, not staff or bot channels".
 - Surfaces: Dream Pass card on `/me` and `/p/[ign]` (level, XP per source, season place, lifetime Dream XP + rank,
   Discord level, champion seasons), `/leaderboard` tab **Dream Pass** (this month) + **Dream XP** (lifetime),
   Discord **`/pass [ign|user] [share]`**, `/leaderboard board: pass`.

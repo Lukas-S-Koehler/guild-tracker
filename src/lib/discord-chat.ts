@@ -151,3 +151,9 @@ export async function chatStats(supabase: SupabaseClient, discordIds?: string[])
 /** Days with enough counted messages for the pass. */
 export const chatDays = (s: ChatStats | undefined) =>
   s ? Array.from(s.days.entries()).filter(([, n]) => n >= CHAT_DAY_MIN).map(([d]) => d) : [];
+
+/** Channels currently read for chat XP (from the cursors), for /pass how and the website. */
+export async function chatChannels(supabase: SupabaseClient): Promise<Array<{ id: string; name: string }>> {
+  const { data } = await supabase.from('discord_chat_cursors').select('channel_id, channel_name').order('channel_name');
+  return (data ?? []).map((r) => ({ id: r.channel_id as string, name: (r.channel_name as string | null) ?? r.channel_id }));
+}
