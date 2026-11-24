@@ -39,6 +39,7 @@ export type Metric =
   | 'combat_level'
   | 'total_level'
   | 'bumps'
+  | 'kudos'
   | 'discord_linked'
   | 'claimed'
   | 'moved_up'
@@ -213,6 +214,13 @@ export const ACHIEVEMENTS: Achievement[] = [
     ['Megaphone', 25, 'gold'],
     ['Town Crier', 50, 'crystal'],
   ], (t) => (t === 1 ? 'Bump the Discord server' : `Bump the Discord server ${t} times`)),
+  ...ladder('community', 'kudos', 'kudos', [
+    ['Appreciated', 1, 'bronze'],
+    ['Well Liked', 10, 'silver'],
+    ['Beloved', 25, 'gold'],
+    ['Pillar of the Dream', 50, 'crystal'],
+    ['Heart of the Dream', 100, 'dream'],
+  ], (t) => (t === 1 ? 'Receive kudos from another member' : `Receive ${t} kudos from other members`)),
   {
     key: 'linked', category: 'community', name: 'Connected', tier: 'bronze',
     metric: 'discord_linked', threshold: 1, description: 'Link your Discord with /claim',

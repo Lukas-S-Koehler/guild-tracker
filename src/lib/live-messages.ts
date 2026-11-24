@@ -16,6 +16,7 @@ import { buildRaidEmbed, CURSED_DREAMERS_ID } from '@/lib/raid-discord';
 import { GUIDE_SITE_URL } from '@/lib/game-guide';
 import { ASSAULT_ENTRY_GUILD_ID, ASSAULT_TOP_GUILD_ID, ASSAULT_TOP_MIN_CL } from '@/lib/raids';
 import { RECAP_PREFIX, assaultRecapKey, recapPayloadsFor } from '@/lib/assault-recap';
+import { KUDOS_WEEKLY_KEY, buildWeeklyShoutout, lastWeekStart } from '@/lib/kudos';
 import { getLiveRow, messageLink, publishLive, textPayloads, type LiveMode, type LivePayload, type PublishResult } from '@/lib/discord-live';
 
 /** Dream Guilds channel ids (see Claude memory reference-discord-channels). */
@@ -44,7 +45,7 @@ export interface LiveDef {
   channel: string | null;
   mode: LiveMode;
   pin?: boolean;
-  source: 'build' | 'auto-warn' | 'guild-hall' | 'achievements' | 'assault-recap';
+  source: 'build' | 'auto-warn' | 'guild-hall' | 'achievements' | 'assault-recap' | 'kudos';
   /** Inactivity reports only: inactive guilds get no report (auto-warn skips them). */
   guild_active?: boolean;
   /** Inactivity reports only: @mention flagged members (guild_config.settings.disable_pings off). */
@@ -97,6 +98,14 @@ export const STATIC_DEFS: LiveDef[] = [
     channel: null,
     mode: 'append',
     source: 'achievements',
+  },
+  {
+    key: KUDOS_WEEKLY_KEY,
+    label: 'Kudos of the week',
+    description: "Weekly shoutout: who got the most kudos and why. Posted once for last week, from Monday after the daily check; earlier ones stay. Bind to #hall-of-fame.",
+    channel: null,
+    mode: 'append',
+    source: 'kudos',
   },
 ];
 
@@ -274,7 +283,7 @@ async function buildLinksHub(supabase: SupabaseClient): Promise<LivePayload[]> {
     '',
     '## 🤖 DreamBot commands',
     '`/claim` link your Discord + claim your character · `/me` daily check and streaks · `/away` holiday',
-    '`/guild` any guild at a glance · `/raid` raid times · `/leaderboard` activity ranks',
+    '`/guild` any guild at a glance · `/raid` raid times · `/leaderboard` activity ranks · `/kudos give` thank someone',
     '`/assault me` your assault season · `/assault checklist` prep checklist · `/assault status` assault countdowns · `/guide show` guide links',
     '-# `/help` lists every command, including the staff ones.',
   ];
@@ -293,6 +302,7 @@ export const canBuild = (key: string) => key in BUILDERS;
 export async function payloadsFor(supabase: SupabaseClient, key: string): Promise<LivePayload[] | null> {
   if (BUILDERS[key]) return BUILDERS[key](supabase);
   if (key.startsWith(RECAP_PREFIX)) return recapPayloadsFor(supabase, key);
+  if (key === KUDOS_WEEKLY_KEY) return buildWeeklyShoutout(supabase, lastWeekStart());
   return (await getLiveRow(supabase, key))?.payloads ?? null;
 }
 
@@ -301,7 +311,7 @@ export async function publishKey(supabase: SupabaseClient, key: string, force = 
   const def = findStaticDef(key) ?? (await allDefs(supabase)).find((d) => d.key === key);
   if (!def) return { ok: false, status: 'error', message_ids: [], error: `Unknown live message ${key}` };
   const payloads = await payloadsFor(supabase, key);
-  if (!payloads?.length) return { ok: false, status: 'error', message_ids: [], error: def.source === 'guild-hall' ? 'Nothing posted yet: comes with the daily guild hall run (15:50 UTC).' : def.source === 'achievements' ? 'Nothing posted yet: comes with the daily achievements run after the activity check.' : def.source === 'assault-recap' ? 'No assault waves recorded for this guild yet.' : 'Nothing posted yet: comes with the daily activity check (11:48 UTC).' };
+  if (!payloads?.length) return { ok: false, status: 'error', message_ids: [], error: def.source === 'guild-hall' ? 'Nothing posted yet: comes with the daily guild hall run (15:50 UTC).' : def.source === 'achievements' ? 'Nothing posted yet: comes with the daily achievements run after the activity check.' : def.source === 'assault-recap' ? 'No assault waves recorded for this guild yet.' : def.source === 'kudos' ? 'Nobody gave kudos last week.' : 'Nothing posted yet: comes with the daily activity check (11:48 UTC).' };
   return publishLive(supabase, key, payloads, { mode: def.mode, pin: def.pin, force });
 }
 

@@ -10,6 +10,7 @@ import { CalendarDays, Coins, Flame, History, Loader2, Map as MapIcon, Swords, T
 import { useAuth } from '@/contexts/AuthContext';
 import AchievementsCard from '@/components/me/AchievementsCard';
 import RankingsCard from '@/components/me/RankingsCard';
+import KudosCard from '@/components/profile/KudosCard';
 import Heatmap from '@/components/me/Heatmap';
 import type { Profile } from '@/lib/profile';
 
@@ -148,6 +149,8 @@ export default function ProfilePage() {
       </div>
 
       <AchievementsCard initial={ach} readOnly />
+
+      <KudosCard ign={data.ign} initial={data.kudos} isSelf={data.is_self} accountIgns={characters.map((c) => c.ign)} />
 
       <RankingsCard src={`/api/profile/${ign}/rankings`} />
 

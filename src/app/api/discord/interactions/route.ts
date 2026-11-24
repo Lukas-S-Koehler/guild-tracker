@@ -6,7 +6,7 @@ import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registe
 import { handleAssaultCommand, handleAssaultAutocomplete, handleAssaultChecklistComponent, handleAssaultPotionsComponent } from '@/lib/assault-discord';
 import { handleRaidCommand } from '@/lib/raid-discord';
 import { handleGuideCommand } from '@/lib/guide-discord';
-import { handleNetworkBoard, handleAway, handleClaim, handleGuild, handleGuildAutocomplete, handleHelp, handleMe, handleProfile, handleProfileAutocomplete, registerHubCommands, type HubInteraction } from '@/lib/hub-discord';
+import { handleNetworkBoard, handleAway, handleKudos, handleKudosAutocomplete, handleClaim, handleGuild, handleGuildAutocomplete, handleHelp, handleMe, handleProfile, handleProfileAutocomplete, registerHubCommands, type HubInteraction } from '@/lib/hub-discord';
 import { getDiscordProfile, formatCharacterLine } from '@/lib/lookup-service';
 import { switchAccountMain } from '@/lib/alt-switch';
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
@@ -159,12 +159,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ type: 1 });
   }
 
-  // Dream Hub step 8: /help, /claim, /me, /guild, /away (+ /profile, step 12).
+  // Dream Hub step 8: /help, /claim, /me, /guild, /away (+ /profile, step 12; /kudos, step 14).
   {
     const hub = interaction as HubInteraction;
     const name = interaction.data?.name;
     if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && name === 'guild') return handleGuildAutocomplete(hub);
     if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && name === 'profile') return handleProfileAutocomplete(hub);
+    if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && name === 'kudos') return handleKudosAutocomplete(hub);
     if (interaction.type === INTERACTION_TYPE_COMMAND) {
       if (name === 'help') return handleHelp(hub);
       if (name === 'claim') return handleClaim(hub);
@@ -172,6 +173,7 @@ export async function POST(req: NextRequest) {
       if (name === 'guild') return handleGuild(hub);
       if (name === 'profile') return handleProfile(hub);
       if (name === 'away') return handleAway(hub);
+      if (name === 'kudos') return handleKudos(hub);
     }
   }
 

@@ -109,6 +109,7 @@ interface Context {
   events: Map<string, EventRow[]>; // member_id → events
   assault: AssaultRow[];
   bumps: Array<{ discord_id: string | null; member_id: string | null; bumped_at: string }>;
+  kudos: Array<{ recipient_member_id: string; created_at: string }>;
   away: AwayRow[];
   guilds: Map<string, GuildRow>;
   claims: Array<{ user_id: string; member_id: string; reviewed_at: string | null; requested_at: string | null }>;
@@ -143,7 +144,7 @@ async function loadContext(supabase: SupabaseClient, members: MemberRow[], full:
       ? fetchAll<EventRow>((f, t) => supabase.from('guild_activity_events').select(evCols).in('type', evTypes).in('character_hashed_id', hashes).order('id').range(f, t))
       : Promise.resolve([] as EventRow[]);
 
-  const [logs, events, assault, bumps, away, guilds, claims, links] = await Promise.all([
+  const [logs, events, assault, bumps, away, guilds, claims, links, kudos] = await Promise.all([
     loadLogs,
     loadEvents,
     fetchAll<AssaultRow>((f, t) => supabase.from('assault_season_contributions').select('season_number, external_guild_id, character_hashed_id, experience, snapshot_at').range(f, t)),
@@ -154,6 +155,10 @@ async function loadContext(supabase: SupabaseClient, members: MemberRow[], full:
       supabase.from('user_characters').select('user_id, member_id, reviewed_at, requested_at').eq('status', 'approved').range(f, t)
     ),
     fetchAll<{ user_id: string; discord_id: string; linked_at: string }>((f, t) => supabase.from('user_discord_links').select('user_id, discord_id, linked_at').range(f, t)),
+    // Table from database/kudos.sql (step 14); missing table = no kudos yet.
+    full
+      ? fetchAll<{ recipient_member_id: string; created_at: string }>((f, t) => supabase.from('kudos').select('recipient_member_id, created_at').order('id').range(f, t)).catch(() => [])
+      : Promise.all(chunks(ids).map((c) => fetchAll<{ recipient_member_id: string; created_at: string }>((f, t) => supabase.from('kudos').select('recipient_member_id, created_at').in('recipient_member_id', c).order('id').range(f, t)))).then((r) => r.flat()).catch(() => []),
   ]);
 
   const idSet = new Set(ids);
@@ -179,6 +184,7 @@ async function loadContext(supabase: SupabaseClient, members: MemberRow[], full:
     events: evMap,
     assault,
     bumps,
+    kudos,
     away,
     guilds: new Map(guilds.map((g) => [g.id, g])),
     claims,
@@ -353,6 +359,10 @@ export function computeMetrics(ctx: Context, acc: Account): Map<Metric, MetricVa
   m.set('bumps', series(ctx.bumps
     .filter((b) => (b.member_id && idSet.has(b.member_id)) || (b.discord_id && discord.has(b.discord_id)))
     .map((b) => ({ date: dateOf(b.bumped_at), inc: 1 }))));
+
+  m.set('kudos', series(ctx.kudos
+    .filter((k) => idSet.has(k.recipient_member_id))
+    .map((k) => ({ date: dateOf(k.created_at), inc: 1 }))));
 
   const claim = ctx.claims.filter((c) => idSet.has(c.member_id)).map((c) => c.reviewed_at ?? c.requested_at).sort()[0];
   m.set('claimed', flag(claim ? dateOf(claim) : null, acc.userIds.length > 0));

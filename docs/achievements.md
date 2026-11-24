@@ -17,7 +17,7 @@ Thresholds are calibrated on live data (2026-11-23, ~200 days of `daily_logs`, 3
 bronze ≈ half of active members, silver ≈ top 25 %, gold ≈ top 10 %, crystal ≈ top 1–2 %, Dream = beyond today's max
 (something to chase). Percentiles in brackets.
 
-## Catalogue (68)
+## Catalogue (73)
 
 ### Contribution — gold donated + deposited, lifetime
 | Key | Name | Threshold | Tier |
@@ -101,6 +101,11 @@ Counted **per item**: each item a person contributes to a guild challenge counts
 | bump-2 | Hype Crew | 10 | Silver |
 | bump-3 | Megaphone | 25 | Gold |
 | bump-4 | Town Crier | 50 | Crystal |
+| kudos-1 | Appreciated | 1 kudos received (step 14) | Bronze |
+| kudos-2 | Well Liked | 10 | Silver |
+| kudos-3 | Beloved | 25 | Gold |
+| kudos-4 | Pillar of the Dream | 50 | Crystal |
+| kudos-5 | Heart of the Dream | 100 | Dream |
 | linked | Connected | linked Discord via `/claim` | Bronze |
 | claimed | That's Me | approved account claim | Bronze |
 

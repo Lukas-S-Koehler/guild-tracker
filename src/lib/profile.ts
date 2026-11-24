@@ -15,6 +15,7 @@ import { getAccountMemberIds } from '@/lib/alt-graph';
 import { buildSummaryFor, type MeSummary } from '@/lib/me-summary';
 import { accountProgress, type AccountAchievements } from '@/lib/achievement-eval';
 import { TIERS } from '@/lib/achievements';
+import { receivedKudos, type ReceivedKudos } from '@/lib/kudos';
 
 export interface ProfileAccount {
   characters: AccountCharacter[];
@@ -51,6 +52,8 @@ export interface Profile {
   journey: MeSummary['journey'];
   feed: { at: string; kind: 'join' | 'assault' | 'achievement'; title: string; detail?: string; tone: 'good' | 'info' }[];
   achievements: { claimed: true } & AccountAchievements;
+  /** Kudos received by the whole account (step 14). */
+  kudos: ReceivedKudos;
 }
 
 const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
@@ -87,9 +90,10 @@ export async function buildProfile(
 ): Promise<Profile> {
   const { characters, userId } = account;
   const ids = characters.map((c) => c.member_id);
-  const [s, achievements] = await Promise.all([
+  const [s, achievements, kudos] = await Promise.all([
     buildSummaryFor(characters, {}, supabase),
     accountProgress(supabase, ids, userId),
+    receivedKudos(supabase, ids, 8).catch(() => ({ total: 0, this_week: 0, givers: 0, recent: [] })),
   ]);
 
   const toChar = (c: MeSummary['characters'][number]): ProfileCharacter => ({
@@ -129,6 +133,7 @@ export async function buildProfile(
     feed: feed.slice(0, 20),
     // Locked hidden achievements are already masked by accountProgress.
     achievements: { claimed: true, ...achievements },
+    kudos,
   };
 }
 

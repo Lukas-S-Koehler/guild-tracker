@@ -1,12 +1,12 @@
 /**
- * Dream Hub Discord commands (step 8): /help, /claim, /me, /guild, /away; /profile (step 12).
+ * Dream Hub Discord commands (step 8): /help, /claim, /me, /guild, /away; /profile (step 12); /kudos (step 14).
  * Routed from src/app/api/discord/interactions/route.ts. Registered with registerHubCommands().
  */
 import { NextResponse } from 'next/server';
 import { waitUntil } from '@vercel/functions';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createAdminClient } from '@/lib/supabase-server';
-import { editOriginalInteractionResponse, postToChannel, upsertGlobalCommand } from '@/lib/discord-api';
+import { editOriginalInteractionResponse, postToChannel, sendInteractionFollowup, upsertGlobalCommand } from '@/lib/discord-api';
 import { getActiveClaim } from '@/lib/account-service';
 import { getLinkByDiscord, linkUrl, mappedIgns, resolveDiscordLink } from '@/lib/discord-link';
 import { buildMeSummary, type GuildGroup } from '@/lib/me-summary';
@@ -23,6 +23,8 @@ import { personalRecapEmbed } from '@/lib/assault-recap';
 import { buildProfile, findProfileAccount } from '@/lib/profile';
 import { profilePath } from '@/lib/profile-path';
 import { NETWORK_BOARDS, getNetworkBoards, placeOf, type NetworkBoardKey } from '@/lib/network-boards';
+import { KUDOS_PER_WEEK, REASON_MAX, REASON_MIN, discordSafe, giveKudos, giverStatus, memberIdByIgn, receivedKudos } from '@/lib/kudos';
+import { getAccountMemberIds } from '@/lib/alt-graph';
 
 const SITE = GUIDE_SITE_URL;
 const CRYSTAL = 0x4cc9f0;
@@ -330,6 +332,9 @@ export function handleProfile(i: HubInteraction) {
               : []),
             ...(streaks ? [{ name: 'Streak', value: streaks.slice(0, 1000), inline: false }] : []),
             ...(badges ? [{ name: 'Latest achievements', value: badges.slice(0, 1000), inline: false }] : []),
+            ...(p.kudos.total
+              ? [{ name: '💎 Kudos', value: `${fmt(p.kudos.total)} from ${p.kudos.givers} member${p.kudos.givers === 1 ? '' : 's'}${p.kudos.recent[0] ? `\n> “${discordSafe(p.kudos.recent[0].reason)}” · ${discordSafe(p.kudos.recent[0].from_ign)}` : ''}`.slice(0, 1000), inline: false }]
+              : []),
             ...(p.characters.length > 1
               ? [{ name: 'Characters', value: p.characters.map((c) => c.ign).join(', ').slice(0, 1000), inline: false }]
               : []),
@@ -376,6 +381,75 @@ export function handleNetworkBoard(i: HubInteraction, boardRaw: unknown) {
         },
       ],
       components: [row(linkButton('Full leaderboard', url))],
+    };
+  });
+}
+
+// ─── /kudos give|me (step 14, F7) ────────────────────────────────────────────
+
+/** IGN autocomplete inside the `give` subcommand (same list as /profile). */
+export function handleKudosAutocomplete(i: HubInteraction) {
+  const sub = i.data.options?.[0];
+  return handleProfileAutocomplete({ ...i, data: { ...i.data, options: sub?.options ?? [] } });
+}
+
+/** Character the caller means: ign option, else the Discord user's claimed main / mapped character. */
+async function kudosTarget(supabase: SupabaseClient, ign: string, userId: string | undefined) {
+  if (ign) return memberIdByIgn(supabase, ign);
+  if (!userId) return null;
+  const link = await getLinkByDiscord(supabase, userId);
+  const claim = link ? await getActiveClaim(link.user_id, supabase) : null;
+  if (claim?.status === 'approved') return { id: claim.member_id as string, ign: claim.ign };
+  const mapped = (await mappedIgns(supabase, userId))[0];
+  return mapped ? memberIdByIgn(supabase, mapped) : null;
+}
+
+export function handleKudos(i: HubInteraction) {
+  const u = caller(i);
+  if (!u) return ephemeral('Could not identify you.');
+  const sub = i.data.options?.[0];
+  const opt = (n: string) => sub?.options?.find((o) => o.name === n)?.value;
+
+  // Validation answers stay private; a successful kudos is posted publicly as a follow-up.
+  return deferred(i, true, async () => {
+    const supabase = createAdminClient();
+    const link = await resolveDiscordLink(supabase, u.id, u.global_name ?? u.username);
+
+    if (sub?.name === 'me') {
+      if (!link) return { content: 'Your Discord is not linked yet. Run `/claim` first.' };
+      const claim = await getActiveClaim(link.user_id, supabase);
+      if (claim?.status !== 'approved') return { content: 'Claim your character first (`/claim`).' };
+      const ids = Array.from(await getAccountMemberIds(supabase, [claim.member_id as string]));
+      const [status, got] = await Promise.all([giverStatus(supabase, link.user_id), receivedKudos(supabase, ids, 5)]);
+      const reset = Math.floor(Date.parse(status.resets_at) / 1000);
+      const lines = [
+        `💎 **${status.remaining} of ${KUDOS_PER_WEEK}** kudos left to give this week · resets <t:${reset}:R>`,
+        ...status.given.map((k) => `• to **${discordSafe(k.recipient_ign)}**: “${discordSafe(k.reason)}”`),
+        '',
+        `**Received:** ${got.total} kudos from ${got.givers} member${got.givers === 1 ? '' : 's'}${got.this_week ? ` · ${got.this_week} this week` : ''}`,
+        ...got.recent.map((k) => `> “${discordSafe(k.reason)}” · ${discordSafe(k.from_ign)} <t:${Math.floor(Date.parse(k.at) / 1000)}:R>`),
+      ];
+      return { content: lines.join('\n').slice(0, 1990), components: [row(linkButton('My profile', `${SITE}${profilePath(claim.ign)}`))] };
+    }
+
+    // give
+    if (!link) return { content: 'Link your Discord first with `/claim`, then you can give kudos.' };
+    const ign = String(opt('ign') ?? '').trim();
+    const userOpt = opt('user') as string | undefined;
+    if (!ign && !userOpt) return { content: 'Pick who gets the kudos: `user:` or `ign:`.' };
+    const target = await kudosTarget(supabase, ign, userOpt);
+    if (!target) return { content: ign ? `No Dream character called **${discordSafe(ign)}**.` : `<@${userOpt}> has no linked character yet.` };
+
+    const res = await giveKudos(supabase, { giverUserId: link.user_id, recipientMemberId: target.id, reason: String(opt('reason') ?? ''), source: 'discord' });
+    if (!res.ok) return { content: `❌ ${res.error}` };
+
+    const who = res.recipient_discord_id ? `<@${res.recipient_discord_id}> (**${discordSafe(res.recipient_ign)}**)` : `**${discordSafe(res.recipient_ign)}**`;
+    const posted = await sendInteractionFollowup(i.application_id, i.token, {
+      content: `💎 **${discordSafe(res.giver_ign)}** gave kudos to ${who}\n> ${discordSafe(res.kudos.reason)}\n-# \`/kudos give\` to thank someone · ${KUDOS_PER_WEEK} per week · weekly shoutout in #hall-of-fame`,
+      allowed_mentions: { users: res.recipient_discord_id ? [res.recipient_discord_id] : [] },
+    });
+    return {
+      content: `✅ Kudos sent to **${discordSafe(res.recipient_ign)}**. ${res.remaining} left this week.${posted.ok ? '' : ' (Could not post it in this channel, but it counts.)'}`,
     };
   });
 }
@@ -448,6 +522,7 @@ const MEMBER_HELP: [string, string[]][] = [
     '`/me` your daily check, streaks and stats (`share:True` posts it)',
     '`/profile ign:` or `user:` someone\'s profile: rank, achievements, stats (no args = yours)',
     '`/away set days:` holiday up to 14 days, the daily check skips you · `/away end` · `/away list`',
+    '`/kudos give user:`/`ign:` `reason:` thank someone (3 per week, weekly shoutout) · `/kudos me` yours',
     '`/lookup` your linked characters',
   ]],
   ['🏰 Guilds', [
@@ -543,6 +618,23 @@ export async function registerHubCommands() {
       name: 'guild',
       description: 'Show a Dream guild: requirement, raids, leaders, stats',
       options: [{ name: 'tag', type: 3, description: 'Guild tag, e.g. DT', required: true, autocomplete: true }],
+    },
+    {
+      name: 'kudos',
+      description: 'Thank a member: kudos with a short reason (3 per week)',
+      options: [
+        {
+          name: 'give',
+          type: 1,
+          description: 'Give someone kudos (3 per week, one per person)',
+          options: [
+            { name: 'reason', type: 3, description: 'What are you thanking them for?', required: true, min_length: REASON_MIN, max_length: REASON_MAX },
+            { name: 'user', type: 6, description: 'Discord member', required: false },
+            { name: 'ign', type: 3, description: 'Or their character name', required: false, autocomplete: true },
+          ],
+        },
+        { name: 'me', type: 1, description: 'Kudos you have left this week and the ones you received' },
+      ],
     },
     {
       name: 'away',

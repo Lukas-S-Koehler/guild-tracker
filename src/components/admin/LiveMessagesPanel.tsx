@@ -17,7 +17,7 @@ interface Item {
   description: string;
   channel: string | null;
   mode: 'edit' | 'repost' | 'append';
-  source: 'build' | 'auto-warn' | 'guild-hall' | 'achievements' | 'assault-recap';
+  source: 'build' | 'auto-warn' | 'guild-hall' | 'achievements' | 'assault-recap' | 'kudos';
   guild_active?: boolean;
   pings?: boolean;
   buildable: boolean;
@@ -191,6 +191,7 @@ function LiveCard({ item, onChange }: { item: Item; onChange: () => void }) {
             {item.source === 'guild-hall' && ' · updated daily at 15:50 UTC'}
             {item.source === 'achievements' && ' · new post daily after the activity check'}
             {item.source === 'assault-recap' && ' · posted once after the season ends'}
+            {item.source === 'kudos' && ' · new post every Monday after the activity check'}
           </p>
         )}
         {item.last_error && (
