@@ -302,9 +302,10 @@ export async function discordInfo(supabase: SupabaseClient, discordIds: string[]
 // ─── Party card (in the party's own thread) ──────────────────────────────────
 
 /** "**Ign** (<@discord>)"; legacy rows without a character: "<@discord> (character not set)". */
-export function memberLabel(m: Pick<PartyMember, 'ign' | 'discord_id'>): string {
+export function memberLabel(m: Pick<PartyMember, 'ign' | 'discord_id' | 'member_id'>): string {
   if (!m.ign) return m.discord_id ? `<@${m.discord_id}> (character not set)` : '?';
-  return m.discord_id ? `**${m.ign}** (<@${m.discord_id}>)` : `**${m.ign}**`;
+  const ext = m.member_id ? '' : ' 🌐'; // 🌐 = character from outside the Dream guilds
+  return m.discord_id ? `**${m.ign}**${ext} (<@${m.discord_id}>)` : `**${m.ign}**${ext}`;
 }
 
 /** Open party a character is in right now (one party per character). */
@@ -337,7 +338,8 @@ export function partyCardPayload(p: PartyFull): LivePayload {
     ...(p.slayer ? ['', '🗡️ **Open for party Slayer**'] : []),
     ...(p.note ? ['', `📝 ${p.note}`] : []),
     '',
-    '-# Leader/officers: `/party invite ign:` (alts too) · `/party league` · `/party edit`. Looking to join? Press 🙋 below. All parties: 📋 Party board.',
+    ...(p.members.some((m) => m.ign && !m.member_id) ? ['-# 🌐 = from outside the Dream guilds'] : []),
+    '-# Leader/officers: `/party invite ign:` (alts and outside players too) · `/party league` · `/party edit`. Looking to join? Press 🙋 below. All parties: 📋 Party board.',
   ];
   const canAsk = p.members.length < PARTY_MAX && !p.closed_at;
   return {

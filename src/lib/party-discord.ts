@@ -157,7 +157,7 @@ export async function handlePartyAutocomplete(i: PartyInteraction) {
     choices = (data ?? [])
       .sort((a, b) => Number(b.discord_id === me) - Number(a.discord_id === me))
       .map((m) => ({ name: `${m.ign}${m.combat_level ? ` · CL ${m.combat_level}` : ''}${m.discord_id === me ? ' · you' : ''}`, value: m.ign as string }));
-    if (q && !choices.some((c) => c.value.toLowerCase() === q)) choices.unshift({ name: `${String(focused?.value)} (not a Dream character)`, value: String(focused?.value) });
+    if (q && !choices.some((c) => c.value.toLowerCase() === q)) choices.unshift({ name: `${String(focused?.value)} (outside Dream 🌐)`, value: String(focused?.value) });
   }
   return NextResponse.json({ type: 8, data: { choices: choices.slice(0, 25).map((c) => ({ name: c.name.slice(0, 100), value: c.value.slice(0, 100) })) } });
 }
@@ -281,7 +281,7 @@ export function handleParty(i: PartyInteraction) {
           allowed_mentions: { users: ch.discord_id && ch.discord_id !== u.id ? [ch.discord_id] : [] },
         });
       }
-      return { content: `✅ Added ${who} to **${p.name}**.${ch.member_id ? '' : '\n-# Not a Dream character we know: add `user:` so the card shows who plays it.'}` + note };
+      return { content: `✅ Added ${who} to **${p.name}**.${ch.member_id ? '' : `\n-# 🌐 **${ch.ign}** is from outside the Dream guilds.${ch.discord_id ? '' : ' If they are on this server, add `user:` so they get pinged and can use `/party leave`.'}`}` + note };
     }
 
     if (sub?.name === 'kick') {
@@ -608,10 +608,10 @@ export const PARTY_COMMAND_DEFS = [
         ],
       },
       {
-        name: 'invite', type: 1, description: 'Add a character, alts too (leader/officers)',
+        name: 'invite', type: 1, description: 'Add a character: alts or players from outside Dream too (leader/officers)',
         options: [
-          { name: 'ign', type: 3, description: 'Character name', required: true, autocomplete: true },
-          { name: 'user', type: 6, description: 'Who plays it (only needed for non-Dream characters)', required: false },
+          { name: 'ign', type: 3, description: 'Character name (any player, also outside Dream)', required: true, autocomplete: true },
+          { name: 'user', type: 6, description: 'Outside player: their Discord, if they are on this server', required: false },
           partyOpt,
         ],
       },
