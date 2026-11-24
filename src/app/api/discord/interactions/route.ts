@@ -7,6 +7,7 @@ import { handleAssaultCommand, handleAssaultAutocomplete, handleAssaultChecklist
 import { handleRaidCommand } from '@/lib/raid-discord';
 import { handleGuideCommand } from '@/lib/guide-discord';
 import { handleNetworkBoard, handlePass, handlePassAutocomplete, handlePassHow, handleLevel, handleHubShare, HOW_ID, handleAway, handleKudos, handleKudosAutocomplete, handleClaim, handleGuild, handleGuildAutocomplete, handleHelp, handleMe, handleProfile, handleProfileAutocomplete, registerHubCommands, type HubInteraction } from '@/lib/hub-discord';
+import { routePartyInteraction, type PartyInteraction } from '@/lib/party-discord';
 import { getDiscordProfile, formatCharacterLine } from '@/lib/lookup-service';
 import { switchAccountMain } from '@/lib/alt-switch';
 import { fetchLeaderboard, type LeaderboardFilter, type LeaderboardPeriod } from '@/lib/leaderboard';
@@ -157,6 +158,12 @@ export async function POST(req: NextRequest) {
   // Discord PING — required for endpoint verification
   if (interaction.type === INTERACTION_TYPE_PING) {
     return NextResponse.json({ type: 1 });
+  }
+
+  // Dream Hub step 16: party finder (/party, /lfg, /league, Ask to join, lfg picker, import modal).
+  {
+    const res = routePartyInteraction(interaction.type, interaction as PartyInteraction);
+    if (res) return res;
   }
 
   // Dream Hub step 8: /help, /claim, /me, /guild, /away (+ /profile, step 12; /kudos, step 14).

@@ -27,6 +27,8 @@ import { KUDOS_PER_WEEK, REASON_MAX, REASON_MIN, discordSafe, giveKudos, giverSt
 import { getAccountMemberIds } from '@/lib/alt-graph';
 import { accountDiscordLevel, accountPass } from '@/lib/dream-pass-account';
 import { chatChannels, memberChannels } from '@/lib/discord-chat';
+import { PARTY_COMMAND_DEFS } from '@/lib/party-discord';
+import { PARTY_STAFF_ROLE_ID } from '@/lib/party';
 import { FIRST_SEASON, CHAT_COOLDOWN_S, CHAT_DAY_MIN, CHAT_MIN_CHARS, MAX_LEVEL, PASS_SOURCES, PASS_XP, SOURCE_ORDER, currentSeason, seasonEnd, seasonLabel, xpForLevel } from '@/lib/dream-pass';
 
 const SITE = GUIDE_SITE_URL;
@@ -779,6 +781,11 @@ const MEMBER_HELP: [string, string[]][] = [
     '`/leaderboard` Dream Pass board of this month · `board:` Discord level, activity (week / month / all time, per guild or class), streaks, most improved, Dream XP',
     '`/guide show` links to the game guide',
   ]],
+  ['🎉 Parties & leagues', [
+    '`/league list` running and upcoming leagues · `/lfg set` list yourself as looking for a party (14 days) · `/lfg clear`',
+    '`/party create name:` list your in-game party (inside your #league-party-find thread to use it) · `/party invite` · `/party league` plan / joined · `/party edit slayer:` · `/party leave` · `/party close`',
+    '-# Everything shows on the 📋 Party board in #league-party-find.',
+  ]],
   ['⚔️ Assault', [
     '`/assault status` countdowns · `/assault last` last result · `/assault plan` kill order',
     '`/assault me` your assault season + recap · `/assault checklist` your prep checklist · `/assault potions` pick your loadout · `/assault loadout`',
@@ -797,6 +804,10 @@ const STAFF_HELP: [string, string[]][] = [
     '`/bumps` bump leaderboard',
     '`/whip target:` 🔥',
   ]],
+  ['🎉 Party finder (supreme staff)', [
+    '`/league import` paste the in-game league list · `/league restrict` cursed/restricted/forsaken/banished · `/league remove` · `/league board` create/repair the board',
+    '`/party create leader:` attach a thread for someone · `/party verify` 💤 Dream party',
+  ]],
   ['🗓️ Officer+ in game', [
     '`/away set user:` / `/away end user:` holidays for people ranked below you',
   ]],
@@ -813,7 +824,7 @@ const section = ([name, lines]: [string, string[]]) => ({ name, value: lines.joi
 
 export function handleHelp(i: HubInteraction) {
   const roles = i.member?.roles ?? [];
-  const isStaff = roles.includes(LEADERSHIP_ROLE_ID) || ASSAULT_STAFF_ROLES.some((r) => roles.includes(r));
+  const isStaff = roles.includes(LEADERSHIP_ROLE_ID) || roles.includes(PARTY_STAFF_ROLE_ID) || ASSAULT_STAFF_ROLES.some((r) => roles.includes(r));
   const embeds: Record<string, unknown>[] = [
     {
       title: '🤖 DreamBot commands',
@@ -917,6 +928,7 @@ export async function registerHubCommands() {
       ],
     },
   ];
+  commands.push(...(PARTY_COMMAND_DEFS as typeof commands));
   const out: Record<string, { ok: boolean; error?: string }> = {};
   for (const c of commands) out[c.name] = await upsertGlobalCommand(c);
   return out;

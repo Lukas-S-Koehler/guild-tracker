@@ -17,6 +17,7 @@ import { GUIDE_SITE_URL } from '@/lib/game-guide';
 import { ASSAULT_ENTRY_GUILD_ID, ASSAULT_TOP_GUILD_ID, ASSAULT_TOP_MIN_CL } from '@/lib/raids';
 import { RECAP_PREFIX, assaultRecapKey, recapPayloadsFor } from '@/lib/assault-recap';
 import { KUDOS_WEEKLY_KEY, buildWeeklyShoutout, lastWeekStart } from '@/lib/kudos';
+import { PARTY_BOARD_KEY, buildPartyBoard } from '@/lib/party';
 import { getLiveRow, messageLink, publishLive, textPayloads, type LiveMode, type LivePayload, type PublishResult } from '@/lib/discord-live';
 
 /** Dream Guilds channel ids (see Claude memory reference-discord-channels). */
@@ -106,6 +107,14 @@ export const STATIC_DEFS: LiveDef[] = [
     channel: null,
     mode: 'append',
     source: 'kudos',
+  },
+  {
+    key: PARTY_BOARD_KEY,
+    label: 'Party board',
+    description: "League / Slayer party finder: upcoming leagues with Dream parties and open slots, running leagues, Slayer parties, players looking. A pinned post in #league-party-find, edited in place on every change and daily. Create it with /league board in Discord (binding here to a normal channel works too).",
+    channel: null,
+    mode: 'edit',
+    source: 'build',
   },
 ];
 
@@ -294,6 +303,7 @@ const BUILDERS: Record<string, (s: SupabaseClient) => Promise<LivePayload[]>> = 
   'guild-directory': buildGuildDirectory,
   'raid-schedule': buildRaidSchedule,
   'links-hub': buildLinksHub,
+  [PARTY_BOARD_KEY]: buildPartyBoard,
 };
 
 export const canBuild = (key: string) => key in BUILDERS;

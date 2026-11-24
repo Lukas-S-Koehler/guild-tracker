@@ -936,3 +936,54 @@ export interface DiscordMessageLite {
 export async function listMessagesAfter(channelId: string, afterId: string): Promise<DiscordMessageLite[]> {
   return discordFetch<DiscordMessageLite[]>(`/channels/${channelId}/messages?limit=100&after=${afterId}`);
 }
+
+// ─── Threads (party finder, step 16) ─────────────────────────────────────────
+
+export interface DiscordThread {
+  id: string;
+  type: number;
+  name?: string;
+  parent_id?: string | null;
+  owner_id?: string;
+  flags?: number;
+  thread_metadata?: { archived?: boolean; locked?: boolean };
+}
+
+/** Fetch a channel or thread. */
+export async function getChannel(channelId: string): Promise<DiscordThread | null> {
+  try {
+    return await discordFetch<DiscordThread>(`/channels/${channelId}`);
+  } catch {
+    return null;
+  }
+}
+
+/** Create a post (thread + starter message) in a forum channel. Starter message id = thread id. */
+export async function createForumPost(
+  forumId: string,
+  name: string,
+  message: Record<string, unknown>
+): Promise<{ ok: boolean; threadId?: string; error?: string }> {
+  try {
+    const thread = await discordFetch<{ id: string }>(`/channels/${forumId}/threads`, {
+      method: 'POST',
+      body: JSON.stringify({ name: name.slice(0, 100), auto_archive_duration: 10080, message }),
+    });
+    return { ok: true, threadId: thread.id };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+/** Patch a thread: archived / locked / flags (2 = pinned forum post) / name. Needs Manage Threads for most. */
+export async function patchThread(
+  threadId: string,
+  patch: { archived?: boolean; locked?: boolean; flags?: number; name?: string; auto_archive_duration?: number }
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await discordFetch(`/channels/${threadId}`, { method: 'PATCH', body: JSON.stringify(patch) });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
