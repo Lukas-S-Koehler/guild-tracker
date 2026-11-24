@@ -185,13 +185,10 @@ export function handleParty(i: PartyInteraction) {
       if (leaderOpt && leaderOpt !== u.id && !staff) return { content: `Only <@&${PARTY_STAFF_ROLE_ID}> can create a party for someone else.` };
       const leader = leaderOpt ?? u.id;
 
-      // Leader character: ign option, else the leader's only Dream character.
-      let ch = opt('ign') ? await resolveCharacter(supabase, String(opt('ign'))) : null;
-      if (!ch) {
-        const { data: own } = await supabase.from('members').select('id, ign').eq('discord_id', leader).eq('is_active', true);
-        if ((own ?? []).length !== 1) return { content: `Which character leads the party? Add \`ign:\`${own?.length ? ` (${own.map((c) => c.ign).join(', ')})` : ''}.` };
-        ch = { ign: own![0]!.ign as string, member_id: own![0]!.id as string, discord_id: leader };
-      }
+      // Leader character (required).
+      const ch = await resolveCharacter(supabase, String(opt('ign') ?? ''));
+      if (!ch) return { content: 'Which character leads the party? Add `ign:` (in-game name).' };
+      if (ch.discord_id && ch.discord_id !== leader) return { content: `**${ch.ign}** belongs to <@${ch.discord_id}>, not the leader.` };
       ch.discord_id = ch.discord_id ?? leader;
       const busy = await openPartyOfCharacter(supabase, ch.ign);
       if (busy) return { content: `**${ch.ign}** is already in **${busy.name}**. A character can be in one party at a time.` };
@@ -764,7 +761,7 @@ export const PARTY_COMMAND_DEFS = [
         name: 'create', type: 1, description: 'List your in-game party (run inside your #league-party-find thread to use it)',
         options: [
           { name: 'name', type: 3, description: 'Party name', required: true, max_length: 60 },
-          { name: 'ign', type: 3, description: 'Leader character (default: your only character)', required: false, autocomplete: true },
+          { name: 'ign', type: 3, description: 'Leader character (in-game name)', required: true, autocomplete: true },
           { name: 'leader', type: 6, description: 'Staff: attach for someone else (default: you)', required: false },
         ],
       },
