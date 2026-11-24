@@ -359,7 +359,6 @@ export function AltSyncTools() {
   );
 }
 
-const GUIDE_CHANNEL = '1573818767505490051';
 const GUILD_INFO_CHANNEL = '1444861407978979459';
 
 /**
@@ -374,19 +373,18 @@ function AutoModWelcomeTexts() {
     full: {
       label: 'Full (recommended)',
       text: [
-        'Welcome to the Dream Guilds, {user}! Please send your character name and combat level, that way leadership can select a guild for you. Or find the guild that fits your CL yourself in <#' + GUILD_INFO_CHANNEL + '>.',
-        'In the meantime you can check out <#' + GUIDE_CHANNEL + '> for all the important info on the game.',
+        'Welcome to the Dream Guilds, {user_mention}! Please send your character name and combat level, that way leadership can select a guild for you. Or find the guild that fits your CL yourself in <#' + GUILD_INFO_CHANNEL + '>.',
         'Already in a Dream guild? Run `/claim` so your guild roles update automatically and `/me` shows your daily check. `/help` lists every DreamBot command.',
       ].join('\n'),
     },
     short: {
       label: 'Short',
-      text: 'Welcome to the Dream Guilds, {user}! Send your character name and combat level so leadership can pick a guild for you (or find one in <#' + GUILD_INFO_CHANNEL + '>). Already in a guild? Run `/claim`.',
+      text: 'Welcome to the Dream Guilds, {user_mention}! Send your character name and combat level so leadership can pick a guild for you (or find one in <#' + GUILD_INFO_CHANNEL + '>). Already in a guild? Run `/claim`.',
     },
     current: {
       label: 'Current text + /claim line',
       text: [
-        'Welcome to the server, {user}! Please send your character name and combat level, that way leadership can select a guild for you. In the meantime you can check out <#' + GUIDE_CHANNEL + '> for all the important info on the game!',
+        'Welcome to the server, {user_mention}! Please send your character name and combat level, that way leadership can select a guild for you.',
         'Already in a Dream guild? Run `/claim` to link your Discord. Every guild is listed in <#' + GUILD_INFO_CHANNEL + '>.',
       ].join('\n'),
     },
@@ -399,7 +397,7 @@ function AutoModWelcomeTexts() {
       <div className="mt-3 space-y-2">
         <p className="text-xs text-muted-foreground">
           AutoMod keeps welcoming people because it reacts to joins instantly; DreamBot can&apos;t see joins live. Paste one of these into the AutoMod
-          welcome message. Replace <code>{'{user}'}</code> with AutoMod&apos;s own placeholder for the new member&apos;s mention.
+          welcome message. <code>{'{user_mention}'}</code> is AutoMod&apos;s placeholder that pings the new member. Visitors only see channels the Visitor role can view, so only link those (#guild-info needs View Channel for Visitor).
         </p>
         <div className="flex items-center gap-2">
           <select value={variant} onChange={(e) => { setVariant(e.target.value); setCopied(false); }} className="h-8 rounded border bg-background px-2 text-sm">
