@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { recomputeAllClaimedUsers } from '@/lib/account-service';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
+import { detectJoins } from '@/lib/recruit-service';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -171,5 +172,13 @@ export async function POST(req: NextRequest) {
     access = { error: String(err) };
   }
 
-  return NextResponse.json({ success: true, results, classes_filled, access });
+  // Recruits that showed up in a Dream guild → joined.
+  let recruits_joined: number | { error: string };
+  try {
+    recruits_joined = await detectJoins(supabase);
+  } catch (err) {
+    recruits_joined = { error: String(err) };
+  }
+
+  return NextResponse.json({ success: true, results, classes_filled, access, recruits_joined });
 }

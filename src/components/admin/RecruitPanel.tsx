@@ -1,0 +1,404 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { AlertCircle, Check, ChevronDown, ChevronRight, Copy, ExternalLink, Loader2, Search, Trash2 } from 'lucide-react';
+import { useApiClient } from '@/lib/api-client';
+import { copyToClipboard } from '@/lib/utils';
+import { TEMPLATES, type RecruitLanguage, type RecruitStatus } from '@/lib/recruit-parse';
+import type { Funnel, NearbyRow, Prospect } from '@/lib/recruit-service';
+
+/**
+ * Recruit tracker. Paste the in-game Nearby list → see who still needs checking; one click to copy
+ * the message and log it. Shared by all deputies/leaders so nobody messages the same player twice.
+ */
+
+const STATUS_LABEL: Record<RecruitStatus, string> = {
+  messaged: 'Messaged', replied: 'Replied', joined: 'Joined', declined: 'Declined',
+  skip_guild: 'Has guild', skip_weak: 'Too weak',
+};
+const STATUS_CLASS: Record<RecruitStatus, string> = {
+  messaged: 'bg-blue-500/15 text-blue-400 border-blue-500/40',
+  replied: 'bg-amber-500/15 text-amber-400 border-amber-500/40',
+  joined: 'bg-green-500/15 text-green-400 border-green-500/40',
+  declined: 'bg-red-500/15 text-red-400 border-red-500/40',
+  skip_guild: 'bg-gray-500/15 text-gray-400 border-gray-500/40',
+  skip_weak: 'bg-gray-500/15 text-gray-400 border-gray-500/40',
+};
+const profileUrl = (ign: string) => `https://web.idle-mmo.com/@${encodeURIComponent(ign)}`;
+const fmtDate = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '';
+
+function readLocal(k: string, fallback: string) {
+  try { return localStorage.getItem(k) ?? fallback; } catch { return fallback; }
+}
+function writeLocal(k: string, v: string) {
+  try { localStorage.setItem(k, v); } catch { /* private mode */ }
+}
+
+function StatusBadge({ s }: { s: RecruitStatus }) {
+  return <span className={`inline-block rounded border px-1.5 py-0.5 text-xs ${STATUS_CLASS[s]}`}>{STATUS_LABEL[s]}</span>;
+}
+
+function Name({ ign, tag }: { ign: string; tag?: string | null }) {
+  return (
+    <a href={profileUrl(ign)} target="_blank" rel="noreferrer" className="font-medium hover:underline inline-flex items-center gap-1">
+      {ign}
+      {tag && <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">{tag}</span>}
+      <ExternalLink className="h-3 w-3 opacity-50" />
+    </a>
+  );
+}
+
+function prospectLine(p: Prospect) {
+  const bits: string[] = [];
+  if (p.messaged_at) bits.push(`messaged ${fmtDate(p.messaged_at)}${p.messaged_by_name ? ` by ${p.messaged_by_name}` : ''}`);
+  if (p.status === 'skip_guild' || p.status === 'skip_weak') {
+    bits.push(`checked ${fmtDate(p.updated_at)}${p.updated_by_name ? ` by ${p.updated_by_name}` : ''}`);
+    if (p.recheck_after) bits.push(`recheck ${fmtDate(p.recheck_after)}`);
+  }
+  if (p.note) bits.push(p.note);
+  return bits.join(' · ');
+}
+
+export default function RecruitPanel() {
+  const api = useApiClient();
+  const [location, setLocation] = useState('');
+  const [lang, setLang] = useState<RecruitLanguage>('en');
+  const [prospects, setProspects] = useState<Prospect[]>([]);
+  const [funnel, setFunnel] = useState<Funnel | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLocation(readLocal('recruit.location', 'Floating Gardens'));
+    setLang(readLocal('recruit.lang', 'en') === 'de' ? 'de' : 'en');
+  }, []);
+  useEffect(() => { if (location) writeLocal('recruit.location', location); }, [location]);
+  useEffect(() => { writeLocal('recruit.lang', lang); }, [lang]);
+
+  const message = TEMPLATES[lang](location || '…');
+
+  const load = useCallback(async () => {
+    try {
+      const res = await api.get('/api/admin/recruit');
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? `Failed (${res.status})`);
+      setProspects(d.prospects);
+      setFunnel(d.funnel);
+      setErr(null);
+    } catch (e) {
+      setErr(String((e as Error).message ?? e));
+    } finally {
+      setLoading(false);
+    }
+  }, [api]);
+  useEffect(() => { load(); }, [load]);
+
+  /** Status change; returns the saved prospect so callers can update their own lists. */
+  const setStatus = async (ign: string, status: RecruitStatus, extra: Record<string, unknown> = {}) => {
+    const res = await api.post('/api/admin/recruit', { ign, status, ...extra });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { setErr(d.error ?? `Failed (${res.status})`); return null; }
+    const p = d.prospect as Prospect;
+    setProspects((prev) => [p, ...prev.filter((x) => x.id !== p.id)]);
+    return p;
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Recruiting</CardTitle>
+          <CardDescription>
+            Shared by all deputies and leaders. Players who show up in a Dream guild are marked joined automatically.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Location" className="w-48" />
+            <div className="flex rounded-md border">
+              {(['en', 'de'] as const).map((l) => (
+                <button key={l} onClick={() => setLang(l)}
+                  className={`px-3 py-1.5 text-xs uppercase ${lang === l ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}>
+                  {l}
+                </button>
+              ))}
+            </div>
+            <CopyButton text={message} label="Copy message" />
+          </div>
+          <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 p-2">{message}</p>
+          {funnel && (
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+              <span><b>{funnel.messaged}</b> messaged</span>
+              <span><b>{funnel.replied}</b> replied {funnel.messaged > 0 && <span className="text-muted-foreground">({Math.round((funnel.replied / funnel.messaged) * 100)}%)</span>}</span>
+              <span className="text-green-500"><b>{funnel.joined}</b> joined {funnel.messaged > 0 && <span className="text-muted-foreground">({Math.round((funnel.joined / funnel.messaged) * 100)}%)</span>}</span>
+              <span><b>{funnel.declined}</b> declined</span>
+              <span className="text-muted-foreground"><b>{funnel.skipped}</b> ruled out</span>
+              {funnel.by_location.length > 1 && (
+                <span className="text-muted-foreground">
+                  {funnel.by_location.map((l) => `${l.location} ${l.joined}/${l.messaged}`).join(' · ')}
+                </span>
+              )}
+            </div>
+          )}
+          {err && <p className="text-sm text-destructive flex items-center gap-1"><AlertCircle className="h-4 w-4" />{err}</p>}
+        </CardContent>
+      </Card>
+
+      <NearbyCard api={api} message={message} location={location} lang={lang} setStatus={setStatus} />
+      <ImportCard api={api} onDone={load} />
+      {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : (
+        <ProspectsCard api={api} prospects={prospects} setStatus={setStatus} reload={load} />
+      )}
+    </div>
+  );
+}
+
+function CopyButton({ text, label, onCopied, variant = 'outline' }: {
+  text: string; label: string; onCopied?: () => void; variant?: 'outline' | 'default';
+}) {
+  const [done, setDone] = useState(false);
+  return (
+    <Button size="sm" variant={variant} onClick={async () => {
+      if (await copyToClipboard(text)) {
+        setDone(true);
+        setTimeout(() => setDone(false), 1500);
+        onCopied?.();
+      }
+    }}>
+      {done ? <Check className="h-3.5 w-3.5 mr-1" /> : <Copy className="h-3.5 w-3.5 mr-1" />}{label}
+    </Button>
+  );
+}
+
+type Api = ReturnType<typeof useApiClient>;
+type SetStatus = (ign: string, status: RecruitStatus, extra?: Record<string, unknown>) => Promise<Prospect | null>;
+
+function NearbyCard({ api, message, location, lang, setStatus }: {
+  api: Api; message: string; location: string; lang: RecruitLanguage; setStatus: SetStatus;
+}) {
+  const [text, setText] = useState('');
+  const [rows, setRows] = useState<NearbyRow[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+
+  const triage = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await api.post('/api/admin/recruit/nearby', { text });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? `Failed (${res.status})`);
+      setRows(d.rows);
+    } catch (e) {
+      setErr(String((e as Error).message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const act = async (ign: string, status: RecruitStatus) => {
+    const extra = status === 'messaged' ? { location, language: lang } : { location };
+    const p = await setStatus(ign, status, extra);
+    if (p) setRows((prev) => prev?.map((r) => (r.ign === ign ? { ...r, bucket: 'done', prospect: p } : r)) ?? null);
+  };
+
+  const groups = useMemo(() => {
+    const g = { check: [] as NearbyRow[], done: [] as NearbyRow[], tagged: [] as NearbyRow[], dream: [] as NearbyRow[] };
+    for (const r of rows ?? []) (r.bucket === 'recheck' ? g.check : g[r.bucket]).push(r);
+    return g;
+  }, [rows]);
+
+  const Section = ({ id, title, items, render }: { id: string; title: string; items: NearbyRow[]; render: (r: NearbyRow) => React.ReactNode }) =>
+    items.length ? (
+      <div>
+        <button onClick={() => setOpen((o) => ({ ...o, [id]: !o[id] }))} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+          {open[id] ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}{title} ({items.length})
+        </button>
+        {open[id] && <div className="mt-1 ml-5 space-y-1 text-sm">{items.map((r) => <div key={r.ign}>{render(r)}</div>)}</div>}
+      </div>
+    ) : null;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Nearby check</CardTitle>
+        <CardDescription>Copy the Nearby Characters panel in game and paste it here. Guild tags and Dream members are filtered out.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} placeholder="Nearby Characters…" className="font-mono text-xs" />
+        <div className="flex gap-2">
+          <Button size="sm" onClick={triage} disabled={busy || !text.trim()}>
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Search className="h-3.5 w-3.5 mr-1" />}Check list
+          </Button>
+          {rows && <Button size="sm" variant="ghost" onClick={() => { setRows(null); setText(''); }}>Clear</Button>}
+        </div>
+        {err && <p className="text-sm text-destructive">{err}</p>}
+
+        {rows && (
+          <div className="space-y-3">
+            <p className="text-sm font-medium">To check ({groups.check.length})</p>
+            {groups.check.length === 0 && <p className="text-sm text-muted-foreground">Nobody new here.</p>}
+            <div className="divide-y rounded-md border">
+              {groups.check.map((r) => (
+                <div key={r.ign} className="flex flex-wrap items-center justify-between gap-2 p-2">
+                  <div className="min-w-0">
+                    <Name ign={r.ign} />
+                    <span className="ml-2 text-xs text-muted-foreground">{r.activity}</span>
+                    {r.bucket === 'recheck' && r.prospect && (
+                      <p className="text-xs text-amber-400">Recheck: was {STATUS_LABEL[r.prospect.status].toLowerCase()} on {fmtDate(r.prospect.updated_at)}{r.prospect.note ? ` (${r.prospect.note})` : ''}</p>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    <CopyButton text={message} label="Copy + messaged" variant="default" onCopied={() => act(r.ign, 'messaged')} />
+                    <Button size="sm" variant="outline" onClick={() => act(r.ign, 'skip_guild')}>Has guild</Button>
+                    <Button size="sm" variant="outline" onClick={() => act(r.ign, 'skip_weak')}>Too weak</Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <Section id="done" title="Already handled" items={groups.done} render={(r) => (
+              <span className="flex flex-wrap items-center gap-2">
+                <Name ign={r.ign} />{r.prospect && <StatusBadge s={r.prospect.status} />}
+                <span className="text-xs text-muted-foreground">{r.prospect && prospectLine(r.prospect)}</span>
+              </span>
+            )} />
+            <Section id="tagged" title="In another guild" items={groups.tagged} render={(r) => <Name ign={r.ign} tag={r.tag} />} />
+            <Section id="dream" title="Already in Dream" items={groups.dream} render={(r) => <Name ign={r.ign} />} />
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ImportCard({ api, onDone }: { api: Api; onDone: () => void }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [open, setOpen] = useState(false);
+
+  const run = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await api.post('/api/admin/recruit/import', { text });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error ?? `Failed (${res.status})`);
+      setMsg({
+        ok: true,
+        text: `${d.parsed} messages read. ${d.added} new, ${d.advanced} updated, ${d.unchanged} unchanged.${d.igns.length ? ` (${d.igns.join(', ')})` : ''}`,
+      });
+      setText('');
+      onDone();
+    } catch (e) {
+      setMsg({ ok: false, text: String((e as Error).message ?? e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3 cursor-pointer" onClick={() => setOpen((o) => !o)}>
+        <CardTitle className="text-base flex items-center gap-1">
+          {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}Import messages
+        </CardTitle>
+        <CardDescription>Paste your in-game message list. Our recruit message counts as messaged, anything else as a reply. Never moves anyone backwards.</CardDescription>
+      </CardHeader>
+      {open && (
+        <CardContent className="space-y-2">
+          <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} className="font-mono text-xs" placeholder="Paste messages (with the player links)…" />
+          <Button size="sm" onClick={run} disabled={busy || !text.trim()}>
+            {busy && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}Import
+          </Button>
+          {msg && <p className={`text-sm ${msg.ok ? 'text-green-500' : 'text-destructive'}`}>{msg.text}</p>}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+const FILTERS: { id: string; label: string; match: (p: Prospect) => boolean }[] = [
+  { id: 'open', label: 'Waiting', match: (p) => p.status === 'messaged' || p.status === 'replied' },
+  { id: 'joined', label: 'Joined', match: (p) => p.status === 'joined' },
+  { id: 'declined', label: 'Declined', match: (p) => p.status === 'declined' },
+  { id: 'skipped', label: 'Ruled out', match: (p) => p.status === 'skip_guild' || p.status === 'skip_weak' },
+  { id: 'all', label: 'All', match: () => true },
+];
+
+function ProspectsCard({ api, prospects, setStatus, reload }: {
+  api: Api; prospects: Prospect[]; setStatus: SetStatus; reload: () => void;
+}) {
+  const [filter, setFilter] = useState('open');
+  const [q, setQ] = useState('');
+  const [addIgn, setAddIgn] = useState('');
+  const shown = useMemo(() => {
+    const f = FILTERS.find((x) => x.id === filter) ?? FILTERS[0];
+    const ql = q.trim().toLowerCase();
+    return prospects.filter((p) => (ql ? p.ign.toLowerCase().includes(ql) : f.match(p)));
+  }, [prospects, filter, q]);
+
+  const editNote = async (p: Prospect) => {
+    const note = window.prompt(`Note for ${p.ign}`, p.note ?? '');
+    if (note === null) return;
+    await api.patch('/api/admin/recruit', { id: p.id, note });
+    reload();
+  };
+  const remove = async (p: Prospect) => {
+    if (!window.confirm(`Remove ${p.ign} from the recruit list?`)) return;
+    await api.delete(`/api/admin/recruit?id=${p.id}`);
+    reload();
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Players</CardTitle>
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          {FILTERS.map((f) => (
+            <Button key={f.id} size="sm" variant={filter === f.id && !q ? 'default' : 'outline'} onClick={() => { setFilter(f.id); setQ(''); }}>
+              {f.label} ({prospects.filter(f.match).length})
+            </Button>
+          ))}
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name" className="h-8 w-40" />
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="divide-y rounded-md border">
+          {shown.length === 0 && <p className="p-3 text-sm text-muted-foreground">Nobody here.</p>}
+          {shown.map((p) => (
+            <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 p-2">
+              <div className="min-w-0 space-y-0.5">
+                <div className="flex items-center gap-2"><Name ign={p.ign} /><StatusBadge s={p.status} />
+                  {p.location && <span className="text-xs text-muted-foreground">{p.location}</span>}
+                </div>
+                <p className="text-xs text-muted-foreground">{prospectLine(p)}</p>
+              </div>
+              <div className="flex items-center gap-1">
+                <select value={p.status} onChange={(e) => setStatus(p.ign, e.target.value as RecruitStatus)}
+                  className="h-8 rounded-md border bg-background px-2 text-xs">
+                  {(Object.keys(STATUS_LABEL) as RecruitStatus[]).map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+                </select>
+                <Button size="sm" variant="ghost" onClick={() => editNote(p)}>Note</Button>
+                <Button size="sm" variant="ghost" onClick={() => remove(p)} aria-label="Remove"><Trash2 className="h-3.5 w-3.5" /></Button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <form className="flex gap-2" onSubmit={async (e) => {
+          e.preventDefault();
+          if (addIgn.trim() && (await setStatus(addIgn.trim(), 'messaged'))) setAddIgn('');
+        }}>
+          <Input value={addIgn} onChange={(e) => setAddIgn(e.target.value)} placeholder="Add name as messaged" className="h-8 w-52" />
+          <Button size="sm" variant="outline" type="submit" disabled={!addIgn.trim()}>Add</Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}

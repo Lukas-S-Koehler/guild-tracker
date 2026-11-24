@@ -18,6 +18,7 @@ import AssaultAdminPanel from '@/components/admin/AssaultAdminPanel';
 import DiscordMappingPanel from '@/components/admin/DiscordMappingPanel';
 import RaidRemindersPanel from '@/components/admin/RaidRemindersPanel';
 import AdvertisingPanel from '@/components/admin/AdvertisingPanel';
+import RecruitPanel from '@/components/admin/RecruitPanel';
 import LiveMessagesPanel from '@/components/admin/LiveMessagesPanel';
 import DataManagementPanel from '@/components/admin/DataManagementPanel';
 import PriceCachePanel from '@/components/admin/PriceCachePanel';
@@ -114,6 +115,7 @@ const TABS: HubTab[] = [
     id: 'assault', label: 'Assault', icon: Swords, access: 'DEPUTY',
     subs: [
       { id: 'schedule', label: 'Schedule & pings', access: 'DEPUTY', render: () => <AssaultAdminPanel /> },
+      { id: 'recruit', label: 'Recruiting', access: 'DEPUTY', render: () => <RecruitPanel /> },
       { id: 'potions', label: 'Potions', access: 'LEADER', render: () => <RefreshPotionMetaCard /> },
     ],
   },
