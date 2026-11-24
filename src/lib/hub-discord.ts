@@ -782,7 +782,7 @@ const MEMBER_HELP: [string, string[]][] = [
     '`/guide show` links to the game guide',
   ]],
   ['🎉 Parties & leagues', [
-    '`/league list` running and upcoming leagues · `/lfg set` list yourself as looking for a party (14 days) · `/lfg clear`',
+    '`/league list` running and upcoming leagues · `/lfg set ign:` list a character as looking for a party (14 days, once per alt) · `/lfg clear`',
     '`/party create name:` list your in-game party (inside your #league-party-find thread to use it) · `/party invite ign:` (alts too, one party per character) · `/party league` plan / joined · `/party edit slayer:` · `/party leave` · `/party close`',
     '-# Everything shows on the 📋 Party board in #league-party-find.',
   ]],

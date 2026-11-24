@@ -12,8 +12,8 @@ import { bindLive, getLiveRow, messageLink } from '@/lib/discord-live';
 import {
   ASK_PREFIX, LEAGUE_SKILLS, PARTY_BOARD_KEY, PARTY_FORUM_ID, PARTY_MAX, PARTY_STAFF_ROLE_ID, RESTRICTIONS, SEEKER_DAYS, SLAYER_SKILL,
   activeSeekers, discordInfo, getLeague, getParty, importLeagues, isPartyStaff, leagueLabel, leagueState, listLiveLeagues, loadParties,
-  maybeRestricted, memberLabel, openPartyOfCharacter, openSlots, parseLeagueList, partiesOf, partyByThread, refreshPartyBoard, syncPartyCard, todayUtc,
-  type PartyFull, type Restriction,
+  characterInfo, isLocked, maybeRestricted, memberLabel, openPartyOfCharacter, openSlots, parseLeagueList, partiesOf, partyByThread, refreshPartyBoard, syncPartyCard, todayUtc,
+  type PartyFull, type Restriction, type Seeker,
 } from '@/lib/party';
 
 const EPHEMERAL = 64;
@@ -144,6 +144,10 @@ export async function handlePartyAutocomplete(i: PartyInteraction) {
         .map((m) => ({ name: `${m.ign} (${m.rank})`, value: m.ign! }))
         .filter((c) => c.name.toLowerCase().includes(q));
     }
+  } else if (focused?.name === 'ign' && i.data.name === 'lfg') {
+    const { data } = await supabase.from('members').select('ign, combat_level').eq('discord_id', caller(i)?.id ?? '').eq('is_active', true).order('ign');
+    choices = (data ?? []).map((m) => ({ name: `${m.ign}${m.combat_level ? ` · CL ${m.combat_level}` : ''}`, value: m.ign as string })).filter((c) => c.name.toLowerCase().includes(q));
+    if (q && !choices.some((c) => c.value.toLowerCase() === q)) choices.unshift({ name: `${String(focused?.value)} (outside Dream 🌐)`, value: String(focused?.value) });
   } else if (focused?.name === 'ign') {
     // Any Dream character; your own first. Free text (non-Dream characters) is allowed too.
     const me = caller(i)?.id;
@@ -275,7 +279,7 @@ export function handleParty(i: PartyInteraction) {
       if (userOpt) ch.discord_id = userOpt;
       const err = await addCharacter(supabase, p, ch, 'member');
       if (err) return { content: err };
-      if (ch.discord_id) await supabase.from('party_seekers').delete().eq('discord_id', ch.discord_id); // found a party
+      await supabase.from('party_seekers').delete().ilike('ign', ch.ign.replace(/[%_\\]/g, '\\$&')); // found a party
       const note = await afterChange(supabase, p);
       const who = ch.discord_id ? `**${ch.ign}** (<@${ch.discord_id}>)` : `**${ch.ign}**`;
       if (p.thread_id) {
@@ -333,27 +337,96 @@ export function handleParty(i: PartyInteraction) {
   });
 }
 
-/** 🙋 Ask to join (button on the party card): pings leader + officers in the thread. */
-export function handlePartyAsk(i: PartyInteraction) {
+// ─── 🙋 Ask to join (button on the party card) ───────────────────────────────
+// Asks WHICH character: the only free one directly, else a picker (+ "another character" → modal).
+// Nobody mapped (e.g. outside Dream) → modal straight away.
+
+const ASK_CHAR = 'party:askc:';
+const ASK_MODAL = 'party:askm:';
+const OTHER = '__other';
+
+/** Caller's Dream characters that are not in an open party yet. */
+async function freeCharacters(supabase: SupabaseClient, discordId: string) {
+  const { data } = await supabase.from('members').select('id, ign, combat_level').eq('discord_id', discordId).eq('is_active', true).order('ign');
+  const out: Array<{ ign: string; cl: number | null }> = [];
+  for (const c of data ?? []) if (!(await openPartyOfCharacter(supabase, c.ign as string))) out.push({ ign: c.ign as string, cl: (c.combat_level as number | null) ?? null });
+  return out;
+}
+
+const askModal = (partyId: string) =>
+  NextResponse.json({
+    type: 9,
+    data: {
+      custom_id: `${ASK_MODAL}${partyId}`,
+      title: 'Ask to join',
+      components: [{ type: 1, components: [{ type: 4, custom_id: 'ign', style: 1, label: 'Your character name (in game)', required: true, min_length: 2, max_length: 40 }] }],
+    },
+  });
+
+async function askBlocker(p: PartyFull | null): Promise<string | null> {
+  if (!p || p.closed_at) return 'This party is closed.';
+  if (!p.thread_id) return 'This party has no thread.';
+  if (isLocked(p)) return 'This party joined a league in game and is locked: no new members until it ends.';
+  if (p.members.length >= PARTY_MAX) return 'This party is full.';
+  return null;
+}
+
+/** Post the request in the party thread for one character. */
+async function postAsk(supabase: SupabaseClient, partyId: string, discordId: string, rawIgn: string): Promise<Record<string, unknown>> {
+  const p = await getParty(supabase, partyId);
+  const blocked = await askBlocker(p);
+  if (blocked) return { content: blocked };
+  const ch = await resolveCharacter(supabase, rawIgn);
+  if (!ch) return { content: 'Which character? Type its in-game name.' };
+  if (ch.discord_id && ch.discord_id !== discordId) return { content: `**${ch.ign}** belongs to someone else.` };
+  if (findChar(p!, ch.ign)) return { content: `**${ch.ign}** is already in **${p!.name}**.` };
+  const busy = await openPartyOfCharacter(supabase, ch.ign);
+  if (busy) return { content: `**${ch.ign}** is already in **${busy.name}**. Leave that party first (\`/party leave ign:${ch.ign}\`).` };
+  const info = (await characterInfo(supabase, [ch.ign])).get(ch.ign.toLowerCase());
+  const about = [info?.cl ? `CL ${info.cl}` : null, info?.tag ?? (ch.member_id ? null : '🌐 outside Dream')].filter(Boolean).join(' · ');
+  const staffIds = Array.from(new Set(p!.members.filter((m) => m.rank !== 'member' && m.discord_id).map((m) => m.discord_id!)));
+  const r = await postToChannelRich(p!.thread_id!, {
+    content: `🙋 **${ch.ign}**${about ? ` (${about})` : ''} · <@${discordId}> would like to join **${p!.name}**. ${staffIds.map((d) => `<@${d}>`).join(' ')}\n-# Leader/officers: invite in game, then \`/party invite ign:${ch.ign}\`${ch.member_id ? '' : ` user:@them`}.`,
+    allowed_mentions: { users: staffIds },
+  });
+  return { content: r.ok ? `✅ Asked with **${ch.ign}** in <#${p!.thread_id}>. The leader will get back to you there.` : `❌ Could not post in the thread: ${r.error}` };
+}
+
+export async function handlePartyAsk(i: PartyInteraction) {
   const u = caller(i);
   if (!u) return ephemeral('Could not identify you.');
-  const id = String(i.data.custom_id ?? '').slice(ASK_PREFIX.length);
-  return deferred(i, async () => {
-    const supabase = createAdminClient();
-    const p = await getParty(supabase, id);
-    if (!p || p.closed_at) return { content: 'This party is closed.' };
-    if (rankIn(p, u.id)) return { content: 'You already have a character in this party (leaders add alts with `/party invite ign:`).' };
-    if (p.members.length >= PARTY_MAX) return { content: 'This party is full.' };
-    if (!p.thread_id) return { content: 'This party has no thread.' };
-    const staffIds = Array.from(new Set(p.members.filter((m) => m.rank !== 'member' && m.discord_id).map((m) => m.discord_id!)));
-    const info = (await discordInfo(supabase, [u.id])).get(u.id);
-    const about = [info?.cl ? `CL ${info.cl}` : null, info?.tags.length ? info.tags.join('/') : null].filter(Boolean).join(' · ');
-    const r = await postToChannelRich(p.thread_id, {
-      content: `🙋 <@${u.id}>${about ? ` (${about})` : ''} would like to join **${p.name}**. ${staffIds.map((d) => `<@${d}>`).join(' ')}\n-# Leader/officers: \`/party invite ign:\` after inviting them in game.`,
-      allowed_mentions: { users: staffIds },
-    });
-    return { content: r.ok ? `✅ Asked in <#${p.thread_id}>. The leader will get back to you there.` : `❌ Could not post in the thread: ${r.error}` };
+  const partyId = String(i.data.custom_id ?? '').slice(ASK_PREFIX.length);
+  const supabase = createAdminClient();
+  const p = await getParty(supabase, partyId);
+  const blocked = await askBlocker(p);
+  if (blocked) return ephemeral(blocked);
+  const chars = await freeCharacters(supabase, u.id);
+  if (!chars.length) return askModal(partyId);
+  if (chars.length === 1) return deferred(i, () => postAsk(supabase, partyId, u.id, chars[0]!.ign));
+  const options = [
+    ...chars.slice(0, 24).map((c) => ({ label: c.ign, value: c.ign, description: c.cl ? `CL ${c.cl}` : undefined })),
+    { label: 'Another character…', value: OTHER, description: 'Type a name (e.g. a character outside Dream)' },
+  ];
+  return ephemeral(`Which character wants to join **${p!.name}**?`, {
+    components: [{ type: 1, components: [{ type: 3, custom_id: `${ASK_CHAR}${partyId}`, placeholder: 'Character…', options }] }],
   });
+}
+
+export function handleAskChar(i: PartyInteraction) {
+  const u = caller(i);
+  if (!u) return ephemeral('Could not identify you.');
+  const partyId = String(i.data.custom_id ?? '').slice(ASK_CHAR.length);
+  const ign = i.data.values?.[0] ?? '';
+  if (ign === OTHER) return askModal(partyId);
+  return deferred(i, () => postAsk(createAdminClient(), partyId, u.id, ign));
+}
+
+export function handleAskModal(i: PartyInteraction) {
+  const u = caller(i);
+  if (!u) return ephemeral('Could not identify you.');
+  const partyId = String(i.data.custom_id ?? '').slice(ASK_MODAL.length);
+  const ign = i.data.components?.[0]?.components?.find((c) => c.custom_id === 'ign')?.value ?? '';
+  return deferred(i, () => postAsk(createAdminClient(), partyId, u.id, ign));
 }
 
 // ─── /party league picker ────────────────────────────────────────────────────
@@ -433,14 +506,21 @@ export function handleLeaguePick(i: PartyInteraction) {
   return NextResponse.json({ type: 6 }); // deferred update of the picker message
 }
 
-// ─── /lfg ────────────────────────────────────────────────────────────────────
+// ─── /lfg (per character) ────────────────────────────────────────────────────
 
-const LFG_PICK = 'party:lfg';
+const LFG_PICK = 'party:lfg:';
+const seekerExpiry = () => new Date(Date.now() + SEEKER_DAYS * 86400_000).toISOString();
 
-function skillPicker(selected: string[]) {
+function skillPicker(seekerId: string, selected: string[]) {
   const options = [SLAYER_SKILL, ...LEAGUE_SKILLS].map((s) => ({ label: s, value: s, default: selected.includes(s) }));
-  return [{ type: 1, components: [{ type: 3, custom_id: LFG_PICK, placeholder: 'What are you looking for? (pick any)', min_values: 1, max_values: options.length, options }] }];
+  return [{ type: 1, components: [{ type: 3, custom_id: `${LFG_PICK}${seekerId}`, placeholder: 'What are you looking for? (pick any)', min_values: 1, max_values: options.length, options }] }];
 }
+
+const seekerLine = (s: Seeker, info: Map<string, { cl: number | null; tag: string | null }>) => {
+  const x = info.get(s.ign.toLowerCase());
+  const bits = [x?.cl ? `CL ${x.cl}` : null, x?.tag ?? (s.member_id ? null : '🌐')].filter(Boolean).join(' · ');
+  return `**${s.ign}**${bits ? ` (${bits})` : ''} · <@${s.discord_id}> · ${s.skills.join(', ') || 'anything'}${s.note ? ` · “${s.note}”` : ''}`;
+};
 
 export function handleLfg(i: PartyInteraction) {
   const u = caller(i);
@@ -450,37 +530,49 @@ export function handleLfg(i: PartyInteraction) {
   return deferred(i, async () => {
     const supabase = createAdminClient();
     if (sub?.name === 'clear') {
-      await supabase.from('party_seekers').delete().eq('discord_id', u.id);
+      const ign = opt('ign') as string | undefined;
+      let q = supabase.from('party_seekers').delete().eq('discord_id', u.id);
+      if (ign) q = q.ilike('ign', ign.replace(/[%_\\]/g, '\\$&'));
+      const { data } = await q.select('ign');
       await refreshPartyBoard(supabase);
-      return { content: '✅ You are off the "looking for a party" list.' };
+      return { content: data?.length ? `✅ Off the list: ${data.map((r) => `**${r.ign}**`).join(', ')}.` : 'Nothing to remove.' };
     }
     if (sub?.name === 'list') {
       const seekers = await activeSeekers(supabase);
-      const info = await discordInfo(supabase, seekers.map((s) => s.discord_id));
       if (!seekers.length) return { content: 'Nobody is looking right now.' };
-      return {
-        content: seekers
-          .map((s) => {
-            const x = info.get(s.discord_id);
-            return `<@${s.discord_id}>${x?.cl ? ` · CL ${x.cl}` : ''}${x?.tags.length ? ` · ${x.tags.join('/')}` : ''} · ${s.skills.join(', ') || 'anything'}${s.note ? ` · “${s.note}”` : ''}`;
-          })
-          .join('\n')
-          .slice(0, 1990),
-      };
+      const info = await characterInfo(supabase, seekers.map((s) => s.ign));
+      return { content: seekers.map((s) => seekerLine(s, info)).join('\n').slice(0, 1990) };
     }
-    // set: save the note now, skills come from the picker.
-    const { data: existing } = await supabase.from('party_seekers').select('skills').eq('discord_id', u.id).maybeSingle();
+
+    // set: which character (ign option, else your only Dream character)
+    let ch = opt('ign') ? await resolveCharacter(supabase, String(opt('ign'))) : null;
+    if (!ch) {
+      const { data: own } = await supabase.from('members').select('id, ign').eq('discord_id', u.id).eq('is_active', true);
+      if ((own ?? []).length !== 1) return { content: `Which character is looking? Add \`ign:\`${own?.length ? ` (${own.map((c) => c.ign).join(', ')})` : ' (your in-game name)'}. Run it once per alt to list several.` };
+      ch = { ign: own![0]!.ign as string, member_id: own![0]!.id as string, discord_id: u.id };
+    }
+    if (ch.discord_id && ch.discord_id !== u.id) return { content: `**${ch.ign}** belongs to someone else.` };
+    const busy = await openPartyOfCharacter(supabase, ch.ign);
+    if (busy) return { content: `**${ch.ign}** is already in **${busy.name}**. \`/party leave ign:${ch.ign}\` first.` };
+
     const note = opt('note');
-    await supabase.from('party_seekers').upsert({
+    const { data: existing } = await supabase.from('party_seekers').select('id, discord_id, skills').ilike('ign', ch.ign.replace(/[%_\\]/g, '\\$&')).maybeSingle();
+    if (existing && existing.discord_id !== u.id) return { content: `**${ch.ign}** is already listed by <@${existing.discord_id}>.` };
+    const values = {
       discord_id: u.id,
-      skills: (existing?.skills as string[] | undefined) ?? [],
-      ...(note !== undefined ? { note: safe(String(note)).slice(0, 200) || null } : {}),
-      expires_at: new Date(Date.now() + SEEKER_DAYS * 86400_000).toISOString(),
+      ign: ch.ign,
+      member_id: ch.member_id,
+      expires_at: seekerExpiry(),
       updated_at: new Date().toISOString(),
-    });
+      ...(note !== undefined ? { note: safe(String(note)).slice(0, 200) || null } : {}),
+    };
+    const saved = existing
+      ? await supabase.from('party_seekers').update(values).eq('id', existing.id).select('id, skills').single()
+      : await supabase.from('party_seekers').insert(values).select('id, skills').single();
+    if (saved.error) return { content: `❌ ${saved.error.message}` };
     return {
-      content: `Pick what you're looking for. You stay listed on the 📋 Party board for ${SEEKER_DAYS} days (run \`/lfg set\` again to renew, \`/lfg clear\` when you found one).`,
-      components: skillPicker((existing?.skills as string[] | undefined) ?? []),
+      content: `What is **${ch.ign}** looking for? Listed on the 📋 Party board for ${SEEKER_DAYS} days (\`/lfg set\` again renews, \`/lfg clear\` removes). Other alts: run \`/lfg set ign:\` for each.`,
+      components: skillPicker(saved.data.id as string, (saved.data.skills as string[]) ?? []),
     };
   });
 }
@@ -488,21 +580,22 @@ export function handleLfg(i: PartyInteraction) {
 export async function handleLfgPick(i: PartyInteraction) {
   const u = caller(i);
   if (!u) return ephemeral('Could not identify you.');
+  const seekerId = String(i.data.custom_id ?? '').slice(LFG_PICK.length);
   const allowed = new Set<string>([SLAYER_SKILL, ...LEAGUE_SKILLS]);
   const skills = (i.data.values ?? []).filter((v) => allowed.has(v));
   const supabase = createAdminClient();
-  const { error } = await supabase.from('party_seekers').upsert({
-    discord_id: u.id,
-    skills,
-    expires_at: new Date(Date.now() + SEEKER_DAYS * 86400_000).toISOString(),
-    updated_at: new Date().toISOString(),
-  });
+  const { data, error } = await supabase
+    .from('party_seekers')
+    .update({ skills, expires_at: seekerExpiry(), updated_at: new Date().toISOString() })
+    .eq('id', seekerId)
+    .eq('discord_id', u.id)
+    .select('ign');
   waitUntil(refreshPartyBoard(supabase).catch(() => undefined));
-  const until = Math.floor((Date.now() + SEEKER_DAYS * 86400_000) / 1000);
+  const until = Math.floor(Date.parse(seekerExpiry()) / 1000);
   return NextResponse.json({
     type: 7,
     data: {
-      content: error ? `❌ ${error.message}` : `✅ Listed as looking for: **${skills.join(', ')}** until <t:${until}:D>. Leaders see you on the 📋 Party board.`,
+      content: error ? `❌ ${error.message}` : !data?.length ? 'That listing is gone, run `/lfg set` again.' : `✅ **${data[0]!.ign}** listed as looking for: **${skills.join(', ')}** until <t:${until}:D>.`,
       components: [],
     },
   });
@@ -646,12 +739,14 @@ export const PARTY_COMMANDS = new Set(['party', 'lfg', 'league']);
 export function routePartyInteraction(type: number, i: PartyInteraction): Promise<NextResponse> | NextResponse | null {
   const name = i.data.name ?? '';
   const id = i.data.custom_id ?? '';
-  if (type === 4 && (name === 'party' || name === 'league')) return handlePartyAutocomplete(i);
+  if (type === 4 && (name === 'party' || name === 'league' || name === 'lfg')) return handlePartyAutocomplete(i);
   if (type === 2 && name === 'party') return handleParty(i);
   if (type === 2 && name === 'lfg') return handleLfg(i);
   if (type === 2 && name === 'league') return handleLeague(i);
   if (type === 3 && id.startsWith(ASK_PREFIX)) return handlePartyAsk(i);
-  if (type === 3 && id === LFG_PICK) return handleLfgPick(i);
+  if (type === 3 && id.startsWith(LFG_PICK)) return handleLfgPick(i);
+  if (type === 3 && id.startsWith(ASK_CHAR)) return handleAskChar(i);
+  if (type === 5 && id.startsWith(ASK_MODAL)) return handleAskModal(i);
   if (type === 3 && id.startsWith(LEAGUE_PICK)) return handleLeaguePick(i);
   if (type === 5 && id === IMPORT_MODAL) return handleLeagueImport(i);
   return null;
@@ -709,8 +804,14 @@ export const PARTY_COMMAND_DEFS = [
     name: 'lfg',
     description: 'Looking for a league or Slayer party: list yourself on the 📋 Party board',
     options: [
-      { name: 'set', type: 1, description: `List yourself for ${SEEKER_DAYS} days and pick skills`, options: [{ name: 'note', type: 3, description: 'e.g. "active daily, 2 alts"', required: false, max_length: 200 }] },
-      { name: 'clear', type: 1, description: 'Remove yourself from the list' },
+      {
+        name: 'set', type: 1, description: `List a character for ${SEEKER_DAYS} days and pick skills (once per alt)`,
+        options: [
+          { name: 'ign', type: 3, description: 'Which character (default: your only one)', required: false, autocomplete: true },
+          { name: 'note', type: 3, description: 'e.g. "active daily"', required: false, max_length: 200 },
+        ],
+      },
+      { name: 'clear', type: 1, description: 'Take a character off the list (default: all of yours)', options: [{ name: 'ign', type: 3, description: 'Which character', required: false, autocomplete: true }] },
       { name: 'list', type: 1, description: 'Who is looking right now' },
     ],
   },

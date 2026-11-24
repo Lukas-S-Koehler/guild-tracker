@@ -62,7 +62,7 @@ export interface PartyMember {
   rank: 'leader' | 'officer' | 'member';
 }
 export interface PartyLeague { party_id: string; league_id: string; status: 'planning' | 'joined' }
-export interface Seeker { discord_id: string; skills: string[]; note: string | null; expires_at: string }
+export interface Seeker { id: string; discord_id: string; ign: string; member_id: string | null; skills: string[]; note: string | null; expires_at: string }
 
 export interface PartyFull extends Party {
   members: PartyMember[];
@@ -299,6 +299,19 @@ export async function discordInfo(supabase: SupabaseClient, discordIds: string[]
   return out;
 }
 
+/** CL + guild tag per character name (lower-cased key). Unknown names are missing. */
+export async function characterInfo(supabase: SupabaseClient, igns: string[]): Promise<Map<string, { cl: number | null; tag: string | null }>> {
+  const out = new Map<string, { cl: number | null; tag: string | null }>();
+  if (!igns.length) return out;
+  const [{ data: chars }, { data: guilds }] = await Promise.all([
+    supabase.from('members').select('ign, combat_level, current_guild_id').in('ign', igns).eq('is_active', true),
+    supabase.from('guilds').select('id, nickname'),
+  ]);
+  const tag = new Map((guilds ?? []).map((g) => [g.id as string, g.nickname as string]));
+  for (const c of chars ?? []) out.set((c.ign as string).toLowerCase(), { cl: (c.combat_level as number | null) ?? null, tag: c.current_guild_id ? tag.get(c.current_guild_id as string) ?? null : null });
+  return out;
+}
+
 // ─── Party card (in the party's own thread) ──────────────────────────────────
 
 /** "**Ign** (<@discord>)"; legacy rows without a character: "<@discord> (character not set)". */
@@ -395,7 +408,7 @@ const badge = (p: Party) => (p.verified ? '💤 ' : '');
 export async function buildPartyBoard(supabase: SupabaseClient): Promise<LivePayload[]> {
   const today = todayUtc();
   const [leagues, parties, seekers] = await Promise.all([listLiveLeagues(supabase), loadParties(supabase), activeSeekers(supabase)]);
-  const info = await discordInfo(supabase, seekers.map((s) => s.discord_id));
+  const info = await characterInfo(supabase, seekers.map((s) => s.ign));
   const inLeague = (l: League) => parties.filter((p) => p.leagues.some((x) => x.league_id === l.id));
 
   const lines = [
@@ -432,11 +445,11 @@ export async function buildPartyBoard(supabase: SupabaseClient): Promise<LivePay
   lines.push(...(slayer.length ? slayer.map((p) => `${badge(p)}${threadRef(p)} · ${p.members.length}/${PARTY_MAX}${p.note ? ` · ${p.note}` : ''}`) : ['-# None right now. Leaders: `/party edit slayer:open`.']));
 
   lines.push('', '## 🙋 Looking for a party');
-  if (!seekers.length) lines.push('-# Nobody listed. `/lfg set` to list yourself for 14 days.');
+  if (!seekers.length) lines.push('-# Nobody listed. `/lfg set ign:` lists a character for 14 days.');
   for (const s of seekers) {
-    const i = info.get(s.discord_id);
-    const who = [`<@${s.discord_id}>`, i?.cl ? `CL ${i.cl}` : null, i?.tags.length ? i.tags.join('/') : null].filter(Boolean).join(' · ');
-    lines.push(`${who} · ${s.skills.length ? s.skills.join(', ') : 'anything'}${s.note ? ` · “${s.note}”` : ''}`);
+    const x = info.get(s.ign.toLowerCase());
+    const bits = [x?.cl ? `CL ${x.cl}` : null, x?.tag ?? (s.member_id ? null : '🌐')].filter(Boolean).join(' · ');
+    lines.push(`**${s.ign}**${bits ? ` (${bits})` : ''} · <@${s.discord_id}> · ${s.skills.length ? s.skills.join(', ') : 'anything'}${s.note ? ` · “${s.note}”` : ''}`);
   }
 
   const others = parties.filter((p) => !p.leagues.some((x) => leagueState(x.league, today) !== 'ended') && !p.slayer);
