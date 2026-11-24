@@ -19,26 +19,52 @@ async function apiKeysFor(userId: string): Promise<{ own: string | null; fallbac
   return { own, fallback };
 }
 
-/** Pull info + effects (+ pets when the user's own key owns the character). */
+export const API_KEY_SETTINGS_URL = 'https://web.idle-mmo.com/settings/api';
+
+const isAuthError = (e: unknown) => e instanceof Error && /API Error: (401|403)\b/.test(e.message);
+
+/**
+ * Pull info + effects + pets. Uses the user's own key; when they have none, or IdleMMO rejects it
+ * (401/403: expired, revoked, missing scope), falls back to the super admin key. Pets are public
+ * unless the owner hides them in game settings, so the fallback tries them too. `notice` tells the
+ * user why something is missing and how to fix it.
+ */
 export async function fetchCharacterSnapshot(userId: string, hashedId: string) {
   const { own, fallback } = await apiKeysFor(userId);
-  const key = own ?? fallback;
-  if (!key) throw new Error('No IdleMMO API key available — add yours in settings.');
-  const api = new IdleMMOApi(key);
+  if (!own && !fallback) throw new Error('No IdleMMO API key available — add yours in /setup.');
 
-  const [info, effects] = await Promise.all([
-    api.getCharacterInformation(hashedId),
-    api.getCharacterEffects(hashedId),
-  ]);
+  let usedFallback = !own;
+  let ownKeyRejected = false;
+  let api = new IdleMMOApi((own ?? fallback) as string);
+  const load = () => Promise.all([api.getCharacterInformation(hashedId), api.getCharacterEffects(hashedId)]);
 
-  // Pets are owner-only; a non-owner key just returns [] or errors.
+  let info: Awaited<ReturnType<IdleMMOApi['getCharacterInformation']>>;
+  let effects: Awaited<ReturnType<IdleMMOApi['getCharacterEffects']>>;
+  try {
+    [info, effects] = await load();
+  } catch (e) {
+    if (!own || !fallback || !isAuthError(e)) throw e;
+    ownKeyRejected = true;
+    usedFallback = true;
+    api = new IdleMMOApi(fallback);
+    [info, effects] = await load();
+  }
+
   let pets: Awaited<ReturnType<IdleMMOApi['getCharacterPets']>> = [];
-  if (own) {
-    try {
-      pets = await new IdleMMOApi(own).getCharacterPets(hashedId);
-    } catch {
-      pets = [];
-    }
+  try {
+    pets = await api.getCharacterPets(hashedId);
+  } catch {
+    pets = [];
+  }
+  const petsMissing = usedFallback && pets.length === 0;
+
+  let notice: string | null = null;
+  if (ownKeyRejected) {
+    notice = `IdleMMO rejected your API key (expired or revoked), so a shared key was used${
+      petsMissing ? ' and your pets could not be loaded' : ''
+    }. Create a new key at ${API_KEY_SETTINGS_URL} and save it in /setup.`;
+  } else if (petsMissing) {
+    notice = `Your pets could not be loaded (they may be hidden in your game settings). Add your own API key from ${API_KEY_SETTINGS_URL} in /setup to sync them automatically.`;
   }
 
   // pet_id → species from non-renamed pets (resolves renamed equipped pets)
@@ -87,7 +113,10 @@ export async function fetchCharacterSnapshot(userId: string, hashedId: string) {
       location_id: e.location_id,
       expire_at: e.expire_at,
     })),
-    pets_available: !!own && pets.length > 0,
+    pets_available: pets.length > 0,
+    /** true when the shared key saw no pets: keep the pets already stored instead of wiping them */
+    keep_stored_pets: petsMissing,
+    notice,
   };
 }
 
@@ -107,15 +136,15 @@ export async function syncProfile(userId: string, profileId: string, force = fal
   }
 
   const snap = await fetchCharacterSnapshot(userId, profile.hashed_id);
-  const { pets_available: _ignored, ...row } = snap;
+  const { pets_available: _ignored, keep_stored_pets, notice, pets, ...row } = snap;
   const { data, error } = await supabase
     .from('combat_profiles')
-    .update({ ...row, last_sync: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .update({ ...row, ...(keep_stored_pets ? {} : { pets }), last_sync: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq('id', profileId)
     .select(PROFILE_COLUMNS)
     .single();
   if (error) throw new Error(error.message);
-  return data;
+  return { profile: data, notice };
 }
 
 /**

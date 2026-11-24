@@ -26,8 +26,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const profile = await syncProfile(auth.user.id, id);
-    return NextResponse.json({ profile });
+    const { profile, notice } = await syncProfile(auth.user.id, id);
+    return NextResponse.json({ profile, notice });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Sync failed';
     return NextResponse.json({ error: msg }, { status: msg.startsWith('Synced recently') ? 429 : 502 });

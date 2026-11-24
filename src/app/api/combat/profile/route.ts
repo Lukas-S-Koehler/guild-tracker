@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const snap = await fetchCharacterSnapshot(auth.user.id, member.hashed_id);
-    const { pets_available, ...row } = snap;
+    const { pets_available, keep_stored_pets, notice, pets, ...row } = snap;
     const { data, error } = await supabase
       .from('combat_profiles')
       .upsert(
@@ -34,6 +34,7 @@ export async function POST(req: NextRequest) {
           member_id: member.member_id,
           hashed_id: member.hashed_id,
           ...row,
+          ...(keep_stored_pets ? {} : { pets }),
           last_sync: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         },
@@ -42,7 +43,7 @@ export async function POST(req: NextRequest) {
       .select(PROFILE_COLUMNS)
       .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ profile: data, pets_available });
+    return NextResponse.json({ profile: data, pets_available, notice });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Sync failed' }, { status: 502 });
   }

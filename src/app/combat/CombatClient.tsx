@@ -167,6 +167,8 @@ export default function CombatClient() {
   const api = useApiClient();
   const [boot, setBoot] = useState<Bootstrap | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** API key / pets warning from the last open or sync (shared key used, pets not visible). */
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [memberId, setMemberId] = useState<string | null>(null);
 
@@ -189,6 +191,7 @@ export default function CombatClient() {
       const data = await res.json();
       setBusy(null);
       if (!res.ok) return setError(data.error ?? 'Could not load character');
+      setNotice(data.notice ?? null);
       replaceProfile(data.profile);
     },
     [api, replaceProfile]
@@ -237,6 +240,7 @@ export default function CombatClient() {
     const data = await res.json();
     setBusy(null);
     if (!res.ok) return setError(data.error ?? 'Sync failed');
+    setNotice(data.notice ?? null);
     replaceProfile(data.profile);
   }
 
@@ -312,6 +316,19 @@ export default function CombatClient() {
       </div>
 
       {error && <p className="text-sm text-red-500">{error}</p>}
+      {notice && (
+        <p className="text-sm text-amber-600 dark:text-amber-400">
+          {notice.split(/(https:\/\/\S+?(?=[\s.,]*(?:\s|$))|\/setup)/).map((part, i) =>
+            part === '/setup' || part.startsWith('https://') ? (
+              <a key={i} href={part} target={part === '/setup' ? undefined : '_blank'} rel="noreferrer" className="underline">
+                {part}
+              </a>
+            ) : (
+              part
+            )
+          )}
+        </p>
+      )}
 
       {profile ? (
         <Workbench
