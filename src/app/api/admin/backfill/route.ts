@@ -4,6 +4,7 @@ import { verifyGuildLeader } from '@/lib/auth-helpers';
 import { isErrorResponse } from '@/lib/auth-helpers';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { storeActivityEvents, processActivityEvents } from '@/lib/activity-processor';
+import { recordFetchRun } from '@/lib/fetch-runs';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,9 +36,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const sinceDate = new Date();
+  sinceDate.setDate(sinceDate.getDate() - days);
   try {
-    const sinceDate = new Date();
-    sinceDate.setDate(sinceDate.getDate() - days);
 
     const api = new IdleMMOApi(config.api_key);
     const allEvents = await api.getAllGuildActivitySince(guild_id, sinceDate);
@@ -45,15 +46,22 @@ export async function POST(req: NextRequest) {
     const stored = await storeActivityEvents(allEvents, guild_id, supabase);
     const { processed, joins, leaves } = await processActivityEvents(allEvents, guild_id, supabase, config.api_key);
 
+    await recordFetchRun(supabase, { guild_id, source: 'backfill', ok: true, events: allEvents.length, covered_from: sinceDate, covered_to: new Date() });
+
+    // Only move the daily cron's cursor when this read reached back to it; otherwise the cron
+    // would skip the unread window between the old cursor and sinceDate for good.
     const { data: existingConfig } = await supabase
       .from('guild_config')
       .select('settings')
       .eq('guild_id', guild_id)
       .single();
-    await supabase
-      .from('guild_config')
-      .update({ settings: { ...(existingConfig?.settings || {}), last_fetched_at: new Date().toISOString() } })
-      .eq('guild_id', guild_id);
+    const prev = existingConfig?.settings?.last_fetched_at ? Date.parse(existingConfig.settings.last_fetched_at) : null;
+    if (prev !== null && sinceDate.getTime() <= prev - 2 * 60 * 60 * 1000) {
+      await supabase
+        .from('guild_config')
+        .update({ settings: { ...(existingConfig?.settings || {}), last_fetched_at: new Date().toISOString() } })
+        .eq('guild_id', guild_id);
+    }
 
     return NextResponse.json({
       success: true,
@@ -65,6 +73,7 @@ export async function POST(req: NextRequest) {
       leaves,
     });
   } catch (err) {
+    await recordFetchRun(supabase, { guild_id, source: 'backfill', ok: false, covered_from: sinceDate, error: String(err) });
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }

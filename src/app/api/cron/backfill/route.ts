@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { storeActivityEvents, processActivityEvents } from '@/lib/activity-processor';
+import { recordFetchRun } from '@/lib/fetch-runs';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,8 +61,10 @@ export async function POST(req: NextRequest) {
       // Estimate pages fetched (20 items per page is typical)
       const pages = Math.ceil(allEvents.length / 20);
       results[gId] = { stored, processed, pages };
+      await recordFetchRun(supabase, { guild_id: gId, source: 'backfill', ok: true, events: allEvents.length, covered_from: sinceDate, covered_to: new Date() });
     } catch (err) {
       results[gId] = { stored: 0, processed: 0, pages: 0, error: String(err) };
+      await recordFetchRun(supabase, { guild_id: gId, source: 'backfill', ok: false, covered_from: sinceDate, error: String(err) });
     }
 
     // Let rate limit window reset between guilds

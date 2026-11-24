@@ -414,7 +414,7 @@ export async function registerLeaderboardCommand(): Promise<{ ok: boolean; error
     {
       name: 'merge_alts',
       type: 5,
-      description: 'Merge alt characters into one entry (same as website toggle)',
+      description: 'Default True = one entry per account (main + alts). False = every character on its own',
       required: false,
     },
   ];

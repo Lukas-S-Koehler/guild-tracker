@@ -47,7 +47,9 @@ export interface Profile {
   main: ProfileCharacter;
   characters: ProfileCharacter[];
   tiles: MeSummary['tiles'];
-  streaks: { guild_name: string; guild_nickname: string | null; current: number; best: number; unit: 'day' | 'week' }[];
+  /** Account streak, same rule as the leaderboard. */
+  streak: MeSummary['streak'];
+  character_streaks: MeSummary['character_streaks'];
   heatmap: MeSummary['heatmap'];
   journey: MeSummary['journey'];
   feed: { at: string; kind: 'join' | 'assault' | 'achievement'; title: string; detail?: string; tone: 'good' | 'info' }[];
@@ -127,7 +129,8 @@ export async function buildProfile(
     main: toChar(s.main),
     characters: s.characters.map(toChar),
     tiles: s.tiles,
-    streaks: s.groups.map((g) => ({ guild_name: g.guild_name, guild_nickname: g.guild_nickname, ...g.streak })),
+    streak: s.streak,
+    character_streaks: s.character_streaks,
     heatmap: s.heatmap,
     journey: s.journey,
     feed: feed.slice(0, 20),

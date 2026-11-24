@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, Copy, Check } from 'lucide-react';
 import { formatGold, getRankEmoji, formatLeaderboard, copyToClipboard } from '@/lib/utils';
 import { useApiClient } from '@/lib/api-client';
-import { NetworkBoard, prettyClass, useNetworkBoards, type NetworkBoardKey } from '@/components/leaderboard/network-boards';
+import { NetworkBoard, ViewToggle, prettyClass, useNetworkBoards, type BoardView, type NetworkBoardKey } from '@/components/leaderboard/network-boards';
 
 type Period = 'week' | 'month' | 'all';
 type Filter = 'all' | 'non-locked' | 'locked';
@@ -48,7 +48,9 @@ export default function LeaderboardPage() {
   const [period, setPeriod] = useState<Period>('week');
   const [guildFilter, setGuildFilter] = useState<string>('all');
   const [filter, setFilter] = useState<Filter>('all');
-  const [merged, setMerged] = useState(false);
+  // Account (main + alts merged) is the default view; Character ranks every character on its own.
+  const [view, setView] = useState<BoardView>('account');
+  const merged = view === 'account';
   const [copied, setCopied] = useState(false);
   const [board, setBoard] = useState<Board>('pass');
   const [classFilter, setClassFilter] = useState<string>('all');
@@ -131,7 +133,7 @@ export default function LeaderboardPage() {
       </Tabs>
 
       {board !== 'activity' ? (
-        <NetworkBoard board={board} data={network.data} error={network.error} />
+        <NetworkBoard board={board} data={network.data} error={network.error} view={view} onViewChange={setView} />
       ) : (
       <Card>
         <CardHeader>
@@ -185,14 +187,7 @@ export default function LeaderboardPage() {
                 </SelectContent>
               </Select>
 
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setMerged(!merged)}
-                title={merged ? 'Switch to individual character view' : 'Switch to merged alt view'}
-              >
-                {merged ? 'Merged' : 'Individual'}
-              </Button>
+              <ViewToggle view={view} onChange={setView} />
 
               <Button variant="outline" size="sm" onClick={handleCopy} disabled={entries.length === 0}>
                 {copied ? <Check className="h-4 w-4 mr-1" /> : <Copy className="h-4 w-4 mr-1" />}

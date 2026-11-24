@@ -7,7 +7,7 @@
  * member sees the same picture staff do.
  *
  * Scopes:
- *  - account (default): every character, one daily-check row and streak per group
+ *  - account (default): every character, one daily-check row per group
  *  - group (?guild_id= or ?member_id= of a character in a Dream guild): that group's
  *    characters, logs limited to that guild
  *  - character (?member_id= of a character outside Dream): that character's history
@@ -17,6 +17,7 @@
  * Guild min_level and raid requirements are combat levels (CL), not total level.
  */
 import { loadAwayCover, withAwayEnd } from '@/lib/away';
+import { loadStreaks } from '@/lib/streak';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getAccountCharacters, type AccountCharacter } from '@/lib/account-service';
 import { DAY_BOUNDARY_OFFSET_MINUTES } from '@/lib/activity-processor';
@@ -122,7 +123,6 @@ export interface GuildGroup {
   /** Last away day while a /away holiday covers the group (no warnings meanwhile). */
   away_until: string | null;
   week_end?: string;
-  streak: { current: number; best: number; unit: 'day' | 'week' };
 }
 
 export interface MeSummary {
@@ -147,8 +147,10 @@ export interface MeSummary {
   status: { warning_level: WarningLevel; exempt: boolean; has_requirement: boolean };
   /** Scope switcher: every guild group, then characters without an active Dream guild. */
   switcher: { guild_id: string | null; member_id: string | null; label: string }[];
-  /** Only for scope=character (outside Dream): that character's own met-day streak. */
-  streak: { current: number; best: number; unit: 'day' | 'week' } | null;
+  /** Account streak (all characters + alts; holidays and unchecked days pause it): same rule as the leaderboard. */
+  streak: { current: number; best: number };
+  /** Same rule per character (the Character view). */
+  character_streaks: { member_id: string; ign: string; current: number; best: number }[];
   heatmap: { date: string; level: 0 | 1 | 2 | 3 }[];
   feed: FeedItem[];
   journey: { member_id: string; ign: string; guild_id: string; name: string; from: string; to: string; days_logged: number; current: boolean }[];
@@ -257,44 +259,6 @@ async function loadCombatLevels(
   return out;
 }
 
-/** Consecutive met days ending at `end` (or today if already met) and the best run. */
-function dayStreak(met: Set<string>, today: string, end: string) {
-  let cur = 0;
-  let d = met.has(today) ? today : end;
-  while (met.has(d)) {
-    cur++;
-    d = addDays(d, -1);
-  }
-  const sorted = Array.from(met).sort();
-  let best = 0;
-  let run = 0;
-  for (let i = 0; i < sorted.length; i++) {
-    run = i > 0 && daysBetween(sorted[i - 1], sorted[i]) === 1 ? run + 1 : 1;
-    best = Math.max(best, run);
-  }
-  return { current: cur, best: Math.max(best, cur), unit: 'day' as const };
-}
-
-/** Consecutive met ISO weeks; an unfinished current week doesn't break it. */
-function weekStreak(metWeeks: Set<string>, today: string) {
-  let cur = 0;
-  let d = today;
-  if (!metWeeks.has(getISOWeekKey(d))) d = addDays(d, -7);
-  while (metWeeks.has(getISOWeekKey(d))) {
-    cur++;
-    d = addDays(d, -7);
-  }
-  let best = 0;
-  let run = 0;
-  let prev: string | null = null;
-  for (const k of Array.from(metWeeks).sort()) {
-    run = prev && getISOWeekKey(addDays(getWeekSunday(prev), 1)) === k ? run + 1 : 1;
-    best = Math.max(best, run);
-    prev = k;
-  }
-  return { current: cur, best: Math.max(best, cur), unit: 'week' as const };
-}
-
 export async function buildMeSummary(
   userId: string,
   opts: { memberId?: string | null; guildId?: string | null },
@@ -401,14 +365,7 @@ export async function buildSummaryFor(
 
     // Last met date pooled over the group (report rules)
     let lastMet: string | null = null;
-    const perMemberWeeks = new Map<string, Record<string, number>>();
     if (cfg.period === 'weekly') {
-      for (const l of gLogs) {
-        const w = perMemberWeeks.get(l.member_id) ?? {};
-        const k = getISOWeekKey(l.log_date);
-        w[k] = (w[k] ?? 0) + gross(l, cfg.depositsOnly);
-        perMemberWeeks.set(l.member_id, w);
-      }
       const upTo: Record<string, Record<string, number>> = {};
       for (const l of gLogs) {
         if (l.log_date > reportDay) continue;
@@ -454,16 +411,6 @@ export async function buildSummaryFor(
       };
     });
 
-    // Group streak: a day/week counts when any character in the group met it
-    let streak: GuildGroup['streak'];
-    if (cfg.period === 'weekly') {
-      const metWeeks = new Set<string>();
-      perMemberWeeks.forEach((w) => Object.entries(w).forEach(([k, v]) => v >= cfg.weeklyReq && metWeeks.add(k)));
-      streak = weekStreak(metWeeks, today);
-    } else {
-      streak = dayStreak(new Set(gLogs.filter((l) => l.met_requirement).map((l) => l.log_date)), today, checkedDay);
-    }
-
     groups.push({
       guild_id: gid,
       guild_name: g.name,
@@ -481,7 +428,6 @@ export async function buildSummaryFor(
       exempt,
       away_until: awayUntil,
       week_end: cfg.period === 'weekly' ? getWeekSunday(wk) : undefined,
-      streak,
     });
   }
   groups.sort((a, b) => (guildMap.get(a.guild_id)?.display_order ?? 99) - (guildMap.get(b.guild_id)?.display_order ?? 99));
@@ -525,7 +471,11 @@ export async function buildSummaryFor(
   tiles.days_logged = loggedDays.size;
   tiles.days_met = metDays.size;
 
-  const streak = scope === 'character' ? dayStreak(metDays, today, checkedDay) : null;
+  const streaks = await loadStreaks(supabase, characters, logs);
+  const streak = streaks.account;
+  const character_streaks = streaks.characters
+    .map((c) => ({ ...c, ign: ignOf.get(c.member_id) ?? '?' }))
+    .sort((a, b) => b.current - a.current || b.best - a.best || a.ign.localeCompare(b.ign));
 
   // ---- Heatmap: last 53 weeks, best day across scope
   const dayLevel = new Map<string, 0 | 1 | 2 | 3>();
@@ -727,6 +677,7 @@ export async function buildSummaryFor(
     ],
     status,
     streak,
+    character_streaks,
     heatmap,
     feed: feed.slice(0, 25),
     journey,

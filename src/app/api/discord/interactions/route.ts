@@ -210,7 +210,9 @@ export async function POST(req: NextRequest) {
     const opts = interaction.data?.options ?? [];
     // Default board = Dream Pass; activity-only options (period, guild, class, …) without board mean activity.
     const board = opts.find((o: { name: string }) => o.name === 'board')?.value ?? (opts.length ? 'activity' : 'pass');
-    if (board !== 'activity') return handleNetworkBoard(interaction as HubInteraction, board);
+    // Account view (alts merged) is the default; merge_alts:False = per character.
+    const perChar = opts.find((o: { name: string }) => o.name === 'merge_alts')?.value === false;
+    if (board !== 'activity') return handleNetworkBoard(interaction as HubInteraction, board, perChar);
     return handleLeaderboardCommand(interaction);
   }
 
@@ -623,7 +625,7 @@ async function handleLeaderboardCommand(interaction: {
   const filter: LeaderboardFilter =
     filterRaw === 'locked' || filterRaw === 'non-locked' ? filterRaw : 'all';
   const guildFilter = (options.find((o) => o.name === 'guild')?.value as string) || null;
-  const merged = options.find((o) => o.name === 'merge_alts')?.value === true;
+  const merged = options.find((o) => o.name === 'merge_alts')?.value !== false;
   const cls = (options.find((o) => o.name === 'class')?.value as string) || null;
 
   try {
@@ -648,7 +650,7 @@ async function handleLeaderboardCommand(interaction: {
 
     const periodLabel = period === 'week' ? 'This Week' : period === 'month' ? 'This Month' : 'All Time';
     const filterLabel = filter === 'locked' ? 'Market-Locked' : filter === 'non-locked' ? 'Non-Locked' : null;
-    const mergedLabel = merged ? 'Alts merged' : null;
+    const mergedLabel = merged ? null : 'Per character';
     const classLabel = cls ? cls.charAt(0) + cls.slice(1).toLowerCase() : null;
     const combinedLabel = [filterLabel, classLabel, mergedLabel, guildLabel].filter(Boolean).join(' · ') || null;
     const content = entries.length === 0

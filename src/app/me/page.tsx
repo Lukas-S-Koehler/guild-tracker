@@ -11,7 +11,6 @@ import {
   ArrowUpCircle,
   CalendarDays,
   Coins,
-  Flame,
   History,
   Loader2,
   Map as MapIcon,
@@ -27,6 +26,7 @@ import AchievementsCard from '@/components/me/AchievementsCard';
 import PassCard from '@/components/me/PassCard';
 import Heatmap from '@/components/me/Heatmap';
 import { profilePath } from '@/lib/profile-path';
+import { StreakCard } from '@/components/streak-card';
 
 const fmt = (n: number) => n.toLocaleString('en-US');
 const compact = (n: number) =>
@@ -310,36 +310,8 @@ export default function MePage() {
           </CardContent>
         </Card>
 
-        {/* B4 Streak, per guild group */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Flame className="h-4 w-4 text-orange-400" />
-              Streak
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {data.streak ? (
-              <div>
-                <div className="text-4xl font-bold tabular-nums">{data.streak.current}<span className="text-base font-normal text-muted-foreground"> days</span></div>
-                <div className="text-sm text-muted-foreground">Best: {data.streak.best} days</div>
-              </div>
-            ) : groups.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No guild requirement to streak.</p>
-            ) : (
-              groups.map((g) => (
-                <div key={g.guild_id}>
-                  {groups.length > 1 && <div className="text-xs text-muted-foreground">{g.guild_nickname ?? g.guild_name}</div>}
-                  <div className={`${groups.length > 1 ? 'text-2xl' : 'text-4xl'} font-bold tabular-nums`}>
-                    {g.streak.current}
-                    <span className="text-base font-normal text-muted-foreground"> {g.streak.unit}{g.streak.current === 1 ? '' : 's'}</span>
-                  </div>
-                  <div className="text-xs text-muted-foreground">Best: {g.streak.best} {g.streak.unit}{g.streak.best === 1 ? '' : 's'}</div>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
+        {/* Streak: account by default, per character as a view */}
+        <StreakCard account={data.streak} characters={data.character_streaks} />
       </div>
 
       <PassCard />

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { IdleMMOApi, ActivityEvent } from '@/lib/idlemmo-api';
 import { storeActivityEvents, processActivityEvents, drainInactiveBanks } from '@/lib/activity-processor';
+import { recordFetchRun } from '@/lib/fetch-runs';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,6 +38,8 @@ export async function POST(req: NextRequest) {
 
   for (const guild of guilds) {
     const { guild_id, api_key } = guild;
+    // Feed window this run must read: from the last fetch (minus the overlap) to now.
+    let coveredFrom: Date | null = null;
 
     try {
       const api = new IdleMMOApi(api_key);
@@ -51,6 +54,7 @@ export async function POST(req: NextRequest) {
       const lastFetchedAt = existingConfig?.settings?.last_fetched_at
         ? new Date(existingConfig.settings.last_fetched_at)
         : null;
+      if (lastFetchedAt) coveredFrom = new Date(lastFetchedAt.getTime() - 2 * 60 * 60 * 1000);
 
       // Paginate until no more pages or all events are older than last fetch
       const allEvents: ActivityEvent[] = [];
@@ -91,6 +95,14 @@ export async function POST(req: NextRequest) {
       );
 
       results[guild_id] = { stored, processed, joins, leaves };
+      await recordFetchRun(supabase, {
+        guild_id,
+        source: 'cron',
+        ok: true,
+        events: allEvents.length,
+        covered_from: coveredFrom,
+        covered_to: endpointUpdatesAt ? new Date(Math.min(Date.parse(endpointUpdatesAt), Date.now())) : new Date(),
+      });
 
       // Drain bank for all active members who had no events today
       await drainInactiveBanks(guild_id, supabase);
@@ -178,6 +190,8 @@ export async function POST(req: NextRequest) {
       }
     } catch (err) {
       results[guild_id] = { stored: 0, processed: 0, joins: [], leaves: [], error: String(err) };
+      // covered_from on a failed run only marks where the unread window starts (gap days).
+      await recordFetchRun(supabase, { guild_id, source: 'cron', ok: false, covered_from: coveredFrom, error: String(err) });
     }
   }
 

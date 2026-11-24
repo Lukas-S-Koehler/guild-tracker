@@ -13,6 +13,8 @@ import {
 } from '@/lib/assault-service';
 import { listTrackedGuilds, syncRunForLaunch } from '@/lib/assault-conquest-service';
 import { buildTemplateVars, renderTemplate, todayLaunchUnix, utcDateString } from '@/lib/assault-template';
+import { runFetchWatchdog } from '@/lib/fetch-runs';
+import { createAdminClient } from '@/lib/supabase-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -118,7 +120,15 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ok: true, minute: currentHHMM, results });
+  // Activity fetch watchdog piggybacks on this tick: pg_cron keeps firing even when GitHub's cron is late.
+  let watchdog: string[] = [];
+  try {
+    watchdog = (await runFetchWatchdog(createAdminClient(), now)).alerts;
+  } catch (e) {
+    console.warn('[assault-scheduler] fetch watchdog failed', e);
+  }
+
+  return NextResponse.json({ ok: true, minute: currentHHMM, results, watchdog });
 }
 
 export async function GET(req: NextRequest) {

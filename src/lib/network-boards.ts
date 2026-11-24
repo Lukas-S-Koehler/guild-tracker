@@ -21,8 +21,15 @@ import { getAccountKeys, getDesignatedMainWeights } from '@/lib/alt-graph';
 import { rankFor } from '@/lib/achievement-ranks';
 import { FIRST_SEASON, LIFETIME, currentSeason, discordLevel, passLevel, seasonLabel } from '@/lib/dream-pass';
 import { chatStats } from '@/lib/discord-chat';
+import { accountStreak, lastCheckedDay, pauseDaysFor, type AwayRow } from '@/lib/streak';
+import { loadGapDays } from '@/lib/fetch-runs';
+
+export { accountStreak };
 
 export type NetworkBoardKey = 'pass' | 'discord' | 'streak' | 'best_streak' | 'improved' | 'dream_xp';
+/** Boards that also have a per-character view (Dream XP and Discord level are always per account). */
+export type CharBoardKey = 'streak' | 'best_streak' | 'improved';
+export const CHAR_BOARDS: CharBoardKey[] = ['streak', 'best_streak', 'improved'];
 
 export const NETWORK_BOARDS: Record<NetworkBoardKey, { label: string; emoji: string; description: string }> = {
   pass: {
@@ -75,6 +82,8 @@ export interface NetworkRow {
   stars?: number;
   rank_name?: string | null;
   rank_emoji?: string | null;
+  /** Character view: the account's main when this row is an alt. */
+  main_ign?: string;
 }
 
 export interface NetworkBoards {
@@ -84,6 +93,8 @@ export interface NetworkBoards {
   /** improved windows (inclusive). */
   windows: { before: [string, string]; after: [string, string] };
   boards: Record<NetworkBoardKey, NetworkRow[]>;
+  /** Same boards ranked per character (key = member id). */
+  char_boards: Record<CharBoardKey, NetworkRow[]>;
   classes: string[];
   /** Dream Pass months with a board, newest first (current month first). */
   pass_seasons: string[];
@@ -93,7 +104,6 @@ const DAY = 86_400_000;
 const PAGE = 1000;
 const LIMIT = 100;
 
-const dateOf = (iso: string) => iso.slice(0, 10);
 const addDays = (d: string, n: number) => new Date(Date.parse(d + 'T00:00:00Z') + n * DAY).toISOString().slice(0, 10);
 
 async function fetchAll<T>(build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
@@ -117,37 +127,12 @@ interface MemberRow {
   is_active: boolean | null;
 }
 interface LogRow { member_id: string; log_date: string; raids: number | null; gold_donated: number | null; deposits_gold: number | null; met_requirement: boolean | null }
-interface AwayRow { member_ids: string[] | null; starts_on: string; ends_on: string; ended_at: string | null }
-
-/**
- * Current + best run of met days. A day with no met log breaks the run unless it is a holiday day.
- * The current run may end on `day` or the day before (today's check may not be in yet).
- */
-export function accountStreak(metDays: Set<string>, awayDays: Set<string>, day: string): { current: number; best: number } {
-  const sorted = Array.from(metDays).sort();
-  if (!sorted.length) return { current: 0, best: 0 };
-  let best = 0;
-  let cur = 0;
-  for (let d = sorted[0]!; d <= sorted[sorted.length - 1]!; d = addDays(d, 1)) {
-    if (metDays.has(d)) best = Math.max(best, ++cur);
-    else if (!awayDays.has(d)) cur = 0;
-  }
-  let current = 0;
-  let d = metDays.has(day) || awayDays.has(day) ? day : addDays(day, -1);
-  for (;;) {
-    if (metDays.has(d)) current++;
-    else if (!awayDays.has(d)) break;
-    d = addDays(d, -1);
-    if (d < sorted[0]!) break;
-  }
-  return { current, best };
-}
 
 const score = (l: LogRow) => (l.raids ?? 0) * 1000 + (l.gold_donated ?? 0) + (l.deposits_gold ?? 0);
 
 export async function buildNetworkBoards(supabase: SupabaseClient): Promise<NetworkBoards> {
   // Last checked game day = yesterday (UTC calendar), like the activity check.
-  const day = addDays(new Date().toISOString().slice(0, 10), -1);
+  const day = lastCheckedDay();
   const after: [string, string] = [addDays(day, -6), day];
   const before: [string, string] = [addDays(day, -13), addDays(day, -7)];
 
@@ -158,6 +143,7 @@ export async function buildNetworkBoards(supabase: SupabaseClient): Promise<Netw
     supabase.from('guilds').select('id, nickname').then((r) => (r.data ?? []) as Array<{ id: string; nickname: string | null }>),
   ]);
   const tag = new Map(guilds.map((g) => [g.id, g.nickname]));
+  const gaps = await loadGapDays(supabase, day);
   const inDream = (m: MemberRow) => m.is_active !== false && !!m.current_guild_id && tag.has(m.current_guild_id);
 
   // Accounts: only those with a character in a Dream guild right now.
@@ -202,6 +188,19 @@ export async function buildNetworkBoards(supabase: SupabaseClient): Promise<Netw
   for (const c of claimRows) { const d = linkOf.get(c.user_id); if (d) claimDiscord.set(c.member_id, d); }
 
   const boards: Record<NetworkBoardKey, NetworkRow[]> = { pass: [], discord: [], streak: [], best_streak: [], improved: [], dream_xp: [] };
+  const char_boards: Record<CharBoardKey, NetworkRow[]> = { streak: [], best_streak: [], improved: [] };
+  const metOf = (ls: LogRow[]) => new Set(ls.filter((l) => l.met_requirement).map((l) => l.log_date));
+  const improvement = (ls: LogRow[]) => {
+    let b = 0;
+    let a = 0;
+    let bLogged = false;
+    let aLogged = false;
+    for (const l of ls) {
+      if (l.log_date >= before[0] && l.log_date <= before[1]) { b += score(l); bLogged = true; }
+      else if (l.log_date >= after[0] && l.log_date <= after[1]) { a += score(l); aLogged = true; }
+    }
+    return bLogged && aLogged && b > 0 && a > b ? { value: a - b, before: b, after: a } : null;
+  };
   for (const [key, ms] of Array.from(accounts)) {
     const dream = ms.filter(inDream);
     if (!dream.length) continue;
@@ -220,31 +219,33 @@ export async function buildNetworkBoards(supabase: SupabaseClient): Promise<Netw
       guild_nickname: tag.get(main.current_guild_id!) ?? null,
       alt_igns: ms.filter((m) => m.id !== main.id && m.is_active !== false).map((m) => m.ign),
     };
-    const ids = new Set(ms.map((m) => m.id));
     const accLogs = ms.flatMap((m) => logsBy.get(m.id) ?? []);
+    const chars = ms.map((m) => ({ member_id: m.id, guild_id: m.current_guild_id }));
 
-    // Streaks
-    const met = new Set(accLogs.filter((l) => l.met_requirement).map((l) => l.log_date));
-    const awayDays = new Set<string>();
-    for (const a of away) {
-      if (!a.member_ids?.some((id) => ids.has(id))) continue;
-      const end = a.ended_at && dateOf(a.ended_at) < a.ends_on ? dateOf(a.ended_at) : a.ends_on;
-      for (let d = a.starts_on; d <= end && d <= day; d = addDays(d, 1)) awayDays.add(d);
-    }
-    const s = accountStreak(met, awayDays, day);
+    // Streaks + most improved, account view
+    const s = accountStreak(metOf(accLogs), pauseDaysFor(away, gaps, chars, day), day);
     if (s.current > 0) boards.streak.push({ ...base, value: s.current });
     if (s.best > 0) boards.best_streak.push({ ...base, value: s.best });
+    const imp = improvement(accLogs);
+    if (imp) boards.improved.push({ ...base, ...imp });
 
-    // Most improved
-    let b = 0;
-    let a = 0;
-    let bLogged = false;
-    let aLogged = false;
-    for (const l of accLogs) {
-      if (l.log_date >= before[0] && l.log_date <= before[1]) { b += score(l); bLogged = true; }
-      else if (l.log_date >= after[0] && l.log_date <= after[1]) { a += score(l); aLogged = true; }
+    // Character view: every Dream character on its own
+    for (const m of dream) {
+      const own = logsBy.get(m.id) ?? [];
+      const row: Omit<NetworkRow, 'value'> = {
+        key: m.id,
+        ign: m.ign,
+        class: m.class,
+        guild_nickname: tag.get(m.current_guild_id!) ?? null,
+        alt_igns: [],
+        ...(m.id !== main.id ? { main_ign: main.ign } : {}),
+      };
+      const cs = accountStreak(metOf(own), pauseDaysFor(away, gaps, [{ member_id: m.id, guild_id: m.current_guild_id }], day), day);
+      if (cs.current > 0) char_boards.streak.push({ ...row, value: cs.current });
+      if (cs.best > 0) char_boards.best_streak.push({ ...row, value: cs.best });
+      const ci = improvement(own);
+      if (ci) char_boards.improved.push({ ...row, ...ci });
     }
-    if (bLogged && aLogged && b > 0 && a > b) boards.improved.push({ ...base, value: a - b, before: b, after: a });
 
     // Dream Pass: this season + lifetime Dream XP.
     const sxp = Math.max(0, ...ms.map((m) => seasonXp.get(m.id) ?? 0));
@@ -274,17 +275,21 @@ export async function buildNetworkBoards(supabase: SupabaseClient): Promise<Netw
     boards[k].sort((x, y) => y.value - x.value || x.ign.localeCompare(y.ign));
     boards[k] = boards[k].slice(0, LIMIT);
   }
+  for (const k of CHAR_BOARDS) {
+    char_boards[k].sort((x, y) => y.value - x.value || x.ign.localeCompare(y.ign));
+    char_boards[k] = char_boards[k].slice(0, LIMIT);
+  }
 
   const classes = Array.from(new Set(members.filter(inDream).map((m) => m.class).filter(Boolean) as string[])).sort();
   const { data: frozen } = await supabase.from('dream_pass_seasons').select('season').gte('season', FIRST_SEASON).order('season', { ascending: false }).limit(24);
   const pass_seasons = [season, ...((frozen ?? []).map((r) => r.season as string).filter((x) => x !== season))];
-  return { generated_at: new Date().toISOString(), day, windows: { before, after }, boards, classes, pass_seasons };
+  return { generated_at: new Date().toISOString(), day, windows: { before, after }, boards, char_boards, classes, pass_seasons };
 }
 
 /** Cached for 30 minutes (boards only move once a day). */
 export const getNetworkBoards = unstable_cache(
   async () => buildNetworkBoards(createAdminClient()),
-  ['network-boards-v3'],
+  ['network-boards-v4'],
   { revalidate: 1800 }
 );
 

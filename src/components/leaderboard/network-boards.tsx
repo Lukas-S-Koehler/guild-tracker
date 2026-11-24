@@ -4,11 +4,27 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useApiClient } from '@/lib/api-client';
 import { profilePath } from '@/lib/profile-path';
 import { formatGold, getRankEmoji } from '@/lib/utils';
 
 export type NetworkBoardKey = 'pass' | 'discord' | 'streak' | 'best_streak' | 'improved' | 'dream_xp';
+export type CharBoardKey = 'streak' | 'best_streak' | 'improved';
+export type BoardView = 'account' | 'character';
+export const hasCharacterView = (b: string): b is CharBoardKey => b === 'streak' || b === 'best_streak' || b === 'improved';
+
+/** Account (default) | Character toggle, shared by the leaderboard boards. */
+export function ViewToggle({ view, onChange }: { view: BoardView; onChange: (v: BoardView) => void }) {
+  return (
+    <Tabs value={view} onValueChange={(v) => onChange(v as BoardView)}>
+      <TabsList>
+        <TabsTrigger value="account" title="Main + alts as one">Account</TabsTrigger>
+        <TabsTrigger value="character" title="Every character on its own">Character</TabsTrigger>
+      </TabsList>
+    </Tabs>
+  );
+}
 
 interface Row {
   key: string;
@@ -24,12 +40,14 @@ interface Row {
   messages?: number;
   rank_name?: string | null;
   rank_emoji?: string | null;
+  main_ign?: string;
 }
 
 export interface NetworkBoardsData {
   day: string;
   windows: { before: [string, string]; after: [string, string] };
   boards: Record<NetworkBoardKey, Row[]>;
+  char_boards?: Record<CharBoardKey, Row[]>;
   classes: string[];
   pass_seasons?: string[];
 }
@@ -47,7 +65,7 @@ const BOARDS: Record<NetworkBoardKey, { title: string; description: string; unit
   },
   streak: {
     title: '🔥 Current streak',
-    description: 'Days in a row the requirement was met. Any character of the account counts; holidays pause the streak instead of breaking it.',
+    description: 'Days in a row the requirement was met. Account: any character counts. Holidays and days the daily check missed pause the streak instead of breaking it.',
     unit: 'Days',
   },
   best_streak: {
@@ -57,7 +75,7 @@ const BOARDS: Record<NetworkBoardKey, { title: string; description: string; unit
   },
   improved: {
     title: '📈 Most improved',
-    description: 'Activity score (raids × 1,000 + gold) of the last 7 checked days vs the 7 days before. Only accounts active in both weeks.',
+    description: 'Activity score (raids × 1,000 + gold) of the last 7 checked days vs the 7 days before. Only those active in both weeks.',
     unit: 'Gain',
   },
   dream_xp: {
@@ -104,7 +122,20 @@ export function useNetworkBoards() {
 
 const monthLabel = (s: string) => new Date(`${s}-01T00:00:00Z`).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 
-export function NetworkBoard({ board, data, error }: { board: NetworkBoardKey; data: NetworkBoardsData | null; error: string | null }) {
+export function NetworkBoard({
+  board,
+  data,
+  error,
+  view = 'account',
+  onViewChange,
+}: {
+  board: NetworkBoardKey;
+  data: NetworkBoardsData | null;
+  error: string | null;
+  view?: BoardView;
+  onViewChange?: (v: BoardView) => void;
+}) {
+  const perChar = view === 'character' && hasCharacterView(board);
   const api = useApiClient();
   const meta = BOARDS[board];
   const seasons = data?.pass_seasons ?? [];
@@ -120,7 +151,11 @@ export function NetworkBoard({ board, data, error }: { board: NetworkBoardKey; d
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pastMonth]);
-  const rows = pastMonth ? (past?.season === pastMonth ? past.rows : []) : data?.boards[board] ?? [];
+  const rows = pastMonth
+    ? past?.season === pastMonth ? past.rows : []
+    : perChar
+      ? data?.char_boards?.[board as CharBoardKey] ?? []
+      : data?.boards[board] ?? [];
   const ranks = places(rows);
   const description =
     board === 'improved' && data
@@ -135,6 +170,7 @@ export function NetworkBoard({ board, data, error }: { board: NetworkBoardKey; d
             <CardTitle>{meta.title}</CardTitle>
             <CardDescription>{description}</CardDescription>
           </div>
+          {hasCharacterView(board) && onViewChange && <ViewToggle view={view} onChange={onViewChange} />}
           {board === 'pass' && seasons.length > 0 && (
             <select
               aria-label="Month"
@@ -185,6 +221,7 @@ export function NetworkBoard({ board, data, error }: { board: NetworkBoardKey; d
                         {r.ign}
                       </Link>
                       {r.class && <span className="ml-1.5 text-xs text-muted-foreground">{prettyClass(r.class)}</span>}
+                      {r.main_ign && <span className="ml-1.5 text-xs text-muted-foreground">alt of {r.main_ign}</span>}
                       {r.alt_igns.length > 0 && (
                         <span className="ml-1.5 text-xs text-blue-400" title={`Alts: ${r.alt_igns.join(', ')}`}>
                           +{r.alt_igns.length} alt{r.alt_igns.length > 1 ? 's' : ''}

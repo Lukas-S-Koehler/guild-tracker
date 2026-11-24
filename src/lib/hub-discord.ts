@@ -22,7 +22,7 @@ import { buildMeAssault } from '@/lib/me-assault';
 import { personalRecapEmbed } from '@/lib/assault-recap';
 import { buildProfile, findProfileAccount } from '@/lib/profile';
 import { profilePath } from '@/lib/profile-path';
-import { NETWORK_BOARDS, getNetworkBoards, placeOf, type NetworkBoardKey } from '@/lib/network-boards';
+import { CHAR_BOARDS, NETWORK_BOARDS, getNetworkBoards, placeOf, type CharBoardKey, type NetworkBoardKey } from '@/lib/network-boards';
 import { KUDOS_PER_WEEK, REASON_MAX, REASON_MIN, discordSafe, giveKudos, giverStatus, memberIdByIgn, receivedKudos } from '@/lib/kudos';
 import { getAccountMemberIds } from '@/lib/alt-graph';
 import { accountDiscordLevel, accountPass } from '@/lib/dream-pass-account';
@@ -176,8 +176,7 @@ function groupLine(g: GuildGroup): string {
     state = g.met ? '✅ met' : g.period === 'weekly' ? `⏳ ${fmt(Math.max(0, g.required - best))}g to go` : '❌ missed';
     if (g.warning_level !== 'safe') state += ` · ${WARN[g.warning_level]} (${g.days_inactive}d)`;
   }
-  const streak = g.streak.current > 0 ? ` · 🔥 ${g.streak.current}${g.streak.unit === 'day' ? 'd' : 'w'}` : '';
-  return `**${tag}** · ${reqText} · ${state}${streak}\n-# ${g.members.map((m) => m.ign).join(', ')}`;
+  return `**${tag}** · ${reqText} · ${state}\n-# ${g.members.map((m) => m.ign).join(', ')}`;
 }
 
 export function handleMe(i: HubInteraction) {
@@ -222,6 +221,7 @@ async function mePayload(supabase: SupabaseClient, u: DiscordUser): Promise<{ pa
             { name: 'Lifetime gold', value: fmt(s.tiles.lifetime_gold), inline: true },
             { name: 'Raids', value: fmt(s.tiles.lifetime_raids), inline: true },
             { name: 'Days met', value: `${fmt(s.tiles.days_met)} / ${fmt(s.tiles.days_logged)}`, inline: true },
+            { name: 'Streak', value: `🔥 ${s.streak.current}d · best ${s.streak.best}d`, inline: true },
             ...(s.tiles.assault_runs ? [{ name: 'Assault kills', value: fmt(s.tiles.assault_kills), inline: true }] : []),
             ...(ach ? [{ name: ach.name, value: ach.value, inline: false }] : []),
             { name: 'Characters', value: s.characters.map((c) => c.ign).join(', ').slice(0, 1000) || '—', inline: false },
@@ -353,10 +353,7 @@ async function profilePayload(supabase: SupabaseClient, ign: string): Promise<{ 
   if (!account) return { payload: { content: `No Dream character called **${ign}**.` } };
   const p = await buildProfile(account, '', supabase);
   const a = p.achievements;
-  const streaks = p.streaks
-    .filter((g) => g.current > 0 || g.best > 0)
-    .map((g) => `**${g.guild_nickname ?? g.guild_name}** 🔥 ${g.current}${g.unit === 'day' ? 'd' : 'w'} (best ${g.best})`)
-    .join(' · ');
+  const streaks = p.streak.current > 0 || p.streak.best > 0 ? `🔥 ${p.streak.current}d (best ${p.streak.best}d)` : '';
   const badges = a.achievements
     .filter((x) => x.unlocked_at)
     .sort((x, y) => (x.unlocked_at! < y.unlocked_at! ? 1 : -1))
@@ -589,16 +586,19 @@ async function levelPayload(supabase: SupabaseClient, ign: string): Promise<{ pa
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 
-export function handleNetworkBoard(i: HubInteraction, boardRaw: unknown) {
+export function handleNetworkBoard(i: HubInteraction, boardRaw: unknown, perCharRaw = false) {
   const board = String(boardRaw) as NetworkBoardKey;
   const meta = NETWORK_BOARDS[board];
   if (!meta) return ephemeral('Unknown board.');
+  // Dream XP / Discord level / Dream Pass are always per account.
+  const perChar = perCharRaw && (CHAR_BOARDS as string[]).includes(board);
   return deferred(i, false, async () => {
     const data = await getNetworkBoards();
-    const rows = data.boards[board].slice(0, 10);
+    const all = perChar ? data.char_boards[board as CharBoardKey] : data.boards[board];
+    const rows = all.slice(0, 10);
     const lines = rows.map((r, idx) => {
-      const place = placeOf(data.boards[board], idx);
-      const alts = r.alt_igns.length ? ` (+${r.alt_igns.length})` : '';
+      const place = placeOf(all, idx);
+      const alts = r.main_ign ? ` (alt of ${r.main_ign})` : r.alt_igns.length ? ` (+${r.alt_igns.length})` : '';
       const tag = r.guild_nickname ? ` · ${r.guild_nickname}` : '';
       const value =
         board === 'improved'
@@ -620,7 +620,7 @@ export function handleNetworkBoard(i: HubInteraction, boardRaw: unknown) {
           url,
           color: CRYSTAL,
           description: [meta.description, '', ...(lines.length ? lines : ['_Nobody on this board yet._'])].join('\n').slice(0, 4000),
-          footer: { text: 'All Dream guilds · alts pooled into one account' },
+          footer: { text: perChar ? 'All Dream guilds · every character on its own' : 'All Dream guilds · alts pooled into one account' },
         },
       ],
       components: [row(linkButton('Full leaderboard', url))],

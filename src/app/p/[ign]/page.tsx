@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { CalendarDays, Coins, Flame, History, Loader2, Map as MapIcon, Swords, Target, UserRound, Users } from 'lucide-react';
+import { CalendarDays, Coins, History, Loader2, Map as MapIcon, Swords, Target, UserRound, Users } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import AchievementsCard from '@/components/me/AchievementsCard';
 import PassCard from '@/components/me/PassCard';
@@ -14,6 +14,7 @@ import RankingsCard from '@/components/me/RankingsCard';
 import KudosCard from '@/components/profile/KudosCard';
 import Heatmap from '@/components/me/Heatmap';
 import type { Profile } from '@/lib/profile';
+import { StreakCard } from '@/components/streak-card';
 
 const fmt = (n: number) => n.toLocaleString('en-US');
 const compact = (n: number) =>
@@ -171,31 +172,8 @@ export default function ProfilePage() {
           </CardContent>
         </Card>
 
-        {/* Streaks */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Flame className="h-4 w-4 text-orange-400" />
-              Streak
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {data.streaks.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Not in an active Dream guild right now.</p>
-            ) : (
-              data.streaks.map((g) => (
-                <div key={g.guild_name}>
-                  {data.streaks.length > 1 && <div className="text-xs text-muted-foreground">{g.guild_nickname ?? g.guild_name}</div>}
-                  <div className={`${data.streaks.length > 1 ? 'text-2xl' : 'text-4xl'} font-bold tabular-nums`}>
-                    {g.current}
-                    <span className="text-base font-normal text-muted-foreground"> {g.unit}{g.current === 1 ? '' : 's'}</span>
-                  </div>
-                  <div className="text-xs text-muted-foreground">Best: {g.best} {g.unit}{g.best === 1 ? '' : 's'}</div>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
+        {/* Streak: account by default, per character as a view */}
+        <StreakCard account={data.streak} characters={data.character_streaks} />
       </div>
 
       <div className="grid md:grid-cols-2 gap-4">
