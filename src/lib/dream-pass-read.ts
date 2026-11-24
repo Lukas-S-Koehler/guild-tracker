@@ -3,7 +3,7 @@
  * Kept apart from the evaluator so the role sync can import it without pulling in the chat reader.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { LIFETIME, currentSeason, passLevel, previousSeason, type Breakdown } from '@/lib/dream-pass';
+import { FIRST_SEASON, LIFETIME, currentSeason, passLevel, previousSeason, type Breakdown } from '@/lib/dream-pass';
 
 const PAGE = 1000;
 const chunks = <T,>(arr: T[], n = 200): T[][] => {
@@ -47,13 +47,13 @@ export async function passFor(supabase: SupabaseClient, memberIds: string[], sea
     const { count } = await supabase.from('dream_pass_scores').select('member_id', { count: 'exact', head: true }).eq('season', s).eq('is_main', true).gt('xp', xp);
     return (count ?? 0) + 1;
   };
-  const { data: mine } = await supabase.from('dream_pass_scores').select('season').in('member_id', memberIds).neq('season', LIFETIME);
+  const { data: mine } = await supabase.from('dream_pass_scores').select('season').in('member_id', memberIds).neq('season', LIFETIME).gte('season', FIRST_SEASON);
   const months = Array.from(new Set([currentSeason(), ...(mine ?? []).map((r) => r.season as string)])).sort().reverse();
   const [place, lifetimePlace, players, seasons] = await Promise.all([
     placeOf(season, cur?.xp),
     placeOf(LIFETIME, life?.xp),
     supabase.from('dream_pass_scores').select('member_id', { count: 'exact', head: true }).eq('season', season).eq('is_main', true).gt('xp', 0).then((r) => r.count ?? 0),
-    supabase.from('dream_pass_seasons').select('season, standings').order('season', { ascending: false }).limit(24),
+    supabase.from('dream_pass_seasons').select('season, standings').gte('season', FIRST_SEASON).order('season', { ascending: false }).limit(24),
   ]);
   const ids = new Set(memberIds);
   const champion = (seasons.data ?? []).flatMap((s) => {
@@ -99,7 +99,7 @@ export async function lifetimeXpByMember(supabase: SupabaseClient, memberIds?: s
 
 /** Newest finished season (for the champion role), or null. */
 export async function latestChampions(supabase: SupabaseClient): Promise<{ season: string; standings: Standing[] } | null> {
-  const { data, error } = await supabase.from('dream_pass_seasons').select('season, standings').order('season', { ascending: false }).limit(1).maybeSingle();
+  const { data, error } = await supabase.from('dream_pass_seasons').select('season, standings').gte('season', FIRST_SEASON).order('season', { ascending: false }).limit(1).maybeSingle();
   if (error || !data) return null;
   return { season: data.season as string, standings: (data.standings ?? []) as Standing[] };
 }

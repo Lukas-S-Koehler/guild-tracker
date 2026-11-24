@@ -19,7 +19,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createAdminClient } from '@/lib/supabase-server';
 import { getAccountKeys, getDesignatedMainWeights } from '@/lib/alt-graph';
 import { rankFor } from '@/lib/achievement-ranks';
-import { LIFETIME, currentSeason, discordLevel, passLevel, seasonLabel } from '@/lib/dream-pass';
+import { FIRST_SEASON, LIFETIME, currentSeason, discordLevel, passLevel, seasonLabel } from '@/lib/dream-pass';
 import { chatStats } from '@/lib/discord-chat';
 
 export type NetworkBoardKey = 'pass' | 'discord' | 'streak' | 'best_streak' | 'improved' | 'dream_xp';
@@ -276,7 +276,7 @@ export async function buildNetworkBoards(supabase: SupabaseClient): Promise<Netw
   }
 
   const classes = Array.from(new Set(members.filter(inDream).map((m) => m.class).filter(Boolean) as string[])).sort();
-  const { data: frozen } = await supabase.from('dream_pass_seasons').select('season').order('season', { ascending: false }).limit(24);
+  const { data: frozen } = await supabase.from('dream_pass_seasons').select('season').gte('season', FIRST_SEASON).order('season', { ascending: false }).limit(24);
   const pass_seasons = [season, ...((frozen ?? []).map((r) => r.season as string).filter((x) => x !== season))];
   return { generated_at: new Date().toISOString(), day, windows: { before, after }, boards, classes, pass_seasons };
 }

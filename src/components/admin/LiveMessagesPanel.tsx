@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import BumpsPanel from '@/components/admin/BumpsPanel';
 import { AlertCircle, Check, ExternalLink, Eye, Loader2, Pause, Play, RefreshCw, Unlink } from 'lucide-react';
 
 /**
@@ -211,7 +212,7 @@ function LiveCard({ item, onChange }: { item: Item; onChange: () => void }) {
   );
 }
 
-type SectionId = 'network' | 'recaps' | 'reports' | 'halls';
+type SectionId = 'network' | 'recaps' | 'reports' | 'halls' | 'bumps';
 
 const SECTIONS: { id: SectionId; label: string; note?: string; compact: boolean }[] = [
   { id: 'network', label: 'Network posts', compact: false },
@@ -227,6 +228,12 @@ const SECTIONS: { id: SectionId; label: string; note?: string; compact: boolean 
     label: 'Guild halls',
     note: "Stockpile post per guild. Needs the guild's API key and active buildings in Admin → Guilds.",
     compact: true,
+  },
+  {
+    id: 'bumps',
+    label: 'Bump tracker',
+    note: 'Bump button + Bump King announcements. Own config, not a bound live post.',
+    compact: false,
   },
 ];
 
@@ -303,6 +310,17 @@ export default function LiveMessagesPanel() {
       <div className="flex flex-wrap gap-2">
         {SECTIONS.map((s) => {
           const rows = by(s.id);
+          if (s.id === 'bumps') {
+            return (
+              <button
+                key={s.id}
+                onClick={() => { setSection(s.id); setOpen(null); }}
+                className={`rounded-full border px-3 py-1.5 text-sm transition ${section === s.id ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted/50'}`}
+              >
+                {s.label}
+              </button>
+            );
+          }
           if (!rows.length) return null;
           const live = rows.filter((i) => i.bound && i.enabled).length;
           const bad = rows.some((i) => i.last_error);
@@ -322,7 +340,9 @@ export default function LiveMessagesPanel() {
 
       {current.note && <p className="text-xs text-muted-foreground">{current.note}</p>}
 
-      {current.compact ? (
+      {section === 'bumps' ? (
+        <BumpsPanel />
+      ) : current.compact ? (
         <div className="space-y-2">
           {list.map((i) => (
             <CompactRow key={i.key} item={i} open={open === i.key} onToggle={() => setOpen(open === i.key ? null : i.key)} onChange={load} />

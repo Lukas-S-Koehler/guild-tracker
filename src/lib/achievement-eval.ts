@@ -14,7 +14,7 @@ import { lifetimeXpByMember } from '@/lib/dream-pass-read';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ACHIEVEMENTS, ACHIEVEMENT_BY_KEY, LATE_BATCHES, TIERS, grantsTitle, type Achievement, type Metric } from '@/lib/achievements';
 import { chatStats, type ChatStats } from '@/lib/discord-chat';
-import { LIFETIME, discordLevel, discordXpForLevel, seasonEnd } from '@/lib/dream-pass';
+import { FIRST_SEASON, LIFETIME, discordLevel, discordXpForLevel, seasonEnd } from '@/lib/dream-pass';
 import type { Standing } from '@/lib/dream-pass-read';
 import { getAccountKeys } from '@/lib/alt-graph';
 import { getISOWeekKey, getWeekSunday } from '@/lib/warning-calculator';
@@ -184,7 +184,7 @@ async function loadContext(supabase: SupabaseClient, members: MemberRow[], full:
       ? fetchAll<{ member_id: string; level: number }>((f, t) => supabase.from('dream_pass_scores').select('member_id, level').neq('season', LIFETIME).gt('level', 0).order('member_id').order('season').range(f, t))
       : Promise.all(chunks(ids).map((c) => fetchAll<{ member_id: string; level: number }>((f, t) => supabase.from('dream_pass_scores').select('member_id, level').neq('season', LIFETIME).gt('level', 0).in('member_id', c).order('member_id').order('season').range(f, t)))).then((r) => r.flat())
     ).catch(() => [] as Array<{ member_id: string; level: number }>),
-    fetchAll<{ season: string; standings: Standing[] }>((f, t) => supabase.from('dream_pass_seasons').select('season, standings').order('season').range(f, t)).catch(() => []),
+    fetchAll<{ season: string; standings: Standing[] }>((f, t) => supabase.from('dream_pass_seasons').select('season, standings').gte('season', FIRST_SEASON).order('season').range(f, t)).catch(() => []),
   ]);
   const passLevels = new Map<string, number>();
   for (const r of passRows) passLevels.set(r.member_id, Math.max(passLevels.get(r.member_id) ?? 0, r.level));

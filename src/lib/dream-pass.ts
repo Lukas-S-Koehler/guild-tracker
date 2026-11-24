@@ -75,6 +75,8 @@ export type Breakdown = Partial<Record<PassSource, number>>;
 // ─── Seasons ─────────────────────────────────────────────────────────────────
 
 export const LIFETIME = 'lifetime';
+/** First monthly season. Source data starts at the end of November 2025, so earlier XP counts for lifetime only. */
+export const FIRST_SEASON = '2025-12';
 /** Days after the month ends before a season is frozen and announced. */
 export const FINALIZE_GRACE_DAYS = 2;
 

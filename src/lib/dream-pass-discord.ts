@@ -9,7 +9,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getLiveRow, publishLive, textPayloads, type PublishResult } from '@/lib/discord-live';
 import { HALL_OF_FAME_KEY } from '@/lib/live-messages';
-import { LIFETIME, MAX_LEVEL, PASS_SOURCES, SOURCE_ORDER, currentSeason, seasonLabel, xpForLevel } from '@/lib/dream-pass';
+import { FIRST_SEASON, LIFETIME, MAX_LEVEL, PASS_SOURCES, SOURCE_ORDER, currentSeason, seasonLabel, xpForLevel } from '@/lib/dream-pass';
 import { PASS_LAUNCH_POST_SETTING } from '@/lib/dream-pass-settings';
 import type { Standing } from '@/lib/dream-pass-read';
 
@@ -36,7 +36,7 @@ async function topOfSeason(supabase: SupabaseClient, season: string, n: number):
 export async function buildLaunchPost(supabase: SupabaseClient): Promise<string[]> {
   const season = currentSeason();
   const [{ data: last }, top] = await Promise.all([
-    supabase.from('dream_pass_seasons').select('season, standings').order('season', { ascending: false }).limit(1).maybeSingle(),
+    supabase.from('dream_pass_seasons').select('season, standings').gte('season', FIRST_SEASON).order('season', { ascending: false }).limit(1).maybeSingle(),
     topOfSeason(supabase, season, 5),
   ]);
   const { count } = await supabase.from('dream_pass_scores').select('member_id', { count: 'exact', head: true }).eq('season', LIFETIME).eq('is_main', true).gt('xp', 0);
@@ -98,7 +98,7 @@ export async function postDreamPass(supabase: SupabaseClient): Promise<PassFeedR
   }
 
   // Season ends.
-  const { data: seasons } = await supabase.from('dream_pass_seasons').select('season, standings').is('announced_at', null).order('season');
+  const { data: seasons } = await supabase.from('dream_pass_seasons').select('season, standings').gte('season', FIRST_SEASON).is('announced_at', null).order('season');
   for (const s of seasons ?? []) {
     let result: PublishResult | 'unbound' = 'unbound';
     if (live) {

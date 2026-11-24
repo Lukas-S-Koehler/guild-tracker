@@ -18,6 +18,7 @@ import {
   contributionXp,
   currentSeason,
   passLevel,
+  FIRST_SEASON,
   seasonEnd,
   seasonOf,
   type Breakdown,
@@ -100,7 +101,7 @@ export type AccountXp = Map<string, Breakdown>;
 
 function addXp(out: AccountXp, date: string, source: PassSource, xp: number) {
   if (!xp) return;
-  const s = date === HISTORY ? HISTORY : seasonOf(date);
+  const s = date === HISTORY || seasonOf(date) < FIRST_SEASON ? HISTORY : seasonOf(date);
   const b = out.get(s) ?? {};
   b[source] = (b[source] ?? 0) + xp;
   out.set(s, b);

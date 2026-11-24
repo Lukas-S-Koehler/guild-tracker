@@ -17,7 +17,6 @@ import WarningsPanel from '@/components/warnings/WarningsPanel';
 import AssaultAdminPanel from '@/components/admin/AssaultAdminPanel';
 import DiscordMappingPanel from '@/components/admin/DiscordMappingPanel';
 import RaidRemindersPanel from '@/components/admin/RaidRemindersPanel';
-import BumpsPanel from '@/components/admin/BumpsPanel';
 import AdvertisingPanel from '@/components/admin/AdvertisingPanel';
 import LiveMessagesPanel from '@/components/admin/LiveMessagesPanel';
 import DataManagementPanel from '@/components/admin/DataManagementPanel';
@@ -121,14 +120,13 @@ const TABS: HubTab[] = [
   {
     id: 'discord', label: 'Discord', icon: MessageSquare, access: 'OFFICER',
     subs: [
-      // Promotion first: copyable ads (live data) next to the bump tracker.
-      { id: 'ads', label: 'Advertising', access: 'OFFICER', render: () => <AdvertisingPanel /> },
+      // Live messages first (bot-owned posts, incl. the bump tracker button); advertising last.
       { id: 'live', label: 'Live messages', access: 'SUPER', render: () => <LiveMessagesPanel /> },
-      { id: 'bumps', label: 'Bump tracker', access: 'SUPER', render: () => <BumpsPanel /> },
       { id: 'roles', label: 'Role sync', access: 'SUPER', render: () => <RoleSyncPanel /> },
       { id: 'mapping', label: 'Member mapping', access: 'OFFICER', render: () => <DiscordMappingPanel /> },
       { id: 'raids', label: 'Raid reminders', access: 'SUPER', render: () => <RaidRemindersPanel /> },
       { id: 'switches', label: 'Switches', access: 'SUPER', render: () => <DiscordSwitches /> },
+      { id: 'ads', label: 'Advertising', access: 'OFFICER', render: () => <AdvertisingPanel /> },
     ],
   },
   {

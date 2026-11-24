@@ -27,7 +27,7 @@ import { KUDOS_PER_WEEK, REASON_MAX, REASON_MIN, discordSafe, giveKudos, giverSt
 import { getAccountMemberIds } from '@/lib/alt-graph';
 import { accountDiscordLevel, accountPass } from '@/lib/dream-pass-account';
 import { chatChannels, memberChannels } from '@/lib/discord-chat';
-import { CHAT_COOLDOWN_S, CHAT_DAY_MIN, CHAT_MIN_CHARS, MAX_LEVEL, PASS_SOURCES, PASS_XP, SOURCE_ORDER, currentSeason, seasonEnd, seasonLabel, xpForLevel } from '@/lib/dream-pass';
+import { FIRST_SEASON, CHAT_COOLDOWN_S, CHAT_DAY_MIN, CHAT_MIN_CHARS, MAX_LEVEL, PASS_SOURCES, PASS_XP, SOURCE_ORDER, currentSeason, seasonEnd, seasonLabel, xpForLevel } from '@/lib/dream-pass';
 
 const SITE = GUIDE_SITE_URL;
 const CRYSTAL = 0x4cc9f0;
@@ -482,7 +482,7 @@ export function handlePass(i: HubInteraction) {
 export async function handlePassAutocomplete(i: HubInteraction) {
   const q = String(i.data.options?.find((o) => o.focused)?.value ?? '').toLowerCase();
   const supabase = createAdminClient();
-  const { data } = await supabase.from('dream_pass_seasons').select('season').order('season', { ascending: false }).limit(24);
+  const { data } = await supabase.from('dream_pass_seasons').select('season').gte('season', FIRST_SEASON).order('season', { ascending: false }).limit(24);
   const seasons = [currentSeason(), ...(data ?? []).map((r) => r.season as string)];
   const choices = seasons
     .map((s, idx) => ({ name: `${seasonLabel(s)}${idx === 0 ? ' (this month)' : ''}`, value: s }))
