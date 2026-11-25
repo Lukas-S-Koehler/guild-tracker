@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { postToChannelReturnId, postToChannelRich } from '@/lib/discord-api';
-import { rsvpComponents } from '@/lib/assault-rsvp-discord';
+import { rsvpComponents } from '@/lib/assault-rsvp';
 import {
   listAssaultConfigs,
   listSteps,

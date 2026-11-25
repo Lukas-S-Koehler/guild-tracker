@@ -6,6 +6,7 @@ import { getAllClaimLocks } from '@/lib/account-service';
 import { huntingBow } from '@/lib/combat/hunting-gear';
 import { mergeGoals } from '@/lib/roster-goals';
 import { RSVP_STATUSES, nextWaveUnix, setRsvp, type RsvpStatus } from '@/lib/assault-rsvp';
+import { refreshRosterBoardSoon } from '@/lib/roster-discord';
 import { RANK, rankInGuild } from '@/lib/role-hierarchy';
 
 export const dynamic = 'force-dynamic';
@@ -73,6 +74,7 @@ export async function PATCH(req: NextRequest) {
     const wave = await nextWaveUnix(row.guild_id);
     if (!wave) return NextResponse.json({ error: 'No upcoming wave scheduled' }, { status: 400 });
     await setRsvp({ guildId: row.guild_id, waveUnix: wave, memberIds: [row.member_id], status: body.rsvp, source: 'web', userId: user.id }, supabase);
+    refreshRosterBoardSoon(row.guild_id);
     return NextResponse.json({ ok: true });
   }
 

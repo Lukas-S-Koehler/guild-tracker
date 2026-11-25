@@ -18,6 +18,7 @@ import { ASSAULT_ENTRY_GUILD_ID, ASSAULT_TOP_GUILD_ID, ASSAULT_TOP_MIN_CL } from
 import { RECAP_PREFIX, assaultRecapKey, recapPayloadsFor } from '@/lib/assault-recap';
 import { KUDOS_WEEKLY_KEY, buildWeeklyShoutout, lastWeekStart } from '@/lib/kudos';
 import { PARTY_BOARD_KEY, buildPartyBoard } from '@/lib/party';
+import { ROSTER_PREFIX, rosterKey, rosterPayloadsFor } from '@/lib/roster-discord';
 import { getLiveRow, messageLink, publishLive, textPayloads, type LiveMode, type LivePayload, type PublishResult } from '@/lib/discord-live';
 
 /** Dream Guilds channel ids (see Claude memory reference-discord-channels). */
@@ -193,9 +194,29 @@ export async function assaultRecapDefs(supabase: SupabaseClient): Promise<LiveDe
   }));
 }
 
+/** Assault roster board per assault guild: next wave RSVP, team goals, setup needed. Edited in place. */
+export async function assaultRosterDefs(supabase: SupabaseClient): Promise<LiveDef[]> {
+  const [{ data: guilds }, { data: cfgs }] = await Promise.all([
+    supabase.from('guilds').select('id, name').eq('is_assault', true).order('name'),
+    supabase.from('assault_configs').select('guild_id, announcement_channel_id'),
+  ]);
+  const channel = new Map((cfgs ?? []).map((c: { guild_id: string; announcement_channel_id: string | null }) => [c.guild_id, c.announcement_channel_id]));
+  return (guilds ?? []).map((g: { id: string; name: string }) => ({
+    key: rosterKey(g.id),
+    label: `Assault roster · ${g.name}`,
+    description: "Next wave RSVP (with I'm in / Maybe / Out buttons), team goal progress, who still needs setup, top hunters. Edited in place daily and after every RSVP.",
+    channel: channel.get(g.id) ?? null,
+    mode: 'edit' as const,
+    pin: true,
+    source: 'build' as const,
+  }));
+}
+
 export async function allDefs(supabase: SupabaseClient): Promise<LiveDef[]> {
-  const [inactivity, halls, recaps] = await Promise.all([inactivityDefs(supabase), guildHallDefs(supabase), assaultRecapDefs(supabase)]);
-  return [...STATIC_DEFS, ...inactivity, ...halls, ...recaps];
+  const [inactivity, halls, recaps, rosters] = await Promise.all([
+    inactivityDefs(supabase), guildHallDefs(supabase), assaultRecapDefs(supabase), assaultRosterDefs(supabase),
+  ]);
+  return [...STATIC_DEFS, ...inactivity, ...halls, ...recaps, ...rosters];
 }
 
 export const findStaticDef = (key: string) => STATIC_DEFS.find((d) => d.key === key) ?? null;
@@ -293,7 +314,7 @@ async function buildLinksHub(supabase: SupabaseClient): Promise<LivePayload[]> {
     '## 🤖 DreamBot commands',
     '`/claim` link your Discord + claim your character · `/me` daily check and streaks · `/pass` your Dream Pass · `/away` holiday',
     '`/guild` any guild at a glance · `/raid` raid times · `/leaderboard` activity ranks · `/kudos give` thank someone',
-    '`/assault me` your assault season · `/assault checklist` prep checklist · `/assault status` assault countdowns · `/guide show` guide links',
+    '`/assault me` your assault season · `/assault checklist` prep checklist · `/assault status` assault countdowns · `/roster` assault roster · `/guide show` guide links',
     '-# `/help` lists every command, including the staff ones.',
   ];
   return textPayloads(lines);
@@ -306,11 +327,12 @@ const BUILDERS: Record<string, (s: SupabaseClient) => Promise<LivePayload[]>> = 
   [PARTY_BOARD_KEY]: buildPartyBoard,
 };
 
-export const canBuild = (key: string) => key in BUILDERS;
+export const canBuild = (key: string) => key in BUILDERS || key.startsWith(ROSTER_PREFIX);
 
 /** Fresh payloads for a buildable key; for auto-warn keys, the last stored copy (or null). */
 export async function payloadsFor(supabase: SupabaseClient, key: string): Promise<LivePayload[] | null> {
   if (BUILDERS[key]) return BUILDERS[key](supabase);
+  if (key.startsWith(ROSTER_PREFIX)) return rosterPayloadsFor(supabase, key);
   if (key.startsWith(RECAP_PREFIX)) return recapPayloadsFor(supabase, key);
   if (key === KUDOS_WEEKLY_KEY) return buildWeeklyShoutout(supabase, lastWeekStart());
   return (await getLiveRow(supabase, key))?.payloads ?? null;
@@ -333,6 +355,14 @@ export async function refreshBuiltLive(supabase: SupabaseClient, force = false) 
     if (!row) continue;
     try {
       out[def.key] = await publishLive(supabase, def.key, await BUILDERS[def.key](supabase), { mode: def.mode, pin: def.pin, force });
+    } catch (err) {
+      out[def.key] = { ok: false, status: 'error', message_ids: [], error: String(err) };
+    }
+  }
+  for (const def of await assaultRosterDefs(supabase)) {
+    if (!(await getLiveRow(supabase, def.key))) continue;
+    try {
+      out[def.key] = await publishLive(supabase, def.key, await rosterPayloadsFor(supabase, def.key), { mode: def.mode, pin: def.pin, force });
     } catch (err) {
       out[def.key] = { ok: false, status: 'error', message_ids: [], error: String(err) };
     }

@@ -7,22 +7,11 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { getAccountCharacters } from '@/lib/account-service';
-import { RSVP_STATUSES, setRsvp, type RsvpStatus } from '@/lib/assault-rsvp';
+import { RSVP_LABEL, RSVP_STATUSES, rsvpComponents, setRsvp, type RsvpStatus } from '@/lib/assault-rsvp';
+import { refreshRosterBoardSoon } from '@/lib/roster-discord';
 
-const LABEL: Record<RsvpStatus, string> = { in: "I'm in", maybe: 'Maybe', out: "Can't make it" };
-
-export function rsvpComponents(guildId: string, waveUnix: number) {
-  return [
-    {
-      type: 1,
-      components: [
-        { type: 2, style: 3, label: LABEL.in, custom_id: `rsvp:${guildId}:${waveUnix}:in` },
-        { type: 2, style: 2, label: LABEL.maybe, custom_id: `rsvp:${guildId}:${waveUnix}:maybe` },
-        { type: 2, style: 4, label: LABEL.out, custom_id: `rsvp:${guildId}:${waveUnix}:out` },
-      ],
-    },
-  ];
-}
+const LABEL = RSVP_LABEL;
+export { rsvpComponents };
 
 const ephemeral = (content: string) => NextResponse.json({ type: 4, data: { content, flags: 64 } });
 
@@ -65,6 +54,7 @@ export async function handleRsvpComponent(interaction: {
   if (!eligible.length) return ephemeral('Your characters here are marked as not assaulting. Ask staff if that changed.');
 
   await setRsvp({ guildId, waveUnix, memberIds: eligible.map((r) => r.member_id as string), status: status as RsvpStatus, source: 'discord', discordId }, supabase);
+  refreshRosterBoardSoon(guildId);
   const names = eligible.map((r) => r.ign).join(', ');
   return ephemeral(`${status === 'in' ? '✅' : status === 'maybe' ? '🤔' : '❌'} **${LABEL[status as RsvpStatus]}** for the wave <t:${waveUnix}:R> · ${names}. Change it any time with the buttons or on the assault roster.`);
 }

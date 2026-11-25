@@ -11,7 +11,7 @@ import { SUPER_ADMIN_EMAIL } from '@/lib/auth-helpers';
 import { ensureCustomPets } from '@/lib/combat/custom-pets-server';
 import { resolveSpeciesName, petTier, PET_STATS } from '@/lib/combat/pet-data';
 import { petHuntEstimate, squadHuntPower, petSquadSize, HUNT_STABLE_SIZE, type PetHuntEstimate } from '@/lib/combat/pet-hunting';
-import { huntingBow, type HuntingBow } from '@/lib/combat/hunting-gear';
+import { huntingBow, PET_EGGS, type HuntingBow } from '@/lib/combat/hunting-gear';
 import {
   applyBuffs, buildCharacterStats, slayerByEnemy, NO_BUFFS, ZERO_STATS,
   type ApiEffect, type BuffState, type GearItem, type GearSelection, type StatLevels,
@@ -125,6 +125,9 @@ export interface RosterRow {
     scaleFixed: boolean;
     /** Highest scaled level where EVERY zone enemy still dies in 2 hits; null if not all 2 hits at base. */
     max2HitLevel: number | null;
+    /** Best battle species per buyable quality (Epic, Legendary) at L100 for this character, best first:
+     *  fewest hits, then least damage taken (defence saves food), then most damage. */
+    bestSpecies: Record<'Epic' | 'Legendary', string[]>;
     /** Cheapest single gear swap (base tier, market price) that reaches the next battle tier. */
     upgrade: { item: string; slot: string; price: number; toTier: number } | null;
   };
@@ -454,6 +457,26 @@ export async function buildRoster(
       bestFighter = top.f;
     }
 
+    // Best species to buy per quality, judged for battling (hits, then damage taken, then damage).
+    const bestSpecies: Record<'Epic' | 'Legendary', string[]> = { Epic: [], Legendary: [] };
+    if (zoneEnemies.length) {
+      for (const q of ['Epic', 'Legendary'] as const) {
+        bestSpecies[q] = Object.values(PET_STATS)
+          .filter((p) => p.quality === q && petTier(p.name) === q && PET_EGGS[p.name] && PET_EGGS[p.name].kind !== 'none')
+          .map((p) => {
+            const ms = hitsAt(fighterWith({ species: p.name, level: 100, evolution: 0 }), zoneEnemies, slayer, null);
+            return {
+              name: p.name,
+              hits: ms.reduce((t, m) => t + (m.hits ?? 99), 0),
+              taken: ms.reduce((t, m) => t + m.damageTakenPerKill, 0),
+              dmg: ms.reduce((t, m) => t + m.damage, 0),
+            };
+          })
+          .sort((a, b) => a.hits - b.hits || a.taken - b.taken || b.dmg - a.dmg)
+          .map((x) => x.name);
+      }
+    }
+
     const computed = gearSet && zoneEnemies.length > 0 && !!bestFighter;
     const fighter = bestFighter ?? fighterWith(null);
     const enemyHits = computed
@@ -520,6 +543,7 @@ export async function buildRoster(
         scaleMax: scale.max,
         scaleFixed: scale.fixed,
         max2HitLevel: curMax2,
+        bestSpecies,
         upgrade,
       },
       hunting: {

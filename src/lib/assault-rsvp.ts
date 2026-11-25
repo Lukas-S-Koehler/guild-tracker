@@ -49,3 +49,19 @@ export async function setRsvp(
   );
   if (error) throw new Error(error.message);
 }
+
+export const RSVP_LABEL: Record<RsvpStatus, string> = { in: "I'm in", maybe: 'Maybe', out: "Can't make it" };
+
+export function rsvpComponents(guildId: string, waveUnix: number) {
+  return [
+    {
+      type: 1,
+      components: [
+        { type: 2, style: 3, label: RSVP_LABEL.in, custom_id: `rsvp:${guildId}:${waveUnix}:in` },
+        { type: 2, style: 2, label: RSVP_LABEL.maybe, custom_id: `rsvp:${guildId}:${waveUnix}:maybe` },
+        { type: 2, style: 4, label: RSVP_LABEL.out, custom_id: `rsvp:${guildId}:${waveUnix}:out` },
+      ],
+    },
+  ];
+}
+

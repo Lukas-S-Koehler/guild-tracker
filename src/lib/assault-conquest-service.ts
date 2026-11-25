@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase-server';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
+import { nextWaveUnix, rsvpComponents } from '@/lib/assault-rsvp';
 import { postToChannelRich } from '@/lib/discord-api';
 import { formatGold } from '@/lib/utils';
 import { COLORS, podium, statFields, siteUrl, linkRow } from '@/lib/assault-embed';
@@ -347,7 +348,19 @@ export async function postFinalizeEmbed(
     footer: { text: `Season ${run.season_number ?? '?'} · ${final ? 'Final' : 'Interim'} · full stats on the website` },
   };
 
-  const res = await postToChannelRich(config.announcement_channel_id, { embeds: [embed], components: [linkRow('/assault/stats', 'Full stats & hall of fame')] });
+  // Final summary opens the RSVP for the next wave, so opt-in members decide early and can hunt for it.
+  const nextWave = final ? await nextWaveUnix(config.guild_id).catch(() => null) : null;
+  if (nextWave) {
+    (embed.fields as { name: string; value: string; inline?: boolean }[]).push({
+      name: '📅 Next wave',
+      value: `<t:${nextWave}:F> (<t:${nextWave}:R>). Are you in? Answer below so you can start hunting for it.`,
+      inline: false,
+    });
+  }
+  const res = await postToChannelRich(config.announcement_channel_id, {
+    embeds: [embed],
+    components: [linkRow('/assault/stats', 'Full stats & hall of fame'), ...(nextWave ? rsvpComponents(config.guild_id, nextWave) : [])],
+  });
   if (!res.ok) return null;
 
   if (res.messageId && final) {

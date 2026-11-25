@@ -22,6 +22,7 @@ import { buildMeAssault } from '@/lib/me-assault';
 import { personalRecapEmbed } from '@/lib/assault-recap';
 import { buildProfile, findProfileAccount } from '@/lib/profile';
 import { profilePath } from '@/lib/profile-path';
+import { ROSTER_COMMAND } from '@/lib/roster-discord';
 import { CHAR_BOARDS, NETWORK_BOARDS, getNetworkBoards, placeOf, type CharBoardKey, type NetworkBoardKey } from '@/lib/network-boards';
 import { KUDOS_PER_WEEK, REASON_MAX, REASON_MIN, discordSafe, giveKudos, giverStatus, memberIdByIgn, receivedKudos } from '@/lib/kudos';
 import { getAccountMemberIds } from '@/lib/alt-graph';
@@ -789,6 +790,7 @@ const MEMBER_HELP: [string, string[]][] = [
   ['⚔️ Assault', [
     '`/assault status` countdowns · `/assault last` last result · `/assault plan` kill order',
     '`/assault me` your assault season + recap · `/assault checklist` your prep checklist · `/assault potions` pick your loadout · `/assault loadout`',
+    '`/roster` your assault guild\'s roster (next wave, goals, setup) · `/roster ign:` one member\'s setup, tiers and next best move',
     '`/assault top` · `/assault season` · `/assault zones` rankings',
     '`/assault conquest-info` how conquest works',
   ]],
@@ -851,6 +853,7 @@ export async function registerHubCommands() {
   const commands = [
     { name: 'help', description: 'Every DreamBot command (staff see their commands too)' },
     { name: 'claim', description: 'Link your Discord to the Dream Guilds website and claim your character' },
+    ROSTER_COMMAND,
     {
       name: 'me',
       description: 'Your daily check, streaks and stats (📢 Share button posts it)',

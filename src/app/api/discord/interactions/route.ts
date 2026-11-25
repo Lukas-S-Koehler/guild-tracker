@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { handleRsvpComponent } from '@/lib/assault-rsvp-discord';
+import { handleRosterAutocomplete, handleRosterCommand } from '@/lib/roster-discord';
 import { outranks, outrankError, rankOfRole } from '@/lib/role-hierarchy';
 import { waitUntil } from '@vercel/functions';
 import { createAdminClient } from '@/lib/supabase-server';
@@ -179,6 +180,7 @@ export async function POST(req: NextRequest) {
       if (interaction.data.custom_id === HOW_ID) return handlePassHow(hub);
     }
     if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && name === 'kudos') return handleKudosAutocomplete(hub);
+    if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && name === 'roster') return handleRosterAutocomplete(interaction as Parameters<typeof handleRosterAutocomplete>[0]);
     if (interaction.type === INTERACTION_TYPE_COMMAND) {
       if (name === 'help') return handleHelp(hub);
       if (name === 'claim') return handleClaim(hub);
@@ -189,6 +191,7 @@ export async function POST(req: NextRequest) {
       if (name === 'level') return handleLevel(hub);
       if (name === 'away') return handleAway(hub);
       if (name === 'kudos') return handleKudos(hub);
+      if (name === 'roster') return handleRosterCommand(interaction as Parameters<typeof handleRosterCommand>[0]);
     }
   }
 

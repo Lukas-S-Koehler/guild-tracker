@@ -84,15 +84,21 @@ Ranking: missing minimum (+100) first, then importance weight × cost factor (lo
 
 UI: red **Setup & eligibility** block (prerequisites + below-minimum elements, with Fix links) at the top of the roster for your own characters and in the drawer; "Next best moves" list in the drawer; Goals table shows each member's top move with cost.
 
+Battle pet buys: never more than one rarity above the best pet owned (floor Epic). Epic/Legendary suggestions name the best species for battling at the zone for that character at L100 (fewest hits, then least damage taken, then most damage: defence saves food). Mythic is always just "a Mythic egg" (≈20M est., all equal).
+
 ## 7a. RSVP (built 2026-11-25)
 
-`assault_rsvps` (guild, wave launch unix, member, in/maybe/out, source web/discord). Effective answer: auto = in unless they answered otherwise, opt-in = no reply until they answer, none = never counted. Next wave = `nextAssaultLaunchUnix` of the guild's assault config. Web: "Next wave" column + tile (in · maybe · out · no reply), drawer buttons (owner or staff), "No reply" filter. Discord: pre-launch notices (steps with a negative offset, e.g. the 24h notice) get I'm in / Maybe / Can't make it buttons (`rsvp:<guild>:<wave>:<status>`); the clicker's characters in that guild (members.discord_id + site account link) are all set, not-assaulting ones skipped, reply is ephemeral.
+`assault_rsvps` (guild, wave launch unix, member, in/maybe/out, source web/discord). Effective answer: auto = in unless they answered otherwise, opt-in = no reply until they answer, none = never counted. Next wave = `nextAssaultLaunchUnix` of the guild's assault config. Web: "Next wave" column + tile (in · maybe · out · no reply), drawer buttons (owner or staff), "No reply" filter. Discord: RSVP opens on the **final summary after a wave** (next wave field + buttons, so opt-in members decide early and can hunt for it); pre-launch notices (negative offset steps) repeat the buttons. Buttons (`rsvp:<guild>:<wave>:<status>`); the clicker's characters in that guild (members.discord_id + site account link) are all set, not-assaulting ones skipped, reply is ephemeral.
 
 ## 7. Cohesion extras (v1)
 
 - **Wave RSVP:** new table `assault_rsvps` (`guild_id`, wave start, `member_id`, status in/out/maybe). Set on the web, with buttons on the existing wave announcement in Discord. The Lineup shows it, and staff see who hasn't answered.
 - **Discord live roster board** (live key `assault-roster:<guild>`, edit in place): ready count, RSVPs for the next wave, team goal progress, last 7 days of tier-ups. It links the channel, not the site, unless needed.
 - **Discord `/roster [ign]`:** no argument = guild summary. With an IGN = setup card (battle line, hunting line, goal tiers, next best move).
+
+## 7b. Discord board + /roster (built 2026-11-25, `src/lib/roster-discord.ts`)
+
+Live key `assault-roster:<guild>` (Admin → Discord → Live messages, default channel = the guild's assault announcement channel, edit in place, pinned): next wave RSVP counts with maybe / opt-in no-reply names, team goals (Bronze+ per element, x/N meet the minimum), setup needed, top pet hunt power, all-2-hits list, RSVP buttons. Refreshed with the daily live job and right after every RSVP (web or Discord). `/roster [ign] [guild]` (hub command, deferred, ephemeral): no IGN = the caller's assault guild summary; IGN = member card (setup status, battle with hit squares, hunting, goal tiers, next best move, next wave answer).
 
 ## 8. Build order
 

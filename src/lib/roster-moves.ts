@@ -139,36 +139,46 @@ function battlePetMoves(r: RosterRow, res: TrackResult, ctx: MoveContext): Move[
   const step = ladder[res.tier];
   if (!step) return [];
   const [q, lv, evo] = step;
-  const out: Move[] = [];
   // Free: an owned pet of that quality just needs levels / evolutions.
   const owned = r.pets
     .filter((p) => (QUALITY_RANK[p.tier] ?? 0) >= q && PET_STATS[p.species])
     .sort((a, b) => b.level - a.level)[0];
   if (owned) {
-    out.push({
+    return [{
       track: 'battle_pet', toTier: res.tier + 1, kind: 'train',
       title: `Level ${owned.species} to L${lv}${evo ? ` and evolve to ${evo}` : ''}`,
       detail: `now L${owned.level}${owned.evolution ? ` evo ${owned.evolution}` : ''}`,
       cost: null,
-    });
-    return out;
+    }];
   }
-  if (!ctx.marketAccess) return out;
-  const eggs = Object.keys(PET_EGGS)
-    .filter((s) => (QUALITY_RANK[petTier(s) ?? ''] ?? 0) >= q)
-    .map((s) => ({ s, p: eggPrice(s, ctx) }))
-    .filter((e) => e.p) as { s: string; p: { price: number; note?: string } }[];
-  const pick = eggs.sort((a, b) => a.p.price - b.p.price)[0];
-  if (pick) {
-    out.push({
-      track: 'battle_pet', toTier: res.tier + 1, kind: 'buy',
-      title: `Buy ${/^[AEIOU]/.test(pick.s) ? 'an' : 'a'} ${pick.s} egg`,
-      detail: `then level to L${lv}${evo ? `, evolve to ${evo}` : ''}`,
-      cost: pick.p.price,
-      costNote: pick.p.note,
-    });
+  if (!ctx.marketAccess) return [];
+  // No huge jumps: at most one rarity above the best pet you own (never below Epic).
+  const ownedBest = Math.max(0, ...r.pets.filter((p) => PET_STATS[p.species]).map((p) => QUALITY_RANK[p.tier] ?? 0));
+  const buyQ = Math.max(3, Math.min(q, Math.floor(ownedBest) + 1));
+  const reaches = (quality: number) => ladder.filter(([lq, llv, le]) => quality >= lq && 100 >= llv && le === 0).length;
+  if (buyQ >= 5) {
+    // Mythics are all equal for this: no species, just "a Mythic egg".
+    return [{
+      track: 'battle_pet', toTier: reaches(5), kind: 'buy',
+      title: 'Buy a Mythic egg',
+      detail: 'any Mythic works the same here; level it to L100',
+      cost: 20_000_000,
+      costNote: 'est., no market',
+    }];
   }
-  return out;
+  const quality = buyQ === 4 ? 'Legendary' : 'Epic';
+  for (const species of r.battle.bestSpecies[quality]) {
+    const p = eggPrice(species, ctx);
+    if (!p) continue;
+    return [{
+      track: 'battle_pet', toTier: reaches(buyQ), kind: 'buy',
+      title: `Buy ${/^[AEIOU]/.test(species) ? 'an' : 'a'} ${species} egg`,
+      detail: `best ${quality} for battling here (hits, then damage taken); level to L100`,
+      cost: p.price,
+      costNote: p.note,
+    }];
+  }
+  return [];
 }
 
 function potionMoves(r: RosterRow, res: TrackResult, ctx: MoveContext): Move[] {
