@@ -38,18 +38,17 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ goals: mergeGoals(null) });
   }
 
-  const goals = mergeGoals({ tracks: body.goals });
-  // Thresholds must step the right way (each tier harder than the one before).
-  for (const t of TRACKS) {
-    const ths = goals[t.id].thresholds.filter((v): v is number => v != null);
+  const goals = mergeGoals(body.goals);
+  // Each tier must be harder than the one before (slayer's first slot is the eligibility rule, not a number).
+  for (const t of TRACKS.filter((x) => x.editable)) {
+    const ths = goals.tracks[t.id].thresholds.slice(t.id === 'slayer' ? 1 : 0);
     for (let i = 1; i < ths.length; i++) {
-      const ok = t.lowerIsBetter ? ths[i] < ths[i - 1] : ths[i] > ths[i - 1];
-      if (!ok) return NextResponse.json({ error: `${t.label}: each tier must be harder than the one before` }, { status: 400 });
+      if (!(ths[i] > ths[i - 1])) return NextResponse.json({ error: `${t.label}: each tier must be higher than the one before` }, { status: 400 });
     }
   }
   const { error } = await supabase
     .from('assault_roster_goals')
-    .upsert({ guild_id: guildId, goals: { tracks: goals }, updated_by: user.id, updated_at: new Date().toISOString() }, { onConflict: 'guild_id' });
+      .upsert({ guild_id: guildId, goals, updated_by: user.id, updated_at: new Date().toISOString() }, { onConflict: 'guild_id' });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ goals });
 }

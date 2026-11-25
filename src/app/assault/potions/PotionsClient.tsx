@@ -169,7 +169,7 @@ export function PotionsClient({ combat, xp, presets }: Props) {
             ⭐ <strong>{recommendedPreset.label}</strong> is recommended for most members, it&apos;s loaded below by default.
           </p>
         )}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {presets.map((p) => (
             <PresetTierCard key={p.id} preset={p} combat={combat} xp={xp} onLoad={() => loadPreset(p)} />
           ))}

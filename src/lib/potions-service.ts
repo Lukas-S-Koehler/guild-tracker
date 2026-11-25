@@ -8,6 +8,8 @@ export interface Preset {
   sort_order: number;
   combat_potion_ids: number[];
   xp_potion_ids: number[];
+  /** Assault Roster tier: 0 none, 1 Bronze … 5 Dream. */
+  assault_tier?: number;
 }
 
 export interface SavedLoadout extends Loadout {

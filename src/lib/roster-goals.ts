@@ -1,142 +1,282 @@
 /**
- * Assault Roster goal tiers (docs/assault-roster.md §5). Client-safe, pure.
- * Tiers: Bronze → Silver → Gold → Crystal. Leaders edit thresholds (and an optional
- * "required" tier = future assault requirement) per guild; defaults are the same for DE and DI.
+ * Assault Roster goals v2 (docs/assault-roster.md §5). Client-safe, pure.
+ *
+ * Tier meaning (user):
+ *   Bronze  = minimum requirement
+ *   Silver  = cost-effective, almost a must-have
+ *   Gold    = very good, upper half
+ *   Crystal = the top
+ *   Dream   = absolutely perfect in that element
+ * Prerequisites (gear set, potions set, pets visible) are not goals: without them a member can't be measured.
+ * Elements carry an importance that weights "next best moves" (step 5).
  */
 import type { RosterRow } from './assault-roster';
 
-export const TIERS = ['Bronze', 'Silver', 'Gold', 'Crystal'] as const;
+export const TIERS = ['Bronze', 'Silver', 'Gold', 'Crystal', 'Dream'] as const;
 export type TierName = (typeof TIERS)[number];
+export const TIER_MEANING: Record<TierName, string> = {
+  Bronze: 'Minimum requirement',
+  Silver: 'Cost-effective, almost a must-have',
+  Gold: 'Very good, upper half',
+  Crystal: 'The top',
+  Dream: 'Absolutely perfect',
+};
 
-export type TrackId = 'hits' | 'bow' | 'pet_hunt' | 'pet_mastery' | 'prep';
+export type Importance = 'core' | 'high' | 'medium' | 'bonus';
+export const IMPORTANCE_LABEL: Record<Importance, string> = { core: 'Core', high: 'High', medium: 'Medium', bonus: 'Bonus' };
+export const IMPORTANCE_WEIGHT: Record<Importance, number> = { core: 3, high: 2, medium: 1, bonus: 0.5 };
+
+export type TrackId = 'battle' | 'pet_hunt' | 'pet_mastery' | 'battle_pet' | 'hunting_mastery' | 'potions' | 'bow' | 'slayer';
 
 export interface TrackDef {
   id: TrackId;
   label: string;
-  /** How the value reads, e.g. "≤ 3 hits", "15% bow". */
-  unit: (v: number) => string;
-  /** true = smaller value is better (hits). */
-  lowerIsBetter?: boolean;
-  /** Default thresholds Bronze..Crystal; null = tier doesn't exist on this track. */
-  defaults: (number | null)[];
+  importance: Importance;
   hint: string;
+  /** Numeric tracks: leaders can edit the 5 thresholds. Fixed tracks describe their ladder. */
+  editable: boolean;
+  defaults: number[];
+  /** Text per tier for the ladder (threshold-aware for editable tracks). */
+  tierText: (tier: number, ths: number[], g: GoalSet) => string;
 }
+
+const QUALITY_RANK: Record<string, number> = { Standard: 0, Refined: 1, Premium: 2, Event: 2.5, Epic: 3, Legendary: 4, Mythic: 5 };
 
 export const TRACKS: TrackDef[] = [
   {
-    id: 'hits',
+    id: 'battle',
     label: 'Battle',
-    unit: (v) => `all mobs ≤ ${v} hits`,
-    lowerIsBetter: true,
-    defaults: [5, 4, 3, 2],
-    hint: "Hits on every mob at the guild's assault zone (gear from /combat, default loadout, best battle pet).",
-  },
-  {
-    id: 'bow',
-    label: 'Hunting bow',
-    unit: (v) => `+${v}% hunt eff`,
-    defaults: [5, 10, 15, 18],
-    hint: 'Hunt efficiency of the hunting bow: 5% any bow, 10% Nightshade, 15% Grimwood, 18%+ Mythic.',
+    importance: 'core',
+    hint: "Hits on every mob at the guild's assault zone with gear from /combat, the default loadout and the best battle pet.",
+    editable: false,
+    defaults: [],
+    tierText: (t, _ths, g) =>
+      ['all mobs ≤4 hits', 'all mobs ≤3 hits', 'half the mobs 2 hits, rest 3', 'all mobs 2 hits', `all 2 hits scaled to Lv ${g.battle.dreamScale}+ (CL 100)`][t],
   },
   {
     id: 'pet_hunt',
     label: 'Pet hunt power',
-    unit: (v) => `${v.toLocaleString()} encounters`,
-    defaults: [600, 1200, 1800, 2500],
-    hint: 'Best 20 pets that can hunt at the zone, Citadel est. Crystal ≈ 20 Epic Vulpinas L100.',
+    importance: 'core',
+    hint: 'Best 20 pets that can hunt at the zone (Citadel est. encounters per hunt). Pets do most of the hunting.',
+    editable: true,
+    defaults: [600, 1200, 1800, 2500, 4000],
+    tierText: (t, ths) => `${ths[t].toLocaleString()} encounters${t === 3 ? ' (≈20 Epic Vulpinas L100)' : t === 4 ? ' (≈20 Legendary L100)' : ''}`,
   },
   {
     id: 'pet_mastery',
     label: 'Pet mastery',
-    unit: (v) => `mastery ${v}`,
-    defaults: [25, 50, 75, 100],
-    hint: 'More pets out at once: 4 at 25, 6 at 50, 8 at 75, 10 at 100.',
+    importance: 'high',
+    hint: 'More pets out at once and up to +20% pet stats. 50 = 6 pets, 63 = 7, 75 = 8, 88 = 9, 100 = 10.',
+    editable: true,
+    defaults: [50, 63, 75, 88, 100],
+    tierText: (t, ths) => `mastery ${ths[t]} (${2 + Math.floor(ths[t] / 12.5)} pets)`,
   },
   {
-    id: 'prep',
-    label: 'Prep',
-    unit: (v) => `${v}/3 set`,
-    defaults: [1, 2, 3, null],
-    hint: 'Gear on /combat, a default potion loadout, a hunting bow.',
+    id: 'battle_pet',
+    label: 'Battle pet',
+    importance: 'high',
+    hint: 'Best battle pet you own. Mostly improves hits, and more defence saves food (gold).',
+    editable: false,
+    defaults: [],
+    tierText: (t) => ['Epic L80+', 'Epic L100', 'Legendary L100', 'Mythic L80+', 'Mythic L100 evo 5'][t],
+  },
+  {
+    id: 'hunting_mastery',
+    label: 'Hunting mastery',
+    importance: 'high',
+    hint: 'The flee mechanic runs on hunting mastery: higher means fewer hunted enemies run away.',
+    editable: true,
+    defaults: [70, 80, 85, 90, 100],
+    tierText: (t, ths) => `level ${ths[t]}`,
+  },
+  {
+    id: 'potions',
+    label: 'Potions',
+    importance: 'medium',
+    hint: 'Default assault loadout rated against the potion presets: Budget = Bronze, Mid = Crystal, Whale = Dream.',
+    editable: false,
+    defaults: [],
+    tierText: (t) => ['Budget preset or better', 'Silver preset or better', 'Gold preset or better', 'Mid preset or better', 'Whale preset'][t],
+  },
+  {
+    id: 'bow',
+    label: 'Hunting bow',
+    importance: 'medium',
+    hint: 'Hunt efficiency of the bow you swap in for hunting. Matters less once your pets hunt well (Gold pet hunt power).',
+    editable: true,
+    defaults: [5, 10, 15, 18, 20],
+    tierText: (t, ths) => `+${ths[t]}% hunt eff${t === 1 ? ' (Nightshade)' : t === 2 ? ' (Grimwood)' : t === 3 ? " (Death's Touch)" : t === 4 ? ' (Sting / Divinity)' : ''}`,
+  },
+  {
+    id: 'slayer',
+    label: 'Slayer',
+    importance: 'bonus',
+    hint: 'Added bonus. Bronze = slayer level at least the highest mob here (eligible for every slayer task here), then slayer % on the mobs here (max 10%).',
+    editable: true,
+    // [unused, silver avg %, gold avg %, crystal avg %, dream min % on every mob]
+    defaults: [0, 2, 4, 7, 10],
+    tierText: (t, ths) => (t === 0 ? 'task eligible here' : t === 4 ? `${ths[4]}% on every mob` : `avg ${ths[t]}% on the mobs here`),
   },
 ];
 
-export interface TrackSetting {
-  thresholds: (number | null)[];
-  /** 0 = no requirement, 1..4 = required tier (Bronze..Crystal). Future assault requirements. */
-  required: number;
+export interface GoalSet {
+  tracks: Record<TrackId, { thresholds: number[] }>;
+  battle: { dreamScale: number };
 }
-export type GoalSet = Record<TrackId, TrackSetting>;
 
 export function defaultGoals(): GoalSet {
-  return Object.fromEntries(TRACKS.map((t) => [t.id, { thresholds: [...t.defaults], required: 0 }])) as GoalSet;
+  return {
+    tracks: Object.fromEntries(TRACKS.map((t) => [t.id, { thresholds: [...t.defaults] }])) as GoalSet['tracks'],
+    battle: { dreamScale: 150 },
+  };
 }
 
-/** Stored goals merged over defaults (unknown/missing tracks fall back). */
+/** Stored goals merged over defaults. Old 4-tier rows are ignored. */
 export function mergeGoals(stored: unknown): GoalSet {
-  const base = defaultGoals();
-  const tracks = (stored as { tracks?: Record<string, Partial<TrackSetting>> } | null)?.tracks ?? {};
+  const g = defaultGoals();
+  const src = (stored ?? {}) as { tracks?: Record<string, { thresholds?: unknown[] }>; battle?: { dreamScale?: unknown } };
   for (const t of TRACKS) {
-    const s = tracks[t.id];
-    if (!s) continue;
-    if (Array.isArray(s.thresholds) && s.thresholds.length === 4) {
-      base[t.id].thresholds = s.thresholds.map((v) => (v == null || Number.isNaN(Number(v)) ? null : Number(v)));
+    const ths = src.tracks?.[t.id]?.thresholds;
+    if (t.editable && Array.isArray(ths) && ths.length === 5 && ths.every((v) => Number.isFinite(Number(v)))) {
+      g.tracks[t.id].thresholds = ths.map(Number);
     }
-    if (typeof s.required === 'number') base[t.id].required = Math.max(0, Math.min(4, Math.floor(s.required)));
   }
-  return base;
+  const ds = Number(src.battle?.dreamScale);
+  if (Number.isFinite(ds) && ds >= 100 && ds <= 150) g.battle.dreamScale = Math.round(ds);
+  return g;
 }
 
-/** Value a member has on a track; null = can't be measured yet (e.g. no gear on /combat). */
-export function trackValue(r: RosterRow, id: TrackId): number | null {
-  switch (id) {
-    case 'hits':
-      return r.battle.computed ? r.battle.worstHits : null;
-    case 'bow':
-      return r.hunting.bow?.huntEff ?? 0;
-    case 'pet_hunt':
-      return r.hunting.squadPower;
-    case 'pet_mastery':
-      return r.pet_mastery ?? 0;
-    case 'prep':
-      return Number(r.battle.gearSet) + Number(!!r.battle.loadout) + Number(!!r.hunting.bow);
-  }
+/* ─── prerequisites ─── */
+
+export interface Prereq { id: string; label: string; ok: boolean; fix: string }
+
+export function prerequisites(r: RosterRow): Prereq[] {
+  return [
+    { id: 'gear', label: 'Gear on /combat', ok: r.battle.gearSet, fix: 'Pick your gear once on /combat' },
+    { id: 'potions', label: 'Potion loadout', ok: !!r.battle.loadout, fix: 'Pick a default loadout on /assault/potions' },
+    { id: 'pets', label: 'Pets visible', ok: !r.pets_hidden, fix: 'Unhide pets in game settings or add your API key in /setup' },
+  ];
 }
+
+/* ─── evaluation ─── */
 
 export interface TrackResult {
   id: TrackId;
-  value: number | null;
-  /** 0 = below Bronze, 1..4 = Bronze..Crystal. */
+  /** 0 = below Bronze, 1..5 = Bronze..Dream. */
   tier: number;
-  maxTier: number;
-  /** Next tier's threshold (null at the top). */
-  next: number | null;
-  /** 0..1 progress from the current tier's threshold towards the next. */
+  /** null = can't be measured (missing prerequisite). */
+  measured: boolean;
+  /** Short "where you are" text. */
+  current: string;
+  /** What the next tier needs (null at Dream). */
+  next: string | null;
+  /** 0..1 towards the next tier (numeric tracks; fixed ladders use 0 or 0.5). */
   progress: number;
-  meetsRequired: boolean;
 }
 
-export function evaluateTrack(r: RosterRow, def: TrackDef, s: TrackSetting): TrackResult {
-  const value = trackValue(r, def.id);
-  const ths = s.thresholds;
-  const maxTier = ths.filter((t) => t != null).length;
-  const reached = (t: number | null) =>
-    value != null && t != null && (def.lowerIsBetter ? value <= t : value >= t);
+function numeric(value: number, ths: number[], fmt: (v: number) => string): Omit<TrackResult, 'id' | 'next'> & { nextIdx: number } {
   let tier = 0;
-  for (let i = 0; i < ths.length; i++) if (reached(ths[i])) tier = i + 1;
-  const next = tier < ths.length ? ths[tier] ?? null : null;
-  let progress = 1;
-  if (next != null && value != null) {
-    const from = tier > 0 ? (ths[tier - 1] as number) : def.lowerIsBetter ? next + 3 : 0;
-    const span = def.lowerIsBetter ? from - next : next - from;
-    const done = def.lowerIsBetter ? from - value : value - from;
-    progress = span > 0 ? Math.max(0, Math.min(1, done / span)) : 0;
-  } else if (value == null) progress = 0;
-  return { id: def.id, value, tier, maxTier, next, progress, meetsRequired: s.required === 0 || tier >= s.required };
+  for (let i = 0; i < ths.length; i++) if (value >= ths[i]) tier = i + 1;
+  const from = tier > 0 ? ths[tier - 1] : 0;
+  const to = tier < ths.length ? ths[tier] : null;
+  return { tier, measured: true, current: fmt(value), progress: to == null ? 1 : Math.max(0, Math.min(1, (value - from) / (to - from || 1))), nextIdx: tier };
 }
 
-export function evaluateGoals(r: RosterRow, goals: GoalSet): TrackResult[] {
-  return TRACKS.map((t) => evaluateTrack(r, t, goals[t.id]));
+export function evaluateTrack(r: RosterRow, def: TrackDef, g: GoalSet): TrackResult {
+  const ths = g.tracks[def.id].thresholds;
+  const nextText = (tier: number) => (tier >= 5 ? null : def.tierText(tier, ths, g));
+  const out = (tier: number, current: string, progress: number, measured = true): TrackResult => ({
+    id: def.id, tier, measured, current, next: measured ? nextText(tier) : null, progress,
+  });
+
+  switch (def.id) {
+    case 'battle': {
+      const b = r.battle;
+      if (!b.computed) return out(0, 'gear not set', 0, false);
+      const hits = b.enemies.map((e) => e.hits ?? 99);
+      const worst = Math.max(...hits);
+      const twos = hits.filter((h) => h <= 2).length;
+      let tier = 0;
+      if (worst <= 4) tier = 1;
+      if (worst <= 3) tier = 2;
+      if (worst <= 3 && twos * 2 >= hits.length) tier = 3;
+      if (worst <= 2) tier = 4;
+      if (worst <= 2 && b.canScale && !b.scaleFixed && (b.max2HitLevel ?? 0) >= g.battle.dreamScale) tier = 5;
+      const current = worst <= 2 ? (b.canScale && !b.scaleFixed && b.max2HitLevel ? `all 2 hits, to Lv ${b.max2HitLevel}` : 'all 2 hits') : `${twos}/${hits.length} at 2 hits, worst ${worst}`;
+      return out(tier, current, tier === 4 && b.max2HitLevel ? Math.max(0, (b.max2HitLevel - 100) / (g.battle.dreamScale - 100)) : twos / Math.max(1, hits.length));
+    }
+    case 'battle_pet': {
+      const p = r.battle.bestPet;
+      if (!p) return out(0, 'no battle pet', 0);
+      const q = QUALITY_RANK[p.tier ?? ''] ?? 0;
+      let tier = 0;
+      if (q >= 3 && p.level >= 80) tier = 1;
+      if (q >= 3 && p.level >= 100) tier = 2;
+      if (q >= 4 && p.level >= 100) tier = 3;
+      if (q >= 5 && p.level >= 80) tier = 4;
+      if (q >= 5 && p.level >= 100 && p.evolution >= 5) tier = 5;
+      return out(tier, `${p.species} L${p.level}${p.evolution ? ` evo ${p.evolution}` : ''}`, tier >= 5 ? 1 : Math.min(1, p.level / 100));
+    }
+    case 'potions': {
+      if (!r.battle.loadout) return out(0, 'no loadout', 0, false);
+      const t = r.battle.potionTier;
+      return out(t, r.battle.preset ? `${r.battle.preset.label} preset` : 'custom loadout', t >= 5 ? 1 : 0);
+    }
+    case 'slayer': {
+      const s = r.slayer;
+      if (!s.zoneMaxLevel) return out(0, 'no zone', 0);
+      if (s.level < s.zoneMaxLevel) return out(0, `slayer ${s.level}`, Math.min(1, s.level / s.zoneMaxLevel));
+      let tier = 1;
+      for (let i = 1; i <= 3; i++) if (s.avgPct >= ths[i]) tier = i + 1;
+      if (s.minPct >= ths[4]) tier = 5;
+      const to = tier < 4 ? ths[tier] : ths[4];
+      return out(tier, `avg ${s.avgPct}% · slayer ${s.level}`, tier >= 5 ? 1 : Math.min(1, (tier === 4 ? s.minPct : s.avgPct) / (to || 1)));
+    }
+    case 'pet_hunt': {
+      const n = numeric(r.hunting.squadPower, ths, (v) => `${v.toLocaleString()} encounters`);
+      return out(n.tier, n.current, n.progress);
+    }
+    case 'pet_mastery': {
+      const n = numeric(r.pet_mastery ?? 0, ths, (v) => `mastery ${v}`);
+      return out(n.tier, n.current, n.progress);
+    }
+    case 'hunting_mastery': {
+      const n = numeric(r.hunting_mastery ?? 0, ths, (v) => `level ${v}`);
+      return out(n.tier, n.current, n.progress);
+    }
+    case 'bow': {
+      const v = r.hunting.bow?.huntEff ?? 0;
+      const n = numeric(v, ths, (x) => (x ? `+${x}% (${r.hunting.bow?.name})` : 'no bow'));
+      return out(n.tier, n.current, n.progress);
+    }
+  }
 }
 
-export const hasRequirements = (goals: GoalSet) => TRACKS.some((t) => goals[t.id].required > 0);
+export function evaluateGoals(r: RosterRow, g: GoalSet): TrackResult[] {
+  return TRACKS.map((t) => evaluateTrack(r, t, g));
+}
+
+/** Importance weight for next best moves; the bow matters less once pets hunt well (Gold pet hunt power). */
+export function trackWeight(id: TrackId, results: TrackResult[]): number {
+  const def = TRACKS.find((t) => t.id === id)!;
+  let w = IMPORTANCE_WEIGHT[def.importance];
+  if (id === 'bow' && (results.find((x) => x.id === 'pet_hunt')?.tier ?? 0) >= 3) w *= 0.5;
+  return w;
+}
+
+/** Bronze is the minimum: every non-bonus element at Bronze or better (and all prerequisites set). */
+export function meetsMinimum(r: RosterRow, results: TrackResult[]): boolean {
+  return prerequisites(r).every((p) => p.ok) && results.every((x) => TRACKS.find((t) => t.id === x.id)!.importance === 'bonus' || x.tier >= 1);
+}
+
+/**
+ * Closest worthwhile next step: a missing Bronze (minimum) on the most important element first,
+ * otherwise the best mix of importance and progress.
+ */
+export function nextStep(results: TrackResult[]): TrackResult | null {
+  const open = results.filter((x) => x.measured && x.next != null);
+  if (!open.length) return null;
+  const missingBronze = open.filter((x) => x.tier === 0 && TRACKS.find((t) => t.id === x.id)!.importance !== 'bonus');
+  const pool = missingBronze.length ? missingBronze : open;
+  return pool.sort((a, b) => trackWeight(b.id, results) * (0.5 + b.progress) - trackWeight(a.id, results) * (0.5 + a.progress))[0];
+}

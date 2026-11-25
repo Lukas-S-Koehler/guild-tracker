@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Loader2 } from 'lucide-react';
-import { TIERS, TRACKS, type GoalSet } from '@/lib/roster-goals';
+import { IMPORTANCE_LABEL, TIERS, TIER_MEANING, TRACKS, type GoalSet, type TrackId } from '@/lib/roster-goals';
 import { TierChip } from '@/components/assault/RosterGoals';
 
 interface GuildRef { id: string; name: string; nickname: string | null }
@@ -39,15 +39,14 @@ export default function RosterGoalsPanel() {
   }, []);
   useEffect(() => { if (guildId) load(guildId); }, [guildId, load]);
 
-  const setThreshold = (track: keyof GoalSet, i: number, v: string) =>
+  const setThreshold = (track: TrackId, i: number, v: string) =>
     setGoals((g) => {
       if (!g) return g;
-      const ths = [...g[track].thresholds];
-      ths[i] = v.trim() === '' ? null : Number(v);
-      return { ...g, [track]: { ...g[track], thresholds: ths } };
+      const ths = [...g.tracks[track].thresholds];
+      ths[i] = Number(v);
+      return { ...g, tracks: { ...g.tracks, [track]: { thresholds: ths } } };
     });
-  const setRequired = (track: keyof GoalSet, v: number) =>
-    setGoals((g) => (g ? { ...g, [track]: { ...g[track], required: v } } : g));
+  const setDreamScale = (v: string) => setGoals((g) => (g ? { ...g, battle: { dreamScale: Number(v) } } : g));
 
   const save = async (reset = false) => {
     if (!guildId || !goals) return;
@@ -73,8 +72,8 @@ export default function RosterGoalsPanel() {
       <CardHeader>
         <CardTitle>Roster goals</CardTitle>
         <CardDescription>
-          Tier thresholds for the Goals view on /assault/roster, per assault guild. Keep them motivating: Bronze should be reachable for most,
-          Crystal is the long-term target. &quot;Required&quot; turns a tier into an assault requirement (shown on the roster, nothing is enforced yet).
+          Tiers for the Goals view on /assault/roster, per assault guild. Bronze = minimum requirement, Silver = cost-effective,
+          Gold = upper half, Crystal = the top, Dream = absolutely perfect.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -94,44 +93,50 @@ export default function RosterGoalsPanel() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs text-muted-foreground border-b">
-                    <th className="py-2 pr-3 font-medium">Track</th>
-                    {TIERS.map((t, i) => <th key={t} className="py-2 pr-2 font-medium"><TierChip tier={i + 1} small /></th>)}
-                    <th className="py-2 font-medium">Required</th>
+                    <th className="py-2 pr-3 font-medium">Element</th>
+                    {TIERS.map((t, i) => (
+                      <th key={t} className="py-2 pr-2 font-medium" title={TIER_MEANING[t]}><TierChip tier={i + 1} small /></th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {TRACKS.map((def) => (
                     <tr key={def.id} className="border-b last:border-0 align-top">
                       <td className="py-2 pr-3">
-                        <div className="font-medium">{def.label}</div>
-                        <div className="text-[11px] text-muted-foreground max-w-[16rem]">{def.hint}{def.lowerIsBetter ? ' Lower = harder.' : ''}</div>
+                        <div className="font-medium">{def.label} <span className="text-[10px] font-normal text-muted-foreground">{IMPORTANCE_LABEL[def.importance]}</span></div>
+                        <div className="text-[11px] text-muted-foreground max-w-[16rem]">{def.hint}</div>
                       </td>
-                      {goals[def.id].thresholds.map((v, i) => (
-                        <td key={i} className="py-2 pr-2">
-                          <Input
-                            className="h-8 w-20 tabular-nums"
-                            inputMode="numeric"
-                            value={v ?? ''}
-                            placeholder="—"
-                            onChange={(e) => setThreshold(def.id, i, e.target.value)}
-                          />
-                        </td>
-                      ))}
-                      <td className="py-2">
-                        <select
-                          className="h-8 rounded-md border bg-background px-2 text-xs"
-                          value={goals[def.id].required}
-                          onChange={(e) => setRequired(def.id, Number(e.target.value))}
-                        >
-                          <option value={0}>None</option>
-                          {TIERS.map((t, i) => goals[def.id].thresholds[i] != null && <option key={t} value={i + 1}>{t}</option>)}
-                        </select>
-                      </td>
+                      {TIERS.map((t, i) => {
+                        const editable = def.editable && !(def.id === 'slayer' && i === 0);
+                        const dream = def.id === 'battle' && i === 4;
+                        return (
+                          <td key={t} className="py-2 pr-2 text-[11px] text-muted-foreground">
+                            {editable ? (
+                              <Input
+                                className="h-8 w-20 tabular-nums"
+                                inputMode="numeric"
+                                value={goals.tracks[def.id].thresholds[i]}
+                                onChange={(e) => setThreshold(def.id, i, e.target.value)}
+                              />
+                            ) : dream ? (
+                              <div className="space-y-1">
+                                <div>all 2 hits scaled to</div>
+                                <Input className="h-8 w-20 tabular-nums" inputMode="numeric" value={goals.battle.dreamScale} onChange={(e) => setDreamScale(e.target.value)} />
+                              </div>
+                            ) : (
+                              def.tierText(i, goals.tracks[def.id].thresholds, goals)
+                            )}
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            <p className="text-[11px] text-muted-foreground">
+              Bronze is the minimum requirement. Potion tiers come from the potion presets (each preset has an assault tier). Prerequisites (gear, potion loadout, visible pets) aren&apos;t tiers.
+            </p>
             <div className="flex gap-2">
               <Button disabled={busy} onClick={() => save(false)}>{busy && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}Save</Button>
               <Button variant="outline" disabled={busy} onClick={() => save(true)}>Reset to defaults</Button>

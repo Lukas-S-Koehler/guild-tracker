@@ -55,21 +55,24 @@ Tone: goals are long-term targets ("next tier: …"), never red failure flags.
 ## 4. Character hunting
 - Hunting level, bow eff %, and active hunting-eff effects (potions, territory). These are shown, not combined into a formula.
 
-## 5. Goal tracks (same defaults for DE and DI; leaders can edit per guild)
+## 5. Goals v2 (agreed with the user 2026-11-25)
 
-Tiers: **Bronze → Silver → Gold → Crystal**. Thresholds live in a new `assault_roster_goals` table (`guild_id`, track, tier, threshold). They are editable in Admin → Assault, and editing is limited to guild leaders and the super admin.
+Tiers: **Bronze** = minimum requirement · **Silver** = cost-effective, almost a must-have · **Gold** = very good, upper half · **Crystal** = the top · **Dream** = absolutely perfect in that element. Measured at the guild's assault zone. Leaders edit numeric thresholds (and the Battle Dream scale level) per guild in Admin → Assault → Roster goals (`assault_roster_goals.goals` = GoalSet JSON). Code: `src/lib/roster-goals.ts`.
 
-| Track | Bronze | Silver | Gold | Crystal |
-|---|---|---|---|---|
-| Battle: hits-to-kill on zone mobs | 5 | 4 | 3 | 2 |
-| Hunting bow eff % | any bow (5%) | 10% (Nightshade) | 15% (Grimwood) | 18%+ (Mythic) |
-| Pet hunt power (Citadel est. encounters/hunt, best 20 pets) | 600 | 1,200 | 1,800 | 2,500 (= 20 Epic Vulpinas L100, mastery 100) |
-| Pet mastery (squad size) | 25 (4 pets) | 50 (6) | 75 (8) | 100 (10) |
+**Prerequisites** (not tiers; without them a member isn't measured, and they're always the first next step): gear set on /combat, default potion loadout, pets visible.
 
-Hunting level is shown on the Lineup but is not a goal track. Higher is better, but pets carry most of the hunting for high-level battlers (user).
-| Prep (potion loadout set, gear set, RSVP'd ≥75% of last 8 waves) | 1/3 | 2/3 | 3/3 | 3/3 + 8-wave streak |
+| Element | Importance | Bronze | Silver | Gold | Crystal | Dream |
+|---|---|---|---|---|---|---|
+| Battle (hits on every zone mob) | Core | all ≤4 | all ≤3 | half at 2, rest ≤3 | all 2 | all 2 scaled to Lv 150 (CL 100 only; leaders may lower to e.g. 130) |
+| Pet hunt power (best 20 eligible pets) | Core | 600 | 1,200 | 1,800 | 2,500 (≈20 Epic Vulpinas L100) | 4,000 (≈20 Legendary L100) |
+| Pet mastery | High | 50 (6 pets) | 63 (7) | 75 (8) | 88 (9) | 100 (10) |
+| Battle pet (best owned) | High | Epic L80+ | Epic L100 | Legendary L100 | Mythic L80+ | Mythic L100 evo 5 |
+| Hunting mastery (flee mechanic) | High | 70 | 80 | 85 | 90 | 100 |
+| Potions (loadout vs presets) | Medium | Budget | Silver preset | Gold preset | Mid | Whale |
+| Hunting bow | Medium (×0.5 once pet hunt power is Gold+) | 5% | 10% | 15% | 18% | 20% |
+| Slayer | Bonus | slayer level ≥ highest zone mob (task eligible) | avg 2% | avg 4% | avg 7% | 10% on every mob |
 
-Unlocking a tier can feed the Dream Pass and achievements later (not in v1). The roster board shows recent tier-ups.
+Event pets rank between Premium and Epic, so they don't count as Epic for the battle pet ladder. Potion tier = best preset (with `assault_potion_presets.assault_tier`) the loadout matches or beats on AP %, Prot %, Battle XP %, Combat XP %. Silver = Thunderfury + Dragonblood + Wraithbane, Gold = Phoenix Ashes + Dragonblood + Wraithbane (proposed, user may change). Weights for next best moves: Core 3, High 2, Medium 1, Bonus 0.5. Next step = missing prerequisite → missing Bronze on a non-bonus element → best weight × progress. "Meets the minimum" = prerequisites + every non-bonus element at Bronze.
 
 ## 6. Upgrade priority ("Next best moves")
 

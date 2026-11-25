@@ -674,6 +674,15 @@ function Workbench({
           gearStats={char.breakdown.gear}
           critDamage={char.critDamageFromGear}
           critChance={char.critChance.gear}
+          footer={
+            <HuntingBowPicker
+              key={profile.id}
+              profileId={profile.id}
+              initial={profile.member_id ? boot.huntingBows?.[profile.member_id] ?? null : null}
+              combatLevel={char.combatLevel}
+              dexterity={profile.stats?.dexterity?.level ?? 0}
+            />
+          }
         />
         <div className="flex flex-col gap-4">
           <BuffsCard
@@ -695,13 +704,6 @@ function Workbench({
             patted={!!settings.petPatted}
             setPatted={(v) => setSetting('petPatted', v)}
             char={char}
-          />
-          <HuntingBowCard
-            key={profile.id}
-            profileId={profile.id}
-            initial={profile.member_id ? boot.huntingBows?.[profile.member_id] ?? null : null}
-            combatLevel={char.combatLevel}
-            dexterity={profile.stats?.dexterity?.level ?? 0}
           />
           <SheetCard
             char={char}
@@ -928,7 +930,7 @@ function SheetCard({
 }
 
 /** Optional hunting bow (separate from the combat bow). Same value as on /assault/roster. */
-function HuntingBowCard({
+function HuntingBowPicker({
   profileId, initial, combatLevel, dexterity,
 }: { profileId: string; initial: string | null; combatLevel: number; dexterity: number }) {
   const api = useApiClient();
@@ -942,34 +944,26 @@ function HuntingBowCard({
   };
   const current = HUNTING_BOWS.find((b) => b.name === bow);
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between gap-2">
-          <CardTitle className="text-base">Hunting bow <span className="text-xs font-normal text-muted-foreground">optional</span></CardTitle>
-          <span className="text-xs text-muted-foreground">
-            {state === 'saving' ? 'Saving…' : state === 'saved' ? 'Saved' : state === 'error' ? <span className="text-red-500">Not saved</span> : current ? `+${current.huntEff}% hunt efficiency` : ''}
-          </span>
-        </div>
-        <CardDescription>The bow you equip for hunting. Shown on the assault roster too; it doesn&apos;t change your combat stats here.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <select
-          className="h-9 w-full rounded-md border bg-background px-2 text-sm"
-          value={bow ?? ''}
-          onChange={(e) => save(e.target.value || null)}
-        >
-          <option value="">No hunting bow</option>
-          {HUNTING_BOWS.map((b) => {
-            const blocker = bowBlocker(b, combatLevel, dexterity);
-            return (
-              <option key={b.name} value={b.name}>
-                {b.name} · +{b.huntEff}% · CL {b.combatLevel} / DEX {b.dexterity}{blocker ? ` (${blocker})` : ''}
-              </option>
-            );
-          })}
-        </select>
-      </CardContent>
-    </Card>
+    <div className="border-t pt-3 mt-2 space-y-1">
+      <div className="flex items-center justify-between gap-2 text-xs">
+        <span className="font-medium">Hunting bow <span className="font-normal text-muted-foreground">optional · not part of your combat stats</span></span>
+        <span className="text-muted-foreground">
+          {state === 'saving' ? 'Saving…' : state === 'saved' ? 'Saved' : state === 'error' ? <span className="text-red-500">Not saved</span> : current ? `+${current.huntEff}% hunt efficiency` : ''}
+        </span>
+      </div>
+      <select className="h-8 w-full rounded-md border bg-background px-2 text-xs" value={bow ?? ''} onChange={(e) => save(e.target.value || null)}>
+        <option value="">No hunting bow</option>
+        {HUNTING_BOWS.map((b) => {
+          const blocker = bowBlocker(b, combatLevel, dexterity);
+          return (
+            <option key={b.name} value={b.name}>
+              {b.name} · +{b.huntEff}% · CL {b.combatLevel} / DEX {b.dexterity}{blocker ? ` (${blocker})` : ''}
+            </option>
+          );
+        })}
+      </select>
+      <p className="text-[11px] text-muted-foreground">The bow you swap in for hunting. Shown on the assault roster too.</p>
+    </div>
   );
 }
 
@@ -1084,8 +1078,11 @@ function GearCard({
   critDamage,
   critChance,
   className,
+  footer,
 }: {
   className?: string;
+  /** Extra block under the gear totals (the optional hunting bow). */
+  footer?: React.ReactNode;
   critChance: number;
   catalog: GearItem[];
   gear: GearSelection[];
@@ -1170,6 +1167,7 @@ function GearCard({
           {critChance ? ` · Crit ${critChance}%` : ''}
           {critDamage ? ` · Crit dmg ${critDamage}` : ''}
         </div>
+        {footer}
       </CardContent>
     </Card>
   );

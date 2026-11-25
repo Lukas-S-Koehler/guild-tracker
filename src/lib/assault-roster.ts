@@ -102,6 +102,8 @@ export interface RosterRow {
     loadoutPotions: RosterPotion[];
     /** The /assault/potions preset this loadout matches exactly, or null = custom. */
     preset: { id: string; label: string; recommended: boolean } | null;
+    /** Assault tier of the loadout (0..5): best preset it matches or beats on AP/Prot/Battle XP/Combat XP. */
+    potionTier: number;
     /** Best battle pet among ALL owned pets for this zone (fewest hits, then highest 2-hit scaling, then damage). */
     bestPet: { species: string; level: number; evolution: number; tier: string | null; equipped: boolean } | null;
     /** Hits are only meaningful with gear set on /combat. */
@@ -135,6 +137,16 @@ export interface RosterRow {
     unknownPets: string[];
   };
   pets: RosterPet[];
+  /** Slayer at the selected location (bonus goal). */
+  slayer: {
+    level: number;
+    /** Highest enemy level here: slayer level ≥ this makes you eligible for every slayer task here. */
+    zoneMaxLevel: number;
+    /** Slayer damage % per mob here (rank effects). */
+    perEnemy: { id: number; name: string; pct: number }[];
+    avgPct: number;
+    minPct: number;
+  };
   pets_hidden: boolean;
   /** auto = always in · opt_in = chooses per assault · none = not assaulting (staff-set). */
   participation: Participation;
@@ -264,6 +276,24 @@ export async function buildRoster(
     const order = ['combo', 'attack', 'protection', 'battle_xp', 'combat_xp'];
     return out.sort((a, b) => order.indexOf(a.slot) - order.indexOf(b.slot));
   };
+  // Loadout strength: AP %, Prot %, Battle XP %, Combat XP % (efficiency potions don't stack, take the best).
+  const vectorOf = (l: { ids: number[]; xpIds: number[] }) => {
+    let ap = 0, prot = 0, bxp = 0, cxp = 0;
+    for (const id of l.ids) { const p = potionById.get(id); if (p) { ap += p.attack_power_bonus; prot += p.protection_bonus; } }
+    for (const id of l.xpIds) { const p = xpById.get(id); if (!p) continue; if (p.category === 'battle_xp') bxp = Math.max(bxp, p.xp_value); else cxp = Math.max(cxp, p.xp_value); }
+    return [ap, prot, bxp, cxp];
+  };
+  const potionTierOf = (l: { ids: number[]; xpIds: number[] }) => {
+    const v = vectorOf(l);
+    let tier = 0;
+    for (const p of presetRows ?? []) {
+      const t = Number((p as { assault_tier?: number }).assault_tier ?? 0);
+      if (!t) continue;
+      const pv = vectorOf({ ids: p.combat_potion_ids ?? [], xpIds: p.xp_potion_ids ?? [] });
+      if (v.every((x, i) => x >= pv[i])) tier = Math.max(tier, t);
+    }
+    return tier;
+  };
 
   // Default potion loadout per owner (web default beats Discord, like /combat).
   const ownerOf = (memberId: string) => {
@@ -272,7 +302,7 @@ export async function buildRoster(
   };
   const owners = Array.from(new Set(memberIds.map(ownerOf).filter(Boolean))) as string[];
   const loadoutOf = new Map<string, { name: string; ids: number[]; xpIds: number[] }>();
-  const { data: presetRows } = await supabase.from('assault_potion_presets').select('id, label, combat_potion_ids, xp_potion_ids').order('sort_order');
+  const { data: presetRows } = await supabase.from('assault_potion_presets').select('*').order('sort_order');
   const key = (ids: number[]) => [...ids].sort((a, b) => a - b).join(',');
   const presetOf = (l: { ids: number[]; xpIds: number[] }) => {
     const p = (presetRows ?? []).find((x) => key(x.combat_potion_ids ?? []) === key(l.ids) && key(x.xp_potion_ids ?? []) === key(l.xpIds));
@@ -430,6 +460,7 @@ export async function buildRoster(
         loadout: loadout?.name ?? null,
         loadoutPotions: loadout ? potionsOf(loadout) : [],
         preset: loadout ? presetOf(loadout) : null,
+        potionTier: loadout ? potionTierOf(loadout) : 0,
         bestPet,
         computed,
         stats: computed
@@ -456,6 +487,17 @@ export async function buildRoster(
         unknownPets: Array.from(new Set(resolved.filter((p) => !p.species).map((p) => p.name))),
       },
       pets: petRows,
+      slayer: (() => {
+        const perEnemy = zoneEnemies.map((e) => ({ id: e.id, name: e.name, pct: slayer[e.id] ?? 0 }));
+        const pcts = perEnemy.map((e) => e.pct);
+        return {
+          level: lvl(skills, 'slayer') ?? 0,
+          zoneMaxLevel: zoneEnemies.length ? Math.max(...zoneEnemies.map((e) => e.level)) : 0,
+          perEnemy,
+          avgPct: pcts.length ? Math.round((pcts.reduce((a, b) => a + b, 0) / pcts.length) * 10) / 10 : 0,
+          minPct: pcts.length ? Math.min(...pcts) : 0,
+        };
+      })(),
       pets_hidden: !!r.pets_hidden,
       participation: (PARTICIPATION.includes(r.participation) ? r.participation : 'auto') as Participation,
       key_source: r.key_source ?? null,

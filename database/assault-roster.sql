@@ -92,3 +92,24 @@ CREATE TABLE IF NOT EXISTS assault_roster_goals (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ALTER TABLE assault_roster_goals ENABLE ROW LEVEL SECURITY;
+
+-- ============================================================================
+-- Step 4b: potion presets carry an assault tier (0 none, 1 Bronze … 5 Dream).
+-- Loadouts are rated by the best preset they match or beat (AP%, Prot%, Battle XP%, Combat XP%).
+-- ============================================================================
+ALTER TABLE assault_potion_presets ADD COLUMN IF NOT EXISTS assault_tier INT NOT NULL DEFAULT 0;
+UPDATE assault_potion_presets SET assault_tier = 0 WHERE id = 'free';
+UPDATE assault_potion_presets SET assault_tier = 1 WHERE id = 'budget';
+UPDATE assault_potion_presets SET assault_tier = 4 WHERE id = 'mid';
+UPDATE assault_potion_presets SET assault_tier = 5 WHERE id = 'whale';
+-- Silver and Gold presets between Budget (Bronze) and Mid (Crystal).
+-- Silver: Thunderfury Brew + Dragonblood Tonic + Wraithbane Essence
+-- Gold:   Phoenix Ashes + Dragonblood Tonic + Wraithbane Essence
+INSERT INTO assault_potion_presets (id, label, description, sort_order, combat_potion_ids, xp_potion_ids, assault_tier) VALUES
+  ('silver', 'Silver', 'Budget with a real Battle XP potion: Thunderfury + Dragonblood Tonic + Wraithbane.', 3, ARRAY[11]::INT[], ARRAY[201, 103]::INT[], 2),
+  ('gold', 'Gold', 'Stronger combo for faster kills: Phoenix Ashes + Dragonblood Tonic + Wraithbane.', 4, ARRAY[14]::INT[], ARRAY[201, 103]::INT[], 3)
+ON CONFLICT (id) DO UPDATE SET assault_tier = EXCLUDED.assault_tier;
+UPDATE assault_potion_presets SET sort_order = 1 WHERE id = 'free';
+UPDATE assault_potion_presets SET sort_order = 2 WHERE id = 'budget';
+UPDATE assault_potion_presets SET sort_order = 5 WHERE id = 'mid';
+UPDATE assault_potion_presets SET sort_order = 6 WHERE id = 'whale';

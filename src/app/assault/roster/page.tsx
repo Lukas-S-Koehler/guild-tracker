@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
-  AlertTriangle, ChevronDown, Sparkles, ChevronRight, EyeOff, FlaskConical, Loader2, MapPin, PawPrint, RefreshCw, Swords, Target, Users, X,
+  AlertTriangle, Check, ChevronDown, ChevronRight, EyeOff, FlaskConical, Loader2, MapPin, PawPrint, RefreshCw, Swords, Target, Users, X,
 } from 'lucide-react';
 import type { Participation, Roster, RosterGuild, RosterPotion, RosterRow } from '@/lib/assault-roster';
 import { HUNTING_BOWS, bowBlocker } from '@/lib/combat/hunting-gear';
@@ -94,11 +94,9 @@ function HitsStrip({ r, wide }: { r: RosterRow; wide?: boolean }) {
         ))}
       </div>
       {perfect ? (
-        <span
-          className="text-[11px] font-semibold flex items-center gap-1 rounded-full border border-crystal/50 bg-crystal/10 px-1.5 py-0.5 text-crystal"
-          title={`Every mob here in 2 hits${scaledText ? `, ${scaledText}` : ''}`}
-        >
-          <Sparkles className="h-3 w-3" />Dream{scaledText ? <span className="font-normal">· {scaledText}</span> : null}
+        <span className="text-[11px] text-emerald-500 font-medium flex items-center gap-0.5">
+          <Check className="h-3 w-3" />
+          {scaledText ?? 'all 2 hits'}
         </span>
       ) : (
         <span className="text-[11px] text-muted-foreground">{b.dist.map((d) => `${d.count}×${d.hits}`).join(' · ')}</span>
