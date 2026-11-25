@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { AlertCircle, Check, ChevronDown, ChevronRight, Copy, ExternalLink, Loader2, Search, Trash2 } from 'lucide-react';
+import { AlertCircle, Check, ChevronDown, ChevronRight, Clock, Copy, ExternalLink, Loader2, Search, Trash2, UserPlus } from 'lucide-react';
 import { useApiClient } from '@/lib/api-client';
 import { copyToClipboard } from '@/lib/utils';
 import { TEMPLATES, type RecruitLanguage, type RecruitStatus } from '@/lib/recruit-parse';
@@ -80,6 +80,7 @@ export default function RecruitPanel() {
   const [lang, setLang] = useState<RecruitLanguage>('en');
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [funnel, setFunnel] = useState<Funnel | null>(null);
+  const [guilds, setGuilds] = useState<JoinGuild[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
@@ -99,6 +100,7 @@ export default function RecruitPanel() {
       if (!res.ok) throw new Error(d.error ?? `Failed (${res.status})`);
       setProspects(d.prospects);
       setFunnel(d.funnel);
+      setGuilds(d.guilds ?? []);
       setErr(null);
     } catch (e) {
       setErr(String((e as Error).message ?? e));
@@ -160,6 +162,7 @@ export default function RecruitPanel() {
         </CardContent>
       </Card>
 
+      <JoiningCard api={api} prospects={prospects} guilds={guilds} reload={load} />
       <RecruitCheckCard api={api} />
       <ScoutCard api={api} />
       <NearbyCard api={api} message={message} location={location} lang={lang} setStatus={setStatus} />
@@ -189,6 +192,108 @@ function CopyButton({ text, label, onCopied, variant = 'outline' }: {
 }
 
 type Api = ReturnType<typeof useApiClient>;
+
+type JoinGuild = { id: string; name: string; nickname: string | null; is_assault: boolean | null };
+
+function timeLeft(iso: string) {
+  const ms = Date.parse(iso) - Date.now();
+  if (ms <= 0) return 'expired';
+  const h = Math.floor(ms / 3_600_000);
+  return h >= 1 ? `${h}h left` : `${Math.max(1, Math.round(ms / 60_000))}m left`;
+}
+
+/**
+ * Joining: a player applied and left their old guild but the in-game move is on cooldown. Until the
+ * members sync sees them in the guild (or the window ends) they count as a recruit there: assault
+ * pages, roster row, Discord member role, claiming. Ends by itself once the move shows up.
+ */
+function JoiningCard({ api, prospects, guilds, reload }: { api: Api; prospects: Prospect[]; guilds: JoinGuild[]; reload: () => void }) {
+  const [ign, setIgn] = useState('');
+  const [guildId, setGuildId] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => { if (!guildId && guilds.length) setGuildId(guilds[0].id); }, [guilds, guildId]);
+  const gName = (id: string | null) => {
+    const g = guilds.find((x) => x.id === id);
+    return g ? g.nickname ?? g.name : 'a guild';
+  };
+  const active = prospects.filter((p) => p.joining_member_id && p.joining_until && Date.parse(p.joining_until) > Date.now());
+
+  const call = async (key: string, fn: () => Promise<Response>, ok: (d: any) => string) => {
+    setBusy(key); setErr(null); setMsg(null);
+    try {
+      const res = await fn();
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error ?? `Failed (${res.status})`);
+      setMsg(ok(d));
+      reload();
+    } catch (e) {
+      setErr(String((e as Error).message ?? e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const start = () =>
+    call('start', () => api.post('/api/admin/recruit/joining', { ign: ign.trim(), guild_id: guildId }), (d) => {
+      setIgn('');
+      return `${d.ign} is joining ${gName(guildId)} until ${new Date(d.until).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' })}. Access, roster and Discord role are live now.`;
+    });
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-1.5"><UserPlus className="h-4 w-4" />Joining (guild move on cooldown)</CardTitle>
+        <CardDescription>
+          For players who left their old guild and wait out the 24h cooldown. They count as a recruit of the guild right away:
+          assault pages, roster row, Discord member role (not stripped), and they can claim the character. Ends by itself once the
+          members sync sees them in the guild, or after 48h.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Input value={ign} onChange={(e) => setIgn(e.target.value)} placeholder="Character name" className="w-48"
+            onKeyDown={(e) => { if (e.key === 'Enter' && ign.trim() && guildId) start(); }} />
+          <select value={guildId} onChange={(e) => setGuildId(e.target.value)} className="h-9 rounded-md border bg-background px-2 text-sm">
+            {guilds.map((g) => <option key={g.id} value={g.id}>{g.nickname ?? g.name}{g.is_assault ? ' (assault)' : ''}</option>)}
+          </select>
+          <Button size="sm" onClick={start} disabled={!ign.trim() || !guildId || busy === 'start'}>
+            {busy === 'start' && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}Mark as joining
+          </Button>
+        </div>
+        {msg && <p className="text-sm text-green-500">{msg}</p>}
+        {err && <p className="text-sm text-destructive flex items-center gap-1"><AlertCircle className="h-4 w-4" />{err}</p>}
+        {active.length > 0 && (
+          <div className="divide-y rounded-md border">
+            {active.map((p) => (
+              <div key={p.id} className="flex flex-wrap items-center gap-2 p-2 text-sm">
+                <Name ign={p.ign} />
+                <span className="rounded border border-sky-500/40 bg-sky-500/15 px-1.5 py-0.5 text-xs text-sky-300">Joining {gName(p.joining_guild_id)}</span>
+                <span className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Clock className="h-3 w-3" />{timeLeft(p.joining_until!)}{p.joining_by_name ? ` · by ${p.joining_by_name}` : ''}
+                </span>
+                <div className="ml-auto flex gap-1">
+                  <Button size="sm" variant="outline" disabled={!!busy}
+                    onClick={() => call(`ext-${p.id}`, () => api.patch('/api/admin/recruit/joining', { id: p.id, hours: 24 }), (d) => `${d.ign}: extended to ${timeLeft(d.until)}.`)}>
+                    +24h
+                  </Button>
+                  <Button size="sm" variant="ghost" disabled={!!busy}
+                    onClick={() => {
+                      if (!window.confirm(`Cancel ${p.ign}'s joining state? Their temporary access and Discord role are removed.`)) return;
+                      call(`end-${p.id}`, () => api.delete(`/api/admin/recruit/joining?id=${p.id}`), () => `${p.ign}: joining cancelled.`);
+                    }}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 const TIER_WORD = ['–', 'Bronze', 'Silver', 'Gold', 'Crystal', 'Dream'];
 const TIER_TEXT = ['text-muted-foreground', 'text-amber-600', 'text-zinc-300', 'text-yellow-400', 'text-sky-300', 'text-crystal'];

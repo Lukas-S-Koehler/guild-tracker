@@ -9,6 +9,7 @@
  *    DreamBot's role and stay manual.
  *  - Unmapped people (no character with their discord_id) are never changed, only reported.
  *  - `discord_role_keeps` rows are never removed (e.g. assault staff who aren't officers in game).
+ *  - Characters marked as joining a guild (Recruiting tab) count as members of it until they land.
  *
  *  - Rank ladder (D4, src/lib/achievement-ranks.ts): one rank role, the highest reached by the person's
  *    lifetime Dream XP (Dream Pass, step 15). Managed only once DreamBot has created the rank roles.
@@ -23,6 +24,7 @@ import { addGuildMemberRole, getGuildMember, listAllGuildMembers, removeGuildMem
 import { DISCORD_SERVER_ID } from '@/lib/discord-live';
 import { RANKS, loadRankRoles, rankFor } from '@/lib/achievement-ranks';
 import { latestChampions, lifetimeXpByMember } from '@/lib/dream-pass-read';
+import { activeJoins, withJoining } from '@/lib/guild-joining';
 
 /** Key of the Season Champion role inside the saved rank roles map. */
 export const CHAMPION_KEY = 'season_champion';
@@ -77,12 +79,17 @@ type CharRow = { id: string; discord_id: string; ign: string; is_active: boolean
 
 async function loadCharacters(supabase: SupabaseClient, discordIds?: string[]): Promise<Map<string, CharRow[]>> {
   const out = new Map<string, CharRow[]>();
+  // Joining characters (src/lib/guild-joining.ts) count as in their target guild: the role isn't stripped.
+  const joins = await activeJoins(supabase);
   for (let from = 0; ; from += 1000) {
     let q = supabase.from('members').select('id, discord_id, ign, is_active, current_guild_id, position').not('discord_id', 'is', null).order('id');
     if (discordIds) q = q.in('discord_id', discordIds);
     const { data, error } = await q.range(from, from + 999);
     if (error) throw error;
-    for (const r of (data ?? []) as CharRow[]) out.set(r.discord_id, [...(out.get(r.discord_id) ?? []), r]);
+    for (const raw of (data ?? []) as CharRow[]) {
+      const r = withJoining(raw, joins);
+      out.set(r.discord_id, [...(out.get(r.discord_id) ?? []), r]);
+    }
     if (!data || data.length < 1000) return out;
   }
 }

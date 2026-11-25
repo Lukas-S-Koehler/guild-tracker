@@ -13,6 +13,7 @@ import { getAccountMemberIds } from '@/lib/alt-graph';
 import { findBundleLocks, getActiveClaim, recomputeUserGuildAccess } from '@/lib/account-service';
 import { syncDiscordUser } from '@/lib/discord-roles';
 import { GUIDE_SITE_URL } from '@/lib/game-guide';
+import { activeJoins, withJoining } from '@/lib/guild-joining';
 
 const TOKEN_TTL_MS = 30 * 60_000;
 
@@ -59,15 +60,17 @@ export async function getLinkByUser(supabase: SupabaseClient, userId: string) {
   return data as { user_id: string; discord_id: string; discord_username: string | null; linked_at: string } | null;
 }
 
-/** Active characters staff mapped to this Discord that sit in a Dream guild. */
+/** Active characters staff mapped to this Discord that sit in a Dream guild (joining counts). */
 async function mappedDreamCharacters(supabase: SupabaseClient, discordId: string) {
   const [{ data: chars }, { data: guilds }] = await Promise.all([
-    supabase.from('members').select('id, ign, current_guild_id, character_id, total_level').eq('discord_id', discordId).eq('is_active', true),
+    supabase.from('members').select('id, ign, current_guild_id, is_active, character_id, total_level').eq('discord_id', discordId),
     supabase.from('guilds').select('id'),
   ]);
   const dream = new Set((guilds ?? []).map((g) => g.id as string));
+  const joins = await activeJoins(supabase, (chars ?? []).map((c) => c.id as string));
   return (chars ?? [])
-    .filter((c) => c.current_guild_id && dream.has(c.current_guild_id))
+    .map((c) => withJoining(c, joins))
+    .filter((c) => c.is_active !== false && c.current_guild_id && dream.has(c.current_guild_id))
     .sort((a, b) => (b.total_level ?? 0) - (a.total_level ?? 0));
 }
 

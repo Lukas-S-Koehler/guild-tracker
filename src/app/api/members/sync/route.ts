@@ -4,8 +4,11 @@ import { verifyAdminOrLeader, isErrorResponse } from '@/lib/auth-helpers';
 import { getMemberApiKey } from '@/lib/member-api-key';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { runAltSync } from '@/lib/alt-sync';
+import { recomputeAllClaimedUsers } from '@/lib/account-service';
+import { detectJoins } from '@/lib/recruit-service';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 120;
 
 /**
  * POST /api/members/sync
@@ -208,8 +211,23 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Same follow-ups as the daily cron, so a manual sync after a guild move updates everything:
+  // recruits/joining players that landed → joined, then website access for everyone.
+  let recruitsJoined: number | null = null;
+  let accessChanged: number | null = null;
+  try {
+    const adminSb = createAdminClient();
+    recruitsJoined = await detectJoins(adminSb);
+    accessChanged = (await recomputeAllClaimedUsers(adminSb)).changed;
+  } catch (err) {
+    console.log('[Sync] recruit/access follow-up failed (non-fatal):', err);
+  }
+
   console.log(`✅ SYNC COMPLETE — ${members.length} members synced`);
   console.log("=== SYNC MEMBERS END ===");
 
-  return NextResponse.json({ success: true, synced: members.length, new_members: newcomerHashedIds.length, alt_sync: altSyncResult });
+  return NextResponse.json({
+    success: true, synced: members.length, new_members: newcomerHashedIds.length, alt_sync: altSyncResult,
+    recruits_joined: recruitsJoined, access_changed: accessChanged,
+  });
 }

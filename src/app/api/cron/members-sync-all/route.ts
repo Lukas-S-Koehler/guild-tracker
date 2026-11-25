@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase-server';
 import { recomputeAllClaimedUsers } from '@/lib/account-service';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { detectJoins } from '@/lib/recruit-service';
+import { expireJoins } from '@/lib/guild-joining-actions';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -164,6 +165,22 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Recruits that showed up in a Dream guild → joined (also ends their joining state).
+  let recruits_joined: number | { error: string };
+  try {
+    recruits_joined = await detectJoins(supabase);
+  } catch (err) {
+    recruits_joined = { error: String(err) };
+  }
+
+  // Joining windows that ran out → cleared before the recompute so their access drops now.
+  let joins_expired: number | { error: string };
+  try {
+    joins_expired = await expireJoins(supabase);
+  } catch (err) {
+    joins_expired = { error: String(err) };
+  }
+
   // Guild moves, promotions and leaves → update derived website access.
   let access: { users: number; changed: number } | { error: string };
   try {
@@ -172,13 +189,5 @@ export async function POST(req: NextRequest) {
     access = { error: String(err) };
   }
 
-  // Recruits that showed up in a Dream guild → joined.
-  let recruits_joined: number | { error: string };
-  try {
-    recruits_joined = await detectJoins(supabase);
-  } catch (err) {
-    recruits_joined = { error: String(err) };
-  }
-
-  return NextResponse.json({ success: true, results, classes_filled, access, recruits_joined });
+  return NextResponse.json({ success: true, results, classes_filled, access, recruits_joined, joins_expired });
 }

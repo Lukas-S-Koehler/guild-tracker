@@ -13,7 +13,13 @@ export async function GET(req: NextRequest) {
   const auth = await verifyAuth(req, 'DEPUTY');
   if (auth instanceof NextResponse) return auth;
   try {
-    return NextResponse.json(await listProspects(createAdminClient()));
+    const supabase = createAdminClient();
+    const [list, { data: guilds }] = await Promise.all([
+      listProspects(supabase),
+      // For the "Joining" card's guild picker (assault guilds first).
+      supabase.from('guilds').select('id, name, nickname, is_assault').order('is_assault', { ascending: false }).order('name'),
+    ]);
+    return NextResponse.json({ ...list, guilds: guilds ?? [] });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }

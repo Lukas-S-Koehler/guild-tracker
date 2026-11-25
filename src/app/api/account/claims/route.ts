@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { findBundleLocks, getActiveClaim, recomputeUserGuildAccess } from '@/lib/account-service';
 import { requireUser, isResponse } from '@/lib/user-auth';
+import { activeJoins } from '@/lib/guild-joining';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +25,9 @@ export async function POST(req: NextRequest) {
   const { data: guild } = member.current_guild_id
     ? await supabase.from('guilds').select('id').eq('id', member.current_guild_id).maybeSingle()
     : { data: null };
-  if (!guild || member.is_active === false) {
+  // Staff marked it as joining a Dream guild (move on cooldown): claimable already.
+  const joining = (await activeJoins(supabase, [member.id])).has(member.id);
+  if (!joining && (!guild || member.is_active === false)) {
     return NextResponse.json({ error: 'Only characters currently in a Dream guild can be claimed' }, { status: 400 });
   }
 

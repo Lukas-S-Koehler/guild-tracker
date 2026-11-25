@@ -10,6 +10,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createAdminClient } from '@/lib/supabase-server';
 import { getAccountMemberIds } from '@/lib/alt-graph';
 import { SUPER_ADMIN_EMAIL } from '@/lib/auth-helpers';
+import { activeJoins, withJoining } from '@/lib/guild-joining';
 
 export type SiteRole = 'MEMBER' | 'OFFICER' | 'DEPUTY' | 'LEADER';
 const ROLE_RANK: Record<SiteRole, number> = { MEMBER: 0, OFFICER: 1, DEPUTY: 2, LEADER: 3 };
@@ -43,6 +44,8 @@ export interface AccountCharacter {
   in_dream_guild: boolean;
   /** Directly claimed (vs. picked up as an alt). */
   claimed: boolean;
+  /** Marked as joining guild_id by staff (in-game move still on cooldown), until this time. */
+  joining_until?: string | null;
 }
 
 export async function getAccountCharacters(
@@ -68,17 +71,20 @@ export async function getBundleCharacters(
   supabase: SupabaseClient = createAdminClient()
 ): Promise<AccountCharacter[]> {
   if (ids.length === 0) return [];
-  const [{ data: members }, { data: guilds }] = await Promise.all([
+  const [{ data: members }, { data: guilds }, joins] = await Promise.all([
     supabase
       .from('members')
       .select('id, ign, hashed_id, avatar_url, class, total_level, position, current_guild_id, is_active')
       .in('id', ids),
     supabase.from('guilds').select('id, name, nickname'),
+    activeJoins(supabase, ids),
   ]);
   const guildMap = new Map((guilds ?? []).map((g) => [g.id as string, g]));
 
   return (members ?? [])
-    .map((m) => {
+    .map((raw) => {
+      // Joining (src/lib/guild-joining.ts): shown as a recruit of the target guild until the move lands.
+      const m = withJoining(raw, joins);
       const g = m.current_guild_id ? guildMap.get(m.current_guild_id) : undefined;
       return {
         member_id: m.id,
@@ -93,6 +99,7 @@ export async function getBundleCharacters(
         guild_nickname: g?.nickname ?? null,
         in_dream_guild: !!g && m.is_active !== false,
         claimed: claimedSet.has(m.id),
+        joining_until: m.joining?.until ?? null,
       };
     })
     .sort((a, b) => Number(b.claimed) - Number(a.claimed) || (b.total_level ?? 0) - (a.total_level ?? 0));

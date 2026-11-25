@@ -28,6 +28,12 @@ export interface Prospect {
   interest_guild_id: string | null;
   interest_tiers: InterestSnapshot | null;
   interest_at: string | null;
+  /** Joining state (src/lib/guild-joining.ts): treated as a recruit of joining_guild_id until joining_until. */
+  joining_member_id: string | null;
+  joining_guild_id: string | null;
+  joining_until: string | null;
+  joining_at: string | null;
+  joining_by_name: string | null;
 }
 
 /** What staff see about an interested player (stored on the prospect). */
@@ -44,7 +50,16 @@ export interface InterestSnapshot {
 export interface Actor { id: string; name: string | null }
 
 const COLS =
-  'id, ign, status, location, language, note, messaged_at, replied_at, joined_at, joined_guild_id, recheck_after, messaged_by_name, updated_by_name, updated_at, interest_guild_id, interest_tiers, interest_at';
+  'id, ign, status, location, language, note, messaged_at, replied_at, joined_at, joined_guild_id, recheck_after, messaged_by_name, updated_by_name, updated_at, interest_guild_id, interest_tiers, interest_at, joining_member_id, joining_guild_id, joining_until, joining_at, joining_by_name';
+const BASE_COLS = COLS.replace(/, joining_[a-z_]+/g, '');
+let hasJoiningCols = false;
+/** COLS, or without the joining columns while database/recruit-joining.sql hasn't run yet. */
+async function cols(supabase: SupabaseClient): Promise<string> {
+  if (hasJoiningCols) return COLS;
+  const { error } = await supabase.from('recruit_prospects').select('joining_until').limit(1);
+  hasJoiningCols = !error;
+  return hasJoiningCols ? COLS : BASE_COLS;
+}
 const DAY_MS = 86_400_000;
 const key = (ign: string) => ign.toLowerCase();
 
@@ -77,9 +92,9 @@ async function dreamMembers(supabase: SupabaseClient, igns: string[]): Promise<M
 }
 
 async function allProspects(supabase: SupabaseClient): Promise<Prospect[]> {
-  const { data, error } = await supabase.from('recruit_prospects').select(COLS).order('updated_at', { ascending: false });
+  const { data, error } = await supabase.from('recruit_prospects').select(await cols(supabase)).order('updated_at', { ascending: false });
   if (error) throw new Error(error.message);
-  return (data ?? []) as Prospect[];
+  return (data ?? []) as unknown as Prospect[];
 }
 
 /** Marks prospects that now show up in a Dream guild as joined. Returns how many changed. */
@@ -92,11 +107,17 @@ export async function detectJoins(supabase: SupabaseClient): Promise<number> {
   for (const p of open) {
     const guild = inDream.get(key(p.ign));
     if (!guild) continue;
-    // Interested players may already be in a Dream guild: joined = they reached the assault guild they asked for.
-    if (p.interest_guild_id && guild !== p.interest_guild_id) continue;
+    // Joining / interested players may still show in their old Dream guild: joined = they reached
+    // the guild they're joining (or the assault guild they asked for).
+    const target = p.joining_guild_id ?? p.interest_guild_id;
+    if (target && guild !== target) continue;
     await supabase
       .from('recruit_prospects')
-      .update({ status: 'joined', joined_at: now, joined_guild_id: guild, recheck_after: null, updated_at: now })
+      .update({
+        status: 'joined', joined_at: now, joined_guild_id: guild, recheck_after: null, updated_at: now,
+        // The move landed: the real membership takes over from the joining state.
+        joining_member_id: null, joining_guild_id: null, joining_until: null,
+      })
       .eq('id', p.id);
     n++;
   }
@@ -180,7 +201,8 @@ export interface SetStatusInput {
 /** Manual status change from the UI. Creates the prospect if new. */
 export async function setStatus(supabase: SupabaseClient, input: SetStatusInput, actor: Actor): Promise<Prospect> {
   const ign = input.ign.trim();
-  const { data: existing } = await supabase.from('recruit_prospects').select(COLS).ilike('ign', ign.replace(/[\\%_]/g, (c) => `\\${c}`)).maybeSingle();
+  const { data: found } = await supabase.from('recruit_prospects').select(await cols(supabase)).ilike('ign', ign.replace(/[\\%_]/g, (c) => `\\${c}`)).maybeSingle();
+  const existing = found as unknown as Prospect | null;
   const now = new Date().toISOString();
   const days = RECHECK_DAYS[input.status];
   const patch: Record<string, unknown> = {
@@ -205,9 +227,9 @@ export async function setStatus(supabase: SupabaseClient, input: SetStatusInput,
   const q = existing
     ? supabase.from('recruit_prospects').update(patch).eq('id', existing.id)
     : supabase.from('recruit_prospects').insert(patch);
-  const { data, error } = await q.select(COLS).single();
+  const { data, error } = await q.select(await cols(supabase)).single();
   if (error) throw new Error(error.message);
-  return data as Prospect;
+  return data as unknown as Prospect;
 }
 
 /**
@@ -220,8 +242,8 @@ export async function registerInterest(
   input: { ign: string; guild_id: string; user_id: string; snapshot: InterestSnapshot }
 ): Promise<{ prospect: Prospect; previous: RecruitStatus | null; sameGuild: boolean }> {
   const ign = input.ign.trim();
-  const { data: existing } = await supabase.from('recruit_prospects').select(COLS).ilike('ign', ign.replace(/[\\%_]/g, (c) => `\\${c}`)).maybeSingle();
-  const prev = (existing as Prospect | null) ?? null;
+  const { data: existing } = await supabase.from('recruit_prospects').select(await cols(supabase)).ilike('ign', ign.replace(/[\\%_]/g, (c) => `\\${c}`)).maybeSingle();
+  const prev = (existing as unknown as Prospect | null) ?? null;
   const now = new Date().toISOString();
   const patch: Record<string, unknown> = {
     ign: prev?.ign ?? ign,
@@ -239,9 +261,9 @@ export async function registerInterest(
   const q = prev
     ? supabase.from('recruit_prospects').update(patch).eq('id', prev.id)
     : supabase.from('recruit_prospects').insert(patch);
-  const { data, error } = await q.select(COLS).single();
+  const { data, error } = await q.select(await cols(supabase)).single();
   if (error) throw new Error(error.message);
-  return { prospect: data as Prospect, previous: prev?.status ?? null, sameGuild: prev?.interest_guild_id === input.guild_id };
+  return { prospect: data as unknown as Prospect, previous: prev?.status ?? null, sameGuild: prev?.interest_guild_id === input.guild_id };
 }
 
 export async function updateNote(supabase: SupabaseClient, id: string, note: string | null, actor: Actor) {

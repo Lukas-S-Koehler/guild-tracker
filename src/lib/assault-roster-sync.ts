@@ -10,6 +10,7 @@
  * site (sees hidden pets), otherwise the super admin key (fetchCharacterSnapshot falls back
  * on its own when the owner's key is missing or rejected).
  */
+import { activeJoins } from '@/lib/guild-joining';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createAdminClient } from '@/lib/supabase-server';
 import { getAllClaimLocks } from '@/lib/account-service';
@@ -52,13 +53,29 @@ export async function assaultMembers(supabase: SupabaseClient = createAdminClien
   const guilds = await assaultGuildIds(supabase);
   const ids = guildId ? guilds.filter((g) => g === guildId) : guilds;
   if (!ids.length) return [];
-  const { data } = await supabase
-    .from('members')
-    .select('id, ign, hashed_id, current_guild_id')
-    .in('current_guild_id', ids)
-    .eq('is_active', true)
-    .not('hashed_id', 'is', null);
-  return (data ?? []) as AssaultMember[];
+  const [{ data }, joins] = await Promise.all([
+    supabase
+      .from('members')
+      .select('id, ign, hashed_id, current_guild_id')
+      .in('current_guild_id', ids)
+      .eq('is_active', true)
+      .not('hashed_id', 'is', null),
+    activeJoins(supabase),
+  ]);
+  const out = new Map<string, AssaultMember>();
+  for (const m of (data ?? []) as AssaultMember[]) {
+    // Joining another guild: they show there instead (handled below).
+    const j = joins.get(m.id);
+    if (j && j.guild_id !== m.current_guild_id) continue;
+    out.set(m.id, m);
+  }
+  // Joining an assault guild (src/lib/guild-joining.ts): on that roster before the move lands.
+  const joiningIds = Array.from(joins.values()).filter((j) => ids.includes(j.guild_id) && !out.has(j.member_id)).map((j) => j.member_id);
+  if (joiningIds.length) {
+    const { data: extra } = await supabase.from('members').select('id, ign, hashed_id').in('id', joiningIds).not('hashed_id', 'is', null);
+    for (const m of extra ?? []) out.set(m.id as string, { id: m.id, ign: m.ign, hashed_id: m.hashed_id, current_guild_id: joins.get(m.id as string)!.guild_id });
+  }
+  return Array.from(out.values());
 }
 
 export async function syncAssaultRoster(opts: RosterSyncOptions = {}): Promise<RosterSyncResult> {
