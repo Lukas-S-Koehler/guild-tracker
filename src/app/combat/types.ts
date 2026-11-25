@@ -71,6 +71,30 @@ export interface PotionLoadout {
   is_default: boolean;
   source: 'web' | 'discord';
   combat_potion_ids: number[];
+  xp_potion_ids: number[];
+}
+
+/** XP-slot potion (Battle XP / Combat XP), assaulters only on /combat. */
+export interface XpPotionRow {
+  id: number;
+  name: string;
+  category: 'combat_xp' | 'battle_xp';
+  quality: string | null;
+  effect_value: number;
+  xp_value: number;
+  efficiency_value: number;
+  duration_minutes: number | null;
+  description: string | null;
+  image_url: string | null;
+}
+
+/** Assault potion preset (Budget / Mid / Whale …) from /assault/potions. */
+export interface PotionPreset {
+  id: string;
+  label: string;
+  combat_potion_ids: number[];
+  xp_potion_ids: number[];
+  assault_tier?: number;
 }
 
 export interface MemberRow {

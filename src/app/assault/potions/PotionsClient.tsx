@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -45,13 +45,19 @@ export function PotionsClient({ combat, xp, presets }: Props) {
   const [loading, setLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  const openedDefault = useRef(false);
   const refresh = async () => {
     if (!user) return;
     setLoading(true);
     try {
       const res = await fetch('/api/assault/potions/loadouts');
       const json = await res.json();
-      setSaved(json.loadouts ?? []);
+      const list: SavedLoadout[] = json.loadouts ?? [];
+      setSaved(list);
+      // First load: open your current assault loadout (also what /combat uses and saves), not the Mid preset.
+      const def = list.find((l) => l.is_default);
+      if (!openedDefault.current && def) loadSaved(def);
+      openedDefault.current = true;
     } finally {
       setLoading(false);
     }

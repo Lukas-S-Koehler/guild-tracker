@@ -259,6 +259,8 @@ export interface BuffState {
   protPotionPct: number;
   /** Combat potions picked on /combat (slot-legal). Older setups only have the % fields. */
   potionIds?: number[];
+  /** XP-slot potions (Battle XP / Combat XP) from an assault preset or loadout. No combat stat effect yet. */
+  xpPotionIds?: number[];
   /** Assault siege: Scorpion +100 AP */
   scorpion: boolean;
   /** Assault siege: Explosive Keg +10% AP */

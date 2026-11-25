@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, RefreshCw, Swords, Trash2, UserPlus, Save, FlaskConical, Shield, Info, X, Pin } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useApiClient } from '@/lib/api-client';
+import { RECOMMENDED_PRESET_ID } from '@/lib/potion-rules';
 import {
   applyBuffs,
   buildCharacterStats,
@@ -47,13 +48,15 @@ import type {
   Enemy,
   PetState,
   PotionLoadout,
+  PotionPreset,
   PotionRow,
   ProfileSettings,
   SandboxState,
   SetupRow,
   TargetState,
+  XpPotionRow,
 } from './types';
-import { clearSlot, kindOf, legalPotionIds, potionIdsOf, potionKey, togglePotion, withPotions } from './potion-slots';
+import { clearSlot, kindOf, legalPotionIds, legalXpIds, potionIdsOf, potionKey, togglePotion, toggleXp, withPotions } from './potion-slots';
 
 /* ─────────────────────────── helpers ─────────────────────────── */
 
@@ -163,6 +166,11 @@ interface Bootstrap {
   canCalibrate?: boolean;
   /** Potion loadouts (web + Discord), default first. */
   loadouts?: PotionLoadout[];
+  /** Member of an assault guild (DE/DI): may take whole assault presets, XP slots included. */
+  assaulter?: boolean;
+  /** Assault potion presets + XP potions (assaulters only, else empty). */
+  presets?: PotionPreset[];
+  xpPotions?: XpPotionRow[];
   /** Hunting bow per member_id (members.hunting_bow, shared with /assault/roster). */
   huntingBows?: Record<string, string | null>;
 }
@@ -374,10 +382,12 @@ function Workbench({
 
   /* potions: start from your real assault loadout (default one from /assault/potions or Discord) */
   const potionById = useMemo(() => new Map(boot.potions.map((p) => [p.id, p])), [boot.potions]);
-  const loadouts = boot.loadouts ?? [];
+  const xpById = useMemo(() => new Map((boot.xpPotions ?? []).map((p) => [p.id, p])), [boot.xpPotions]);
+  const [loadouts, setLoadouts] = useState<PotionLoadout[]>(boot.loadouts ?? []);
   const myLoadout = loadouts.find((l) => l.is_default) ?? loadouts[0] ?? null;
   const loadoutIds = useMemo(() => legalPotionIds(myLoadout?.combat_potion_ids ?? [], potionById), [myLoadout, potionById]);
-  const loadoutBuffs = () => withPotions({ ...NO_BUFFS }, loadoutIds, potionById);
+  const loadoutXpIds = useMemo(() => legalXpIds(myLoadout?.xp_potion_ids ?? [], xpById), [myLoadout, xpById]);
+  const loadoutBuffs = () => ({ ...withPotions({ ...NO_BUFFS }, loadoutIds, potionById), xpPotionIds: loadoutXpIds });
 
   /* profile-backed (saved to the character automatically) */
   const [settings, setSettings] = useState<ProfileSettings>(profile.settings ?? {});
@@ -533,7 +543,12 @@ function Workbench({
   }
   function resetToCharacter() {
     // Siege buffs are situational, so they stay; potions go back to your loadout.
-    setSb((cur) => ({ ...emptySandbox(), buffs: withPotions(cur.buffs, loadoutIds, potionById), target: cur.target, counts: cur.counts }));
+    setSb((cur) => ({
+      ...emptySandbox(),
+      buffs: { ...withPotions(cur.buffs, loadoutIds, potionById), xpPotionIds: loadoutXpIds },
+      target: cur.target,
+      counts: cur.counts,
+    }));
     setGearSandbox(false);
     setActiveSetupId(null);
   }
@@ -546,9 +561,36 @@ function Workbench({
   const mySetups = boot.setups.filter((s) => s.profile_id === profile.id || !s.profile_id);
   const activeSetup = mySetups.find((s) => s.id === activeSetupId) ?? null;
   const pickedIds = potionIdsOf(sb.buffs, boot.potions);
-  const potionsDiffer = pickedIds == null || potionKey(pickedIds) !== potionKey(loadoutIds);
+  const pickedXpIds = legalXpIds(sb.buffs.xpPotionIds ?? [], xpById);
+  const potionsDiffer =
+    pickedIds == null || potionKey(pickedIds) !== potionKey(loadoutIds) || (!!boot.assaulter && potionKey(pickedXpIds) !== potionKey(loadoutXpIds));
   const sandboxActive = gearSandbox || sb.pet.mode === 'sandbox' || !!sb.classOverride || potionsDiffer || slayerSandboxed || !!activeSetup;
   const setPotionIds = (ids: number[]) => setSb((s) => ({ ...s, buffs: withPotions(s.buffs, ids, potionById) }));
+  const setXpIds = (ids: number[]) => setSb((s) => ({ ...s, buffs: { ...s.buffs, xpPotionIds: legalXpIds(ids, xpById) } }));
+  /** A whole preset / loadout: combat slots + XP slots together. */
+  const applyPotions = (combatIds: number[], xpIds: number[]) =>
+    setSb((s) => ({ ...s, buffs: { ...withPotions(s.buffs, combatIds, potionById), xpPotionIds: legalXpIds(xpIds, xpById) } }));
+  const [savingLoadout, setSavingLoadout] = useState(false);
+  /** Save what's in the slots as your assault loadout (default), shared with /assault/potions and Discord. */
+  async function saveAsLoadout(suggested: string) {
+    const name = window.prompt('Save as your assault loadout (also on /assault/potions and Discord). Name:', suggested)?.trim();
+    if (!name) return;
+    setSavingLoadout(true);
+    const res = await api.post('/api/assault/potions/loadouts', {
+      name,
+      is_default: true,
+      combat_potion_ids: pickedIds ?? [],
+      xp_potion_ids: pickedXpIds,
+    });
+    const data = await res.json().catch(() => ({}));
+    setSavingLoadout(false);
+    if (!res.ok || !data.loadout) return alert(data.error ?? 'Could not save loadout');
+    const l = data.loadout;
+    setLoadouts((cur) => [
+      { id: l.id, name: l.name, is_default: true, source: 'web', combat_potion_ids: l.combat_potion_ids ?? [], xp_potion_ids: l.xp_potion_ids ?? [] },
+      ...cur.filter((x) => x.id !== l.id).map((x) => ({ ...x, is_default: false })),
+    ]);
+  }
 
   return (
     <div className="space-y-4">
@@ -695,6 +737,15 @@ function Workbench({
             loadouts={loadouts}
             myLoadout={myLoadout}
             differs={potionsDiffer}
+            assaulter={!!boot.assaulter}
+            presets={boot.presets ?? []}
+            xpPotions={boot.xpPotions ?? []}
+            xpById={xpById}
+            xpIds={pickedXpIds}
+            setXpIds={setXpIds}
+            applyPotions={applyPotions}
+            onSaveLoadout={saveAsLoadout}
+            savingLoadout={savingLoadout}
           />
           <PetCard
             pet={sb.pet}
@@ -1156,6 +1207,14 @@ function GearCard({
                     <button className="px-1.5 text-sm hover:bg-muted disabled:opacity-30" disabled={sel.tier <= 1} onClick={() => setTier(key, sel.tier - 1)}>−</button>
                     <span className="text-xs w-9 text-center font-medium">T{sel.tier}</span>
                     <button className="px-1.5 text-sm hover:bg-muted disabled:opacity-30" disabled={sel.tier >= maxTier} onClick={() => setTier(key, sel.tier + 1)}>+</button>
+                    <button
+                      className="px-1.5 text-[10px] font-semibold border-l hover:bg-muted disabled:opacity-30"
+                      disabled={sel.tier >= maxTier}
+                      onClick={() => setTier(key, maxTier)}
+                      title={`Max tier (T${maxTier})`}
+                    >
+                      MAX
+                    </button>
                   </div>
                 )}
               </div>
@@ -1179,6 +1238,17 @@ const SLOT_ROWS = [
   { kind: 'combo', label: 'Both slots', icon: '✦' },
 ] as const;
 
+const XP_ROWS = [
+  { category: 'battle_xp', label: 'Battle XP', icon: '⭐' },
+  { category: 'combat_xp', label: 'Combat XP', icon: '✧' },
+] as const;
+
+/** Short effect label for an XP potion chip (values filled in over time). */
+const xpEffect = (p: XpPotionRow) =>
+  [(p.xp_value || p.effect_value) > 0 && `+${p.xp_value || p.effect_value}% XP`, p.efficiency_value > 0 && `+${p.efficiency_value}% eff`]
+    .filter(Boolean)
+    .join(' · ');
+
 const potionBonus = (p: PotionRow) =>
   [p.attack_power_bonus && `+${p.attack_power_bonus}% AP`, p.protection_bonus && `+${p.protection_bonus}% Prot`].filter(Boolean).join(' · ');
 
@@ -1196,7 +1266,27 @@ function BuffsCard({
   loadouts,
   myLoadout,
   differs,
+  assaulter,
+  presets,
+  xpPotions,
+  xpById,
+  xpIds,
+  setXpIds,
+  applyPotions,
+  onSaveLoadout,
+  savingLoadout,
 }: {
+  assaulter: boolean;
+  presets: PotionPreset[];
+  xpPotions: XpPotionRow[];
+  xpById: Map<number, XpPotionRow>;
+  /** XP-slot potions picked (assaulters only). */
+  xpIds: number[];
+  setXpIds: (ids: number[]) => void;
+  /** Put a whole preset / loadout in the slots (combat + XP). */
+  applyPotions: (combatIds: number[], xpIds: number[]) => void;
+  onSaveLoadout: (suggestedName: string) => void;
+  savingLoadout: boolean;
   buffs: BuffState;
   setBuffs: (b: BuffState) => void;
   /** null = an old setup whose potion % matches no real potion */
@@ -1218,9 +1308,18 @@ function BuffsCard({
       .filter((p) => kindOf(p) === r.kind)
       .sort((a, b) => a.attack_power_bonus + a.protection_bonus - (b.attack_power_bonus + b.protection_bonus)),
   })).filter((r) => r.items.length);
-  const loadoutKey = (l: PotionLoadout) => potionKey(legalPotionIds(l.combat_potion_ids, potionById));
-  const activeKey = pickedIds ? potionKey(pickedIds) : null;
+  // A loadout / preset is "on" when combat slots match, and (assaulters) XP slots too.
+  const keyOf = (c: number[], x: number[]) =>
+    `${potionKey(legalPotionIds(c, potionById))}|${assaulter ? potionKey(legalXpIds(x, xpById)) : ''}`;
+  const loadoutKey = (l: PotionLoadout) => keyOf(l.combat_potion_ids, l.xp_potion_ids ?? []);
+  const activeKey = pickedIds ? keyOf(pickedIds, xpIds) : null;
   const myLoadoutIds = myLoadout ? legalPotionIds(myLoadout.combat_potion_ids, potionById) : [];
+  const activePreset = presets.find((p) => activeKey === keyOf(p.combat_potion_ids, p.xp_potion_ids));
+  const matchesSaved = loadouts.some((l) => l.source === 'web' && activeKey === loadoutKey(l));
+  const xpPicked = xpIds.map((id) => xpById.get(id)).filter((p): p is XpPotionRow => !!p);
+  const xpRows = assaulter
+    ? XP_ROWS.map((r) => ({ ...r, items: xpPotions.filter((p) => p.category === r.category) })).filter((r) => r.items.length)
+    : [];
 
   return (
     <Card>
@@ -1232,7 +1331,7 @@ function BuffsCard({
               <button
                 type="button"
                 className="text-xs text-amber-400 hover:underline"
-                onClick={() => setPotionIds(myLoadoutIds)}
+                onClick={() => applyPotions(myLoadoutIds, myLoadout?.xp_potion_ids ?? [])}
                 title="Put your current assault loadout back in the slots"
               >
                 {myLoadout ? `Differs from ${myLoadout.name} · reset` : 'Clear potions'}
@@ -1256,7 +1355,7 @@ function BuffsCard({
               <button
                 key={l.id}
                 type="button"
-                onClick={() => setPotionIds(lIds)}
+                onClick={() => applyPotions(lIds, l.xp_potion_ids ?? [])}
                 title={`${l.name}${l.is_default ? ' (current assault loadout)' : ''}${l.source === 'discord' ? ' · from Discord' : ''}: ${lIds.map((id) => potionById.get(id)?.name).join(' + ') || 'no combat potions'}`}
                 className={`inline-flex items-center gap-1 rounded-full border pl-1.5 pr-2 py-0.5 text-xs transition-colors ${
                   on ? 'border-primary bg-primary/10 text-foreground' : 'hover:bg-muted text-muted-foreground'
@@ -1276,6 +1375,38 @@ function BuffsCard({
             {loadouts.length ? 'Edit' : 'No saved loadout yet · make one'}
           </Link>
         </div>
+
+        {/* assault presets: assaulters take the whole preset, XP slots included */}
+        {assaulter && presets.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs text-muted-foreground mr-1">Assault presets</span>
+            {presets.map((p) => {
+              const cIds = legalPotionIds(p.combat_potion_ids, potionById);
+              const xIds = legalXpIds(p.xp_potion_ids, xpById);
+              const names = [...cIds.map((id) => potionById.get(id)?.name), ...xIds.map((id) => xpById.get(id)?.name)].filter(Boolean);
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => applyPotions(cIds, xIds)}
+                  title={`${p.label} preset: ${names.join(' + ') || 'no potions'}`}
+                  className={`inline-flex items-center gap-1 rounded-full border pl-1.5 pr-2 py-0.5 text-xs transition-colors ${
+                    activePreset?.id === p.id ? 'border-primary bg-primary/10 text-foreground' : 'hover:bg-muted text-muted-foreground'
+                  }`}
+                >
+                  {cIds.length + xIds.length ? (
+                    <span className="flex -space-x-1.5">
+                      {cIds.map((id) => <PotionIcon key={`c${id}`} p={potionById.get(id)} className="h-4 w-4 ring-1 ring-background" />)}
+                      {xIds.map((id) => <PotionIcon key={`x${id}`} p={xpById.get(id)} className="h-4 w-4 ring-1 ring-background" />)}
+                    </span>
+                  ) : null}
+                  {p.label}
+                  {p.id === RECOMMENDED_PRESET_ID && <span className="text-[10px] text-amber-400">★</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* slots */}
         <div className="rounded-md border divide-y">
@@ -1316,6 +1447,37 @@ function BuffsCard({
               </div>
             );
           })}
+          {xpRows.map((r) => {
+            const inSlot = xpPicked.find((p) => p.category === r.category);
+            return (
+              <div key={r.category} className="flex items-start gap-2 px-2 py-1.5">
+                <span className="w-20 shrink-0 pt-1 text-xs text-muted-foreground">
+                  {r.icon} {r.label}
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  <PotionChip on={!inSlot} onClick={() => setXpIds(xpIds.filter((id) => xpById.get(id)?.category !== r.category))}>
+                    <span className="text-muted-foreground">None</span>
+                  </PotionChip>
+                  {r.items.map((p) => {
+                    const clash = xpPicked.find((o) => o.category !== p.category && o.efficiency_value > 0 && p.efficiency_value > 0);
+                    return (
+                      <PotionChip
+                        key={p.id}
+                        on={xpIds.includes(p.id)}
+                        dim={!!clash}
+                        onClick={() => setXpIds(toggleXp(xpIds, p, xpById))}
+                        title={`${p.name}${p.description ? ` · ${p.description}` : ''}${p.duration_minutes ? ` · ${p.duration_minutes} min` : ''}${clash ? ` · replaces ${clash.name} (both hunting efficiency)` : ''}`}
+                      >
+                        <PotionIcon p={p} className="h-4 w-4" />
+                        <span>{p.name}</span>
+                        {xpEffect(p) && <span className="text-[10px] text-muted-foreground">{xpEffect(p)}</span>}
+                      </PotionChip>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
         </div>
         <div className="text-xs text-muted-foreground">
           {pickedIds == null ? (
@@ -1326,6 +1488,18 @@ function BuffsCard({
             <>Potions: <b className="text-foreground">+{buffs.apPotionPct}% AP · +{buffs.protPotionPct}% Prot</b></>
           ) : (
             'No potions.'
+          )}
+          {xpPicked.length > 0 && <> · XP: <b className="text-foreground">{xpPicked.map((p) => p.name).join(' + ')}</b></>}
+          {assaulter && pickedIds != null && (picked.length > 0 || xpPicked.length > 0) && !matchesSaved && (
+            <button
+              type="button"
+              disabled={savingLoadout}
+              onClick={() => onSaveLoadout(activePreset ? `${activePreset.label} loadout` : 'My loadout')}
+              className="ml-2 text-primary hover:underline disabled:opacity-50"
+              title="Save these potions as your assault loadout: shows on /assault/potions, Discord and the roster"
+            >
+              {savingLoadout ? 'Saving…' : 'Save as my assault loadout'}
+            </button>
           )}
         </div>
 
@@ -1370,7 +1544,7 @@ function PotionChip({
   );
 }
 
-function PotionIcon({ p, className }: { p: PotionRow | undefined; className?: string }) {
+function PotionIcon({ p, className }: { p: { image_url: string | null } | undefined; className?: string }) {
   if (!p?.image_url) return <span className={`inline-block rounded-full bg-muted ${className ?? ''}`} />;
   return <img src={p.image_url} alt="" className={`rounded-full bg-background object-contain ${className ?? ''}`} />;
 }

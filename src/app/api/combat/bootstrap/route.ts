@@ -4,6 +4,7 @@ import { requireUser, isResponse } from '@/lib/user-auth';
 import { getAccountCharacters } from '@/lib/account-service';
 import { PROFILE_COLUMNS, canCalibrateStats } from '@/lib/combat/profile-service';
 import { ensureCustomPets } from '@/lib/combat/custom-pets-server';
+import { listOwnerLoadouts, ownerForUser } from '@/lib/potions-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,20 +20,14 @@ export async function GET(req: NextRequest) {
   const auth = { user };
 
   const supabase = createAdminClient();
-  const [characters, { data: link }] = await Promise.all([
-    getAccountCharacters(user.id, supabase),
-    supabase.from('user_discord_links').select('discord_id').eq('user_id', user.id).maybeSingle(),
-  ]);
-  // Potion loadouts from /assault/potions (web) and /potions in Discord, so the Buffs card can
-  // start from the user's real assault setup.
-  const loadoutQ = supabase
-    .from('assault_potion_loadouts')
-    .select('id, name, is_default, combat_potion_ids, user_id, updated_at')
-    .order('updated_at', { ascending: false });
+  const characters = await getAccountCharacters(user.id, supabase);
+  // Potion loadouts from /assault/potions (web) and /potions in Discord: one set per person
+  // (see LoadoutOwner), so the Buffs card starts from the user's real assault setup.
+  const loadoutQ = ownerForUser(user.id, supabase).then((o) => listOwnerLoadouts(o, supabase));
   const [customPets, canCalibrate, loadouts, profiles, setups, gear, potions, enemies] = await Promise.all([
     ensureCustomPets(),
     canCalibrateStats(user.id, characters, supabase),
-    link?.discord_id ? loadoutQ.or(`user_id.eq.${user.id},discord_user_id.eq.${link.discord_id}`) : loadoutQ.eq('user_id', user.id),
+    loadoutQ,
     supabase.from('combat_profiles').select(PROFILE_COLUMNS).eq('user_id', auth.user.id).order('created_at'),
     supabase
       .from('combat_setups')
@@ -62,6 +57,17 @@ export async function GET(req: NextRequest) {
   const { data: bowRows } = memberIds.length
     ? await supabase.from('members').select('id, hunting_bow').in('id', memberIds)
     : { data: [] as { id: string; hunting_bow: string | null }[] };
+  // Assaulters (a character in DE/DI) can take whole assault presets, XP slots included.
+  const [presets, xpPotions] = canCalibrate
+    ? await Promise.all([
+        supabase.from('assault_potion_presets').select('id, label, combat_potion_ids, xp_potion_ids, assault_tier').order('sort_order'),
+        supabase
+          .from('xp_potions')
+          .select('id, name, category, quality, effect_value, xp_value, efficiency_value, duration_minutes, description, image_url')
+          .order('id'),
+      ])
+    : [{ data: [] }, { data: [] }];
+
   const huntingBows = Object.fromEntries((bowRows ?? []).map((m) => [m.id, m.hunting_bow ?? null]));
 
   return NextResponse.json({
@@ -74,15 +80,17 @@ export async function GET(req: NextRequest) {
     huntingBows,
     characters,
     canCalibrate,
+    assaulter: canCalibrate,
+    presets: presets.data ?? [],
+    xpPotions: xpPotions.data ?? [],
     // Default first (web default beats Discord default, same as /me/assault), then most recent.
-    loadouts: (loadouts.data ?? [])
-      .map((l) => ({
-        id: l.id as string,
-        name: l.name as string,
-        is_default: !!l.is_default,
-        source: l.user_id === user.id ? 'web' : 'discord',
-        combat_potion_ids: (l.combat_potion_ids ?? []) as number[],
-      }))
-      .sort((a, b) => Number(b.is_default) - Number(a.is_default) || Number(b.source === 'web') - Number(a.source === 'web')),
+    loadouts: loadouts.map((l) => ({
+      id: l.id,
+      name: l.name,
+      is_default: !!l.is_default,
+      source: l.discord_user_id && !l.user_id ? 'discord' : 'web',
+      combat_potion_ids: l.combat_potion_ids ?? [],
+      xp_potion_ids: l.xp_potion_ids ?? [],
+    })),
   });
 }
