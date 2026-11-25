@@ -73,6 +73,8 @@ export default function LeaderboardPage() {
   }, []);
 
   useEffect(() => {
+    // Only the Activity tab uses this board; don't load it behind the Dream Pass tab.
+    if (board !== 'activity') return;
     async function fetchLeaderboard() {
       setLoading(true);
       try {
@@ -91,7 +93,7 @@ export default function LeaderboardPage() {
     }
     fetchLeaderboard();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period, guildFilter, merged, filter, classFilter]);
+  }, [board, period, guildFilter, merged, filter, classFilter]);
 
   const handleCopy = async () => {
     const periodLabel = period === 'week' ? 'This Week' : period === 'month' ? 'This Month' : 'All Time';

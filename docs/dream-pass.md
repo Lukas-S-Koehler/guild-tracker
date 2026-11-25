@@ -29,7 +29,7 @@ Status: spec signed off and built 2026-11-24 (commit on `dream-hub`). Numbers ca
 | Kudos given | **5** each | max 3/week already | — |
 | Discord bump | **1** each | no cap (natural cap ≈ 12/day, one bump per 2 h) | max 46 in Nov |
 | Discord chat | **5** per active chat day | from the Discord level system below (≥3 counted messages that day); Discord must be linked | 15 / 100 / 155 |
-| Achievement unlock | Bronze 10 · Silver 25 · Gold 50 · Crystal 100 · Dream 200 | unchanged tier values | — |
+| Achievement unlock | Bronze 10 · Silver 25 · Gold 50 · Crystal 100 · Dream 200 | **lifetime Dream XP only** (since 2026-11-26), never season XP | — |
 
 Assault weighting check: 2 DE waves (Nov 19 + 22) gave attendees 55–130 XP. At ~9 waves a month a regular
 assaulter earns ~450–550 assault XP **on top of** their daily XP, i.e. roughly double a top raider.
@@ -154,3 +154,18 @@ L50 = 7,850). 1 Discord XP per counted message, +1 per bump.
   Discord **`/pass [ign|user] [share]`**, `/leaderboard board: pass`.
 - Order inside the daily workflow means pass-based achievements (level, champion) lag one day; achievement XP
   counts in the pass the same day.
+
+## Leaderboard speed (2026-11-26)
+- Building every `/leaderboard` network board takes ~12 s (all `daily_logs` + ~63k Discord chat rows), which every
+  cold 30-min cache paid. Now the dream-pass cron stores the result as a snapshot (`app_settings` key
+  `network_boards_snapshot`, ~90 KB JSON) after the daily recompute and after each 2-hourly chat-only run, and
+  revalidates the cache tag. `/api/leaderboard/network` reads that one row; it rebuilds live only when the snapshot
+  is missing, older than 30 h, or from last month. The Activity board only loads when its tab is open.
+
+## Achievements → lifetime only (user, 2026-11-26)
+- Achievement XP no longer counts for any season, only for lifetime Dream XP (ranks unchanged). Reason: unlocks are
+  one-time and lumpy, and the pass's own achievements (level 10/20, champion) fed back into the season.
+- Impact on live November (before → after): achievements were 30% of season XP; p50 153 → 130, p90 489 → 430,
+  max 1,225 → 741 (#1 had 715 achievement XP); 3 of the top 10 change; level 20 reached 1 → 0. Finished seasons
+  (frozen) had 0% achievement XP already (backfilled unlocks went to history), so nothing frozen changes.
+- Level curve unchanged: it was calibrated on simulated seasons without achievement XP.

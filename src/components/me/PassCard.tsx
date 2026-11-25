@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Loader2, Ticket } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { MAX_LEVEL, PASS_SOURCES, SOURCE_ORDER, seasonEnd, seasonLabel } from '@/lib/dream-pass';
+import { MAX_LEVEL, PASS_SOURCES, SEASON_SOURCES, SOURCE_ORDER, seasonEnd, seasonLabel } from '@/lib/dream-pass';
 import type { AccountPass } from '@/lib/dream-pass-account';
 
 type Data = ({ claimed: true } & AccountPass) | { claimed: false };
@@ -44,7 +44,7 @@ export default function PassCard({ src = '/api/me/pass', readOnly = false }: { s
   const live = p ? p.season === p.seasons[0] : true;
   const lv = p?.level;
   const sources = p ? SOURCE_ORDER.filter((k) => (p.breakdown[k] ?? 0) > 0).sort((a, b) => (p.breakdown[b] ?? 0) - (p.breakdown[a] ?? 0)) : [];
-  const unused = p ? SOURCE_ORDER.filter((k) => !(p.breakdown[k] ?? 0)) : [];
+  const unused = p ? SEASON_SOURCES.filter((k) => !(p.breakdown[k] ?? 0)) : [];
 
   return (
     <Card>

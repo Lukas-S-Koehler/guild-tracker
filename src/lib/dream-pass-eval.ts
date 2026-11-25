@@ -268,8 +268,9 @@ export function computeAll(accounts: Account[], data: PassData, members: Array<{
     for (const d of Array.from(days)) addXp(xpOf(a.key), d, 'chat', PASS_XP.chatDay);
   }
 
-  // ── Achievements: tier XP of each unlock (account union, earliest date). Unlocks from a silent launch
-  // backfill have unreliable dates (many were stamped "now"), so they count for lifetime only.
+  // ── Achievements: tier XP of each unlock (account union, earliest unlock). Lifetime Dream XP only, never a
+  // season: unlocks are one-time and lumpy (a new ladder can drop hundreds of XP on one day), and the pass's own
+  // achievements (level, champion) would feed back into the season they reward (user decision 2026-11-26).
   const firstUnlock = new Map<string, Map<string, { at: string; backfilled: boolean }>>();
   for (const u of data.unlocks) {
     const acc = accountOf.get(u.member_id);
@@ -282,7 +283,7 @@ export function computeAll(accounts: Account[], data: PassData, members: Array<{
   for (const [acc, m] of Array.from(firstUnlock)) {
     for (const [key, u] of Array.from(m)) {
       const a = ACHIEVEMENT_BY_KEY.get(key);
-      if (a) addXp(xpOf(acc), u.backfilled ? HISTORY : dateOf(u.at), 'achievements', TIERS[a.tier].xp);
+      if (a) addXp(xpOf(acc), HISTORY, 'achievements', TIERS[a.tier].xp);
     }
   }
 

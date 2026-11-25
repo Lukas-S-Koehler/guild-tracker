@@ -12,7 +12,8 @@
  *  - dream_xp:    lifetime Dream XP (all Dream Pass seasons) + rank (src/lib/achievement-ranks.ts)
  *
  * Per class lives on the activity board (/leaderboard class filter), since class is per character.
- * Data only changes once a day (11:48 UTC check), so the result is cached for 30 minutes.
+ * Data only changes once a day (11:48 UTC check): the dream-pass cron stores a snapshot (app_settings),
+ * the page reads it (cached 30 min). Discord level refreshes with the 2-hourly chat run.
  */
 import { unstable_cache } from 'next/cache';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -286,12 +287,45 @@ export async function buildNetworkBoards(supabase: SupabaseClient): Promise<Netw
   return { generated_at: new Date().toISOString(), day, windows: { before, after }, boards, char_boards, classes, pass_seasons };
 }
 
-/** Cached for 30 minutes (boards only move once a day). */
-export const getNetworkBoards = unstable_cache(
-  async () => buildNetworkBoards(createAdminClient()),
-  ['network-boards-v4'],
-  { revalidate: 1800 }
-);
+/**
+ * Daily snapshot: the dream-pass cron builds every board once and stores the JSON in app_settings, so the
+ * page reads one row instead of paging through all daily_logs + Discord chat (~80k rows) on a cold cache.
+ */
+export const NETWORK_SNAPSHOT_SETTING = 'network_boards_snapshot';
+export const NETWORK_BOARDS_TAG = 'network-boards';
+const SNAPSHOT_MAX_AGE = 30 * 3_600_000; // older than a missed daily run → rebuild live
+
+export async function saveNetworkBoardsSnapshot(supabase: SupabaseClient): Promise<{ generated_at: string; bytes: number }> {
+  const boards = await buildNetworkBoards(supabase);
+  const value = JSON.stringify(boards);
+  const { error } = await supabase.from('app_settings').upsert({ key: NETWORK_SNAPSHOT_SETTING, value });
+  if (error) throw new Error(error.message);
+  return { generated_at: boards.generated_at, bytes: value.length };
+}
+
+async function loadNetworkBoards(): Promise<NetworkBoards> {
+  const supabase = createAdminClient();
+  const { data } = await supabase.from('app_settings').select('value').eq('key', NETWORK_SNAPSHOT_SETTING).maybeSingle();
+  if (data?.value) {
+    try {
+      const snap = JSON.parse(data.value as string) as NetworkBoards;
+      // Same month and fresh enough: serve it (a new month needs the new season's pass board).
+      if (
+        snap.pass_seasons?.[0] === currentSeason() &&
+        Date.now() - Date.parse(snap.generated_at) < SNAPSHOT_MAX_AGE
+      ) return snap;
+    } catch {
+      /* fall through to a live build */
+    }
+  }
+  return buildNetworkBoards(supabase);
+}
+
+/** Snapshot read, cached 30 min; the cron revalidates the tag right after writing a new snapshot. */
+export const getNetworkBoards = unstable_cache(loadNetworkBoards, ['network-boards-v5'], {
+  revalidate: 1800,
+  tags: [NETWORK_BOARDS_TAG],
+});
 
 /** Competition rank: ties share a place. */
 export function placeOf(rows: NetworkRow[], i: number): number {

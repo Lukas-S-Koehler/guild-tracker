@@ -2,7 +2,8 @@
  * Dream Pass (Dream Hub step 15, D6). Spec + calibration: docs/dream-pass.md.
  *
  *  - Season = calendar month (UTC), key 'YYYY-MM'. Season XP + pass level reset on the 1st.
- *  - Lifetime Dream XP = every season's XP added up; drives the rank roles (src/lib/achievement-ranks.ts).
+ *  - Lifetime Dream XP = every season's XP added up + achievement XP (lifetime only); drives the rank roles
+ *    (src/lib/achievement-ranks.ts).
  *  - Earned per account (main + alts pooled). XP is recomputed daily from source data by
  *    src/lib/dream-pass-eval.ts and stored in `dream_pass_scores`.
  *
@@ -65,10 +66,12 @@ export const PASS_SOURCES: Record<PassSource, { label: string; emoji: string; hi
   kudos: { label: 'Kudos', emoji: '💎', hint: `${PASS_XP.kudosReceived} received, ${PASS_XP.kudosGiven} given` },
   bumps: { label: 'Bumps', emoji: '📣', hint: `${PASS_XP.bump} per bump` },
   chat: { label: 'Discord chat', emoji: '💬', hint: `${PASS_XP.chatDay} per day with 3+ messages in member channels (not staff or bot channels)` },
-  achievements: { label: 'Achievements', emoji: '🏆', hint: 'Bronze 10 · Silver 25 · Gold 50 · Crystal 100 · Dream 200' },
+  achievements: { label: 'Achievements', emoji: '🏆', hint: 'Bronze 10 · Silver 25 · Gold 50 · Crystal 100 · Dream 200 · lifetime Dream XP only, not the season' },
 };
 
 export const SOURCE_ORDER: PassSource[] = ['assault', 'assault_finish', 'daily', 'streak', 'raids', 'contribution', 'kudos', 'bumps', 'chat', 'achievements'];
+/** Sources that earn season XP (achievements only add to lifetime Dream XP). */
+export const SEASON_SOURCES: PassSource[] = SOURCE_ORDER.filter((k) => k !== 'achievements');
 
 export type Breakdown = Partial<Record<PassSource, number>>;
 
