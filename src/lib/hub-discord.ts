@@ -791,7 +791,7 @@ const MEMBER_HELP: [string, string[]][] = [
   ['⚔️ Assault', [
     '`/assault status` countdowns · `/assault last` last result · `/assault plan` kill order',
     '`/assault me` your assault season + recap · `/assault checklist` your prep checklist · `/assault potions` pick your loadout · `/assault loadout`',
-    '`/roster` your assault guild\'s roster (next wave, goals, setup) · `/roster ign:` one member\'s setup, tiers and next best move',
+    '`/roster` your own setup, tiers and next best moves · `/roster ign:` one member\'s · `/roster guild:` the guild summary (next wave, goals, setup)',
     '`/roster-default` your assault default: Auto (in unless you say out) · Opt-in (in when you say so) · Not assaulting. Single waves: the RSVP buttons',
     '`/assault top` · `/assault season` · `/assault zones` rankings',
     '`/assault conquest-info` how conquest works',

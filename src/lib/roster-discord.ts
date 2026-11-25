@@ -211,6 +211,11 @@ interface RosterInteraction {
 }
 
 /** /roster [ign] [guild] — deferred (building the roster takes a few seconds). */
+/**
+ * /roster [ign] [guild]: deferred (building the roster takes a few seconds).
+ * No options = your own setup card(s) (user rule); guild: = that guild's summary; ign: = that member.
+ * Falls back to your guild's summary when none of your characters is on a roster.
+ */
 export function handleRosterCommand(i: RosterInteraction) {
   const opt = (n: string) => i.data.options?.find((o) => o.name === n)?.value;
   const ign = typeof opt('ign') === 'string' ? (opt('ign') as string).trim() : '';
@@ -222,35 +227,52 @@ export function handleRosterCommand(i: RosterInteraction) {
       const supabase = createAdminClient();
       let payload: Record<string, unknown>;
       try {
-        let guildId = wantGuild;
-        let target: { member_id: string; guild_id: string } | null = null;
+        const { chars: mine } = await discordRosterCharacters(discordId, supabase);
+        const ownIds = new Set(mine.map((c) => c.member_id));
+
+        // Which characters get a setup card: the named one, or (no options) all of yours.
+        let targets: { member_id: string; guild_id: string }[] = [];
         if (ign) {
           const { data } = await supabase.from('assault_roster').select('member_id, guild_id, ign').ilike('ign', ign).maybeSingle();
           if (!data) throw new Error(`${ign} isn't on an assault roster (DE / DI).`);
-          target = data;
-          guildId = data.guild_id;
+          targets = [{ member_id: data.member_id as string, guild_id: String(data.guild_id) }];
+        } else if (!wantGuild && mine.length) {
+          targets = mine.slice(0, 4).map((c) => ({ member_id: c.member_id, guild_id: c.guild_id }));
         }
-        if (!guildId) {
-          // Default: the caller's assault guild (Discord mapping), else the first assault guild.
-          const { data: mine } = await supabase.from('members').select('current_guild_id').eq('discord_id', discordId).eq('is_active', true);
-          const { data: ag } = await supabase.from('guilds').select('id').eq('is_assault', true).order('name');
-          const assault = (ag ?? []).map((g) => String(g.id));
-          guildId = (mine ?? []).map((m) => String(m.current_guild_id)).find((g) => assault.includes(g)) ?? assault[0];
-        }
-        const roster = await buildRoster(guildId, supabase);
-        if (!roster) throw new Error('Not an assault guild.');
-        const goals = await goalsFor(supabase, guildId);
-        if (target) {
-          const row = roster.rows.find((r) => r.member_id === target!.member_id);
-          if (!row) throw new Error('Not synced yet.');
-          // Your own character: buttons to set your default right here.
-          const { chars } = await discordRosterCharacters(discordId, supabase);
-          const own = chars.some((c) => c.member_id === row.member_id);
+
+        if (targets.length) {
+          const embeds: unknown[] = [];
+          const rows: unknown[] = [];
+          for (const gid of Array.from(new Set(targets.map((t) => t.guild_id)))) {
+            const roster = await buildRoster(gid, supabase);
+            if (!roster) continue;
+            const goals = await goalsFor(supabase, gid);
+            for (const t of targets.filter((x) => x.guild_id === gid)) {
+              const row = roster.rows.find((r) => r.member_id === t.member_id);
+              if (!row) continue;
+              embeds.push(memberEmbed(row, roster, goals));
+              // Your own character: buttons to set your default right here (named when there are several).
+              if (ownIds.has(row.member_id)) rows.push(defaultButtons(row.member_id, row.participation, targets.length > 1 ? row.ign : undefined));
+            }
+          }
+          if (!embeds.length) throw new Error('Not synced yet.');
           payload = {
-            embeds: [memberEmbed(row, roster, goals)],
-            components: [...(own ? [defaultButtons(row.member_id, row.participation)] : []), link('Open the roster', '/assault/roster')],
+            content: !ign && mine.length > 4 ? `-# Showing 4 of your ${mine.length} characters. Use \`/roster ign:\` for the others.` : undefined,
+            embeds,
+            components: [...rows, link('Open the roster', '/assault/roster')].slice(0, 5),
           };
         } else {
+          // Guild summary: the chosen guild, else your assault guild (Discord mapping), else the first one.
+          let guildId = wantGuild;
+          if (!guildId) {
+            const { data: m } = await supabase.from('members').select('current_guild_id').eq('discord_id', discordId).eq('is_active', true);
+            const { data: ag } = await supabase.from('guilds').select('id').eq('is_assault', true).order('name');
+            const assault = (ag ?? []).map((g) => String(g.id));
+            guildId = (m ?? []).map((x) => String(x.current_guild_id)).find((g) => assault.includes(g)) ?? assault[0];
+          }
+          const roster = await buildRoster(guildId, supabase);
+          if (!roster) throw new Error('Not an assault guild.');
+          const goals = await goalsFor(supabase, guildId);
           payload = { embeds: [summaryEmbed(roster, goals)], components: [link('Open the roster', '/assault/roster')] };
         }
       } catch (err) {
@@ -274,11 +296,11 @@ export async function handleRosterAutocomplete(i: { data: { options?: { name: st
 
 export const ROSTER_COMMAND = {
   name: 'roster',
-  description: "Assault roster: your guild's summary, or one member's setup (IGN)",
+  description: 'Assault roster: your own setup (default), one member (ign) or a guild summary (guild)',
   options: [
     { name: 'ign', type: 3, description: 'Character on the DE / DI roster', required: false, autocomplete: true },
     {
-      name: 'guild', type: 3, description: 'Assault guild (default: yours)', required: false,
+      name: 'guild', type: 3, description: "Show this guild's summary instead of your setup", required: false,
       choices: [{ name: 'Dream Engineers (DE)', value: '1184' }, { name: 'Dream Invaders (DI)', value: '138' }],
     },
   ],

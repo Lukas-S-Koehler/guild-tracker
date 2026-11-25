@@ -62,13 +62,13 @@ const doneText = (chars: MyRosterChar[], value: Participation) =>
   '-# Single waves: use the RSVP buttons on the pinned roster board. Change this any time with `/roster-default`.';
 
 /** The three default buttons for one character (shown on your own /roster card). */
-export function defaultButtons(memberId: string, current: Participation) {
+export function defaultButtons(memberId: string, current: Participation, ign?: string) {
   return {
     type: 1,
     components: (['auto', 'opt_in', 'none'] as Participation[]).map((v) => ({
       type: 2,
       style: v === current ? 1 : 2,
-      label: `${DEFAULT_LABEL[v]}${v === current ? ' (now)' : ''}`,
+      label: `${ign ? `${ign}: ` : ''}${DEFAULT_LABEL[v]}${v === current ? ' (now)' : ''}`.slice(0, 80),
       custom_id: `rdef:${memberId}:${v}`,
       disabled: v === current,
     })),
