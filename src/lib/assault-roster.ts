@@ -20,7 +20,7 @@ import { matchup, estimateHP, HP_TARGETS, type FighterStats } from '@/lib/combat
 import { MAX_LOCATION_ID } from '@/lib/assault-plan';
 import { RECOMMENDED_PRESET_ID } from '@/lib/potion-rules';
 import { battleTier, mergeGoals, type GoalSet } from '@/lib/roster-goals';
-import { computeMoves, huntEggOptions, priceBattleOptions, stableAtL100, type BattleSpeciesOption, type EggOption, type Move } from '@/lib/roster-moves';
+import { bowOptions, computeMoves, huntEggOptions, priceBattleOptions, stableAtL100, type BowOption, type BattleSpeciesOption, type EggOption, type Move } from '@/lib/roster-moves';
 import { hasMarketAccess } from '@/lib/combat/class-talents';
 import { effectiveRsvp, nextWaveUnix, rsvpsForWave, type EffectiveRsvp, type RsvpStatus } from '@/lib/assault-rsvp';
 import { GEAR_SLOTS, HAND_SLOT_CONFLICTS } from '@/lib/combat/character-stats';
@@ -152,7 +152,7 @@ export interface RosterRow {
     /** Highest scaled level where EVERY zone enemy still dies in 2 hits; null if not all 2 hits at base. */
     max2HitLevel: number | null;
     /** Best battle species per buyable quality (Epic, Legendary) at L100 for this character, best first:
-     *  fewest hits, then least damage taken (defence saves food), then most damage. */
+     *  fewest hits, then 2-hit scaling level (CL 100+), then most damage, then least damage taken. */
     bestSpecies: Record<'Epic' | 'Legendary', string[]>;
     /** Every buyable Epic / Legendary species (and one generic Mythic row) simulated at L100 here,
      *  strongest first per quality. Prices filled in with the moves. Feeds the "weigh options" view. */
@@ -178,6 +178,8 @@ export interface RosterRow {
     stableL100: number[];
     /** Buyable eggs with encounters at L100 for this member's pet mastery and price (filled with the moves). */
     eggOptions: EggOption[];
+    /** Every hunting bow with price and this character's missing requirement (filled with the moves). */
+    bowOptions: BowOption[];
   };
   pets: RosterPet[];
   /** Slayer at the selected location (bonus goal). */
@@ -521,22 +523,31 @@ export async function buildRoster(
       bestFighter = top.f;
     }
 
-    // Species to buy, judged for battling here at L100: fewest hits, then least damage taken
-    // (defence saves food), then most damage. Mythic eggs hatch a random Mythic: one generic row, worst case.
+    // Species to buy, judged for battling here at L100 (user rule): fewest hits, then (CL 100+) the
+    // highest level they still 2-hit everything at, then MOST DAMAGE, then least damage taken.
+    // Mythic eggs hatch a random Mythic: one generic row, worst case. Hits at each mob's own level.
     const bestSpecies: Record<'Epic' | 'Legendary', string[]> = { Epic: [], Legendary: [] };
     const speciesOptions: BattleSpeciesOption[] = [];
     if (zoneEnemies.length) {
       const simulate = (name: string) => {
-        const ms = hitsAt(fighterWith({ species: name, level: 100, evolution: 0 }), zoneEnemies, slayer, null);
+        const f = fighterWith({ species: name, level: 100, evolution: 0 });
+        const ms = hitsAt(f, zoneEnemies, slayer, null);
+        const counts = new Map<number, number>();
+        for (const m of ms) counts.set(m.hits ?? 99, (counts.get(m.hits ?? 99) ?? 0) + 1);
         return {
           hits: ms.reduce((t, m) => t + (m.hits ?? 99), 0),
+          dist: Array.from(counts.entries()).sort((a, b) => a[0] - b[0]).map(([h, c]) => `${c}×${h}`).join(' · '),
+          perMob: ms.map((m) => m.hits).sort((a, b) => (a ?? 99) - (b ?? 99)),
+          twoHitLv: scale.allowed && !scale.fixed ? max2HitLevel(f, zoneEnemies, slayer, scale.max, scale.allowed, scale.fixed) : null,
           worst: Math.max(...ms.map((m) => m.hits ?? 99)),
           taken: Math.round(ms.reduce((t, m) => t + m.damageTakenPerKill, 0)),
-          dmg: Math.round(ms.reduce((t, m) => t + m.damage, 0)),
+          dmg: Math.round(ms.reduce((t, m) => t + m.damage, 0) * 10) / 10,
         };
       };
-      const order = (a: { hits: number; taken: number; dmg: number }, b: { hits: number; taken: number; dmg: number }) =>
-        a.hits - b.hits || a.taken - b.taken || b.dmg - a.dmg;
+      const order = (
+        a: { hits: number; taken: number; dmg: number; twoHitLv: number | null },
+        b: { hits: number; taken: number; dmg: number; twoHitLv: number | null }
+      ) => a.hits - b.hits || (b.twoHitLv ?? 0) - (a.twoHitLv ?? 0) || b.dmg - a.dmg || a.taken - b.taken;
       for (const q of ['Epic', 'Legendary'] as const) {
         const list = Object.values(PET_STATS)
           .filter((p) => p.quality === q && petTier(p.name) === q && PET_EGGS[p.name] && PET_EGGS[p.name].kind !== 'none')
@@ -638,6 +649,7 @@ export async function buildRoster(
         unknownPets: Array.from(new Set(resolved.filter((p) => !p.species).map((p) => p.name))),
         stableL100: [],
         eggOptions: [],
+        bowOptions: [],
       },
       pets: petRows,
       slayer: (() => {
@@ -699,6 +711,7 @@ export async function buildRoster(
     const ctx = { price: priceOf };
     row.hunting.stableL100 = stableAtL100(row);
     row.hunting.eggOptions = huntEggOptions(row.pet_mastery ?? 0, ctx);
+    row.hunting.bowOptions = bowOptions(row, ctx);
     priceBattleOptions(row.battle.speciesOptions, ctx);
     row.moves = computeMoves(row, { goals, price: priceOf, presets: tieredPresets, marketAccess: hasMarketAccess(row.character_class) }).slice(0, 6);
   }

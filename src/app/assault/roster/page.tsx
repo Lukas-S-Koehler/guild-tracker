@@ -470,6 +470,8 @@ function Drawer({
           )}
         </section>
 
+        <GearSection r={r} canEdit={canLeaderEdit} onSaved={onChanged} />
+
         {/* ── Hunting bow ── */}
         <section className="rounded-lg border p-3 space-y-2">
           <h3 className="text-sm font-semibold flex items-center gap-1.5"><Target className="h-4 w-4" />Hunting bow</h3>
@@ -536,8 +538,6 @@ function Drawer({
             </table>
           </div>
         </section>
-
-        <GearSection r={r} canEdit={canLeaderEdit} onSaved={onChanged} />
 
         {nextWave && (
           <section className="rounded-lg border p-3 space-y-2">

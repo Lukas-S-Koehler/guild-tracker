@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import Link from 'next/link';
 import { AlertTriangle, ChevronDown, ChevronRight, CircleDashed, Coins, Dumbbell, FlaskConical, Gift, Scale, ShieldCheck, Sparkles, Star, Wrench } from 'lucide-react';
 import {
-  BATTLE_PET_LADDER, EGG_RARITIES, QUALITY_BY_RANK, fmtGold, huntPlans, ownedForBattleStep, recommendBattle, recommendHunt, type Move,
+  BATTLE_PET_LADDER, EGG_RARITIES, QUALITY_BY_RANK, fmtGold, huntPlans, ownedForBattleStep, recommendBattle, recommendBow, recommendHunt, type Move,
 } from '@/lib/roster-moves';
 import type { RosterRow } from '@/lib/assault-roster';
 import {
@@ -208,6 +208,20 @@ function HuntWeigh({ r, goals, current }: { r: RosterRow; goals: GoalSet; curren
 }
 const HUNT_STABLE_SIZE_TEXT = (owned: number) => (owned < 20 ? `${20 - owned} of the 20 counted slots are empty, so every egg adds its full value.` : 'New eggs replace your weakest counted pets.');
 
+/** One square per mob coloured by hits (same look as the Lineup hits column). */
+const HIT_SQ: Record<number, string> = { 1: 'bg-emerald-500 text-white', 2: 'bg-emerald-500 text-white', 3: 'bg-lime-500 text-black', 4: 'bg-amber-500 text-black' };
+function HitSquares({ hits }: { hits: (number | null)[] }) {
+  return (
+    <span className="inline-flex gap-0.5">
+      {hits.map((h, i) => (
+        <span key={i} className={`h-4 w-4 rounded text-[10px] font-bold tabular-nums flex items-center justify-center ${h == null ? 'bg-muted text-muted-foreground' : HIT_SQ[h] ?? 'bg-red-500 text-white'}`}>
+          {h ?? '–'}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 /** Every battle species of the target tier's rarity, simulated here at L100. */
 function BattleWeigh({ r, current }: { r: RosterRow; current: number }) {
   const [target, setTarget] = useState(Math.min(5, current + 1));
@@ -216,14 +230,14 @@ function BattleWeigh({ r, current }: { r: RosterRow; current: number }) {
   const owned = ownedForBattleStep(r, step);
   const options = r.battle.speciesOptions.filter((o) => o.quality === quality);
   const rec = recommendBattle(r, quality);
-  const now = r.battle.computed ? r.battle.enemies.reduce((t, e) => t + (e.hits ?? 99), 0) : null;
+  const now = r.battle.computed ? 1 : null;
   return (
     <div className="space-y-2 rounded-md border bg-muted/20 p-2">
       <TargetTabs from={current} value={target} onChange={setTarget} />
       <p className="text-[11px] text-muted-foreground">
         <b className="text-foreground">{tierName(target)}</b> needs a <span className={RARITY_TEXT[quality]}>{quality}</span> at L{step[1]}{step[2] ? ` evo ${step[2]}` : ''}.
         {owned ? <> You own <b className="text-foreground">{owned.species}</b> (L{owned.level}{owned.evolution ? ` evo ${owned.evolution}` : ''}): levelling it is free.</> : null}
-        {now != null && r.battle.bestPet ? <> Now: {r.battle.bestPet.species} = {now} hits over {r.battle.enemies.length} mobs.</> : null}
+        {now != null && r.battle.bestPet ? <> Now ({r.battle.bestPet.species} L{r.battle.bestPet.level}): <HitSquares hits={r.battle.enemies.map((e) => e.hits)} />{r.battle.max2HitLevel && r.battle.canScale && !r.battle.scaleFixed ? ` 2 hits to Lv ${r.battle.max2HitLevel}` : ''}</> : null}
       </p>
       {options.length > 0 ? (
         <div className="overflow-x-auto">
@@ -231,9 +245,10 @@ function BattleWeigh({ r, current }: { r: RosterRow; current: number }) {
             <thead>
               <tr className="text-left text-muted-foreground border-b">
                 <th className="py-1 pr-2 font-medium">Pet (L100)</th>
-                <th className="py-1 pr-2 font-medium" title="Total hits over every mob here (worst mob)">Hits</th>
+                <th className="py-1 pr-2 font-medium" title="Hits to kill each mob here at its own level, one square per mob">Hits</th>
+                {options.some((o) => o.twoHitLv != null) && <th className="py-1 pr-2 font-medium" title="Highest scaled level where every mob still dies in 2 hits (CL 100+)">2 hits to</th>}
+                <th className="py-1 pr-2 font-medium" title="Damage per hit, summed over the mobs here">Damage</th>
                 <th className="py-1 pr-2 font-medium" title="Damage taken per kill, summed (defence saves food)">Dmg taken</th>
-                <th className="py-1 pr-2 font-medium">Damage</th>
                 <th className="py-1 font-medium">Egg</th>
               </tr>
             </thead>
@@ -246,9 +261,10 @@ function BattleWeigh({ r, current }: { r: RosterRow; current: number }) {
                       {star && <Star className="inline h-3 w-3 mr-0.5 text-crystal" />}
                       <span className={RARITY_TEXT[o.quality] ?? ''}>{o.label}</span>
                     </td>
-                    <td className="py-1 pr-2 tabular-nums">{o.hits} <span className="text-muted-foreground">({o.worst} max)</span></td>
+                    <td className="py-1 pr-2 whitespace-nowrap"><HitSquares hits={o.perMob} /></td>
+                    {options.some((x) => x.twoHitLv != null) && <td className="py-1 pr-2 tabular-nums">{o.twoHitLv != null ? `Lv ${o.twoHitLv}` : '—'}</td>}
+                    <td className="py-1 pr-2 tabular-nums font-medium">{Math.round(o.dmg).toLocaleString()}</td>
                     <td className="py-1 pr-2 tabular-nums">{o.taken.toLocaleString()}</td>
-                    <td className="py-1 pr-2 tabular-nums">{o.dmg.toLocaleString()}</td>
                     <td className="py-1 tabular-nums whitespace-nowrap">
                       {o.price ? <span className="text-yellow-400">{fmtGold(o.price)}g</span> : <span className="text-muted-foreground">no price</span>}
                       {o.note && o.price ? <span className="text-muted-foreground"> est.</span> : null}
@@ -263,13 +279,69 @@ function BattleWeigh({ r, current }: { r: RosterRow; current: number }) {
         <p className="text-[11px] text-muted-foreground">Set gear on /combat to simulate pets here.</p>
       )}
       <p className="text-[10px] text-muted-foreground">
-        ★ = strongest for battling here: fewest hits, then least damage taken, then most damage. Simulated with your gear, loadout and pet mastery. The main suggestion goes at most one rarity above your best pet; pick a higher tab to plan a jump.
+        ★ = strongest for battling here: fewest hits, then highest 2-hit scaling (CL 100+), then most damage, then least damage taken. Hits are at each mob&apos;s own level. Simulated with your gear, loadout and pet mastery. The main suggestion goes at most one rarity above your best pet; pick a higher tab to plan a jump.
       </p>
     </div>
   );
 }
 
-/** Next best moves list (drawer). Pet moves can open the weigh-options view. */
+/** Every hunting bow that reaches a hunt efficiency target, with requirements and price. */
+function BowWeigh({ r, goals, current }: { r: RosterRow; goals: GoalSet; current: number }) {
+  const [target, setTarget] = useState(Math.min(5, current + 1));
+  const ths = goals.tracks.bow.thresholds;
+  const need = ths[target - 1];
+  const tierOf = (eff: number) => ths.filter((t) => eff >= t).length;
+  // Only bows that reach the target (user: weaker ones are useless here). Strongest first.
+  const list = r.hunting.bowOptions.filter((o) => o.huntEff >= need).sort((a, b) => b.huntEff - a.huntEff || (a.price ?? Infinity) - (b.price ?? Infinity));
+  const rec = recommendBow(r.hunting.bowOptions, need);
+  return (
+    <div className="space-y-2 rounded-md border bg-muted/20 p-2">
+      <TargetTabs from={current} value={target} onChange={setTarget} />
+      <p className="text-[11px] text-muted-foreground">
+        <b className="text-foreground">{tierName(target)}</b> needs +{need}% hunt efficiency. Now: {r.hunting.bow ? `${r.hunting.bow.name} +${r.hunting.bow.huntEff}%` : 'no hunting bow'}.
+        You: CL {r.combat_level ?? '?'} · DEX {r.dexterity ?? '?'}.
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[11px]">
+          <thead>
+            <tr className="text-left text-muted-foreground border-b">
+              <th className="py-1 pr-2 font-medium">Bow</th>
+              <th className="py-1 pr-2 font-medium">Hunt eff</th>
+              <th className="py-1 pr-2 font-medium">Requires</th>
+              <th className="py-1 pr-2 font-medium">Price</th>
+              <th className="py-1 font-medium">Tier</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((o) => {
+              const star = rec?.name === o.name;
+              return (
+                <tr key={o.name} className={`border-b last:border-0 ${star ? 'bg-crystal/10' : ''}`}>
+                  <td className="py-1 pr-2 whitespace-nowrap">
+                    {star && <Star className="inline h-3 w-3 mr-0.5 text-crystal" />}
+                    <span className={RARITY_TEXT[o.quality] ?? ''}>{o.name}</span>
+                    {r.hunting.bow?.name === o.name && <span className="ml-1 text-[10px] text-muted-foreground">(yours)</span>}
+                  </td>
+                  <td className="py-1 pr-2 tabular-nums font-medium">+{o.huntEff}%</td>
+                  <td className={`py-1 pr-2 whitespace-nowrap tabular-nums ${o.blocker ? 'text-amber-500' : 'text-muted-foreground'}`} title={o.blocker ?? 'You can equip it'}>
+                    CL {o.combatLevel} / DEX {o.dexterity}{o.blocker ? ' ✗' : ' ✓'}
+                  </td>
+                  <td className="py-1 pr-2 tabular-nums whitespace-nowrap">{o.price ? <span className="text-yellow-400">{fmtGold(o.price)}g</span> : <span className="text-muted-foreground">no price</span>}</td>
+                  <td className="py-1"><TierChip tier={tierOf(o.huntEff)} small /></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[10px] text-muted-foreground">
+        ★ = strongest bow you can equip in the cheapest rarity that reaches the target (you keep it a long time). Hunt efficiency is fixed: upgrading a bow&apos;s tier doesn&apos;t change it. Bows matter less once your pets hunt well.
+      </p>
+    </div>
+  );
+}
+
+/** Next best moves list (drawer). Pet and bow moves can open the weigh-options view. */
 export function MovesList({ r, goals }: { r: RosterRow; goals: GoalSet }) {
   const [open, setOpen] = useState<string | null>(null);
   const list = r.moves.filter((m) => m.kind !== 'setup');
@@ -311,6 +383,7 @@ export function MovesList({ r, goals }: { r: RosterRow; goals: GoalSet }) {
             </div>
             {open === key && m.weigh === 'pet_hunt' && <HuntWeigh r={r} goals={goals} current={tierOfTrack('pet_hunt')} />}
             {open === key && m.weigh === 'battle_pet' && <BattleWeigh r={r} current={tierOfTrack('battle_pet')} />}
+            {open === key && m.weigh === 'bow' && <BowWeigh r={r} goals={goals} current={tierOfTrack('bow')} />}
           </div>
         );
       })}
@@ -347,7 +420,7 @@ export function GoalsSection({ r, goals }: { r: RosterRow; goals: GoalSet }) {
               <span>
                 {!res.measured ? 'Set the prerequisites to get measured' : res.next ? <>Next <span className={TEXT_STYLE[res.tier + 1]}>{tierName(res.tier + 1)}</span>: {res.next}</> : <span className="text-crystal">Dream: perfect</span>}
               </span>
-              {(res.id === 'pet_hunt' || res.id === 'battle_pet') && res.measured && res.tier < 5 && (
+              {(res.id === 'pet_hunt' || res.id === 'battle_pet' || res.id === 'bow') && res.measured && res.tier < 5 && (
                 <button type="button" className="shrink-0 inline-flex items-center gap-0.5 text-crystal hover:underline" onClick={() => setWeigh(weigh === res.id ? null : res.id)}>
                   <Scale className="h-3 w-3" />{weigh === res.id ? 'Hide options' : 'Weigh options'}
                 </button>
@@ -355,6 +428,7 @@ export function GoalsSection({ r, goals }: { r: RosterRow; goals: GoalSet }) {
             </div>
             {weigh === 'pet_hunt' && res.id === 'pet_hunt' && <HuntWeigh r={r} goals={goals} current={res.tier} />}
             {weigh === 'battle_pet' && res.id === 'battle_pet' && <BattleWeigh r={r} current={res.tier} />}
+            {weigh === 'bow' && res.id === 'bow' && <BowWeigh r={r} goals={goals} current={res.tier} />}
           </div>
         );
       })}

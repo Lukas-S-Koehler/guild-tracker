@@ -25,7 +25,7 @@ export interface Move {
   costNote?: string;
   href?: string;
   /** Opens the "weigh options" view (all eggs / species per target tier, including jumps). */
-  weigh?: 'pet_hunt' | 'battle_pet';
+  weigh?: 'pet_hunt' | 'battle_pet' | 'bow';
 }
 
 export interface MoveContext {
@@ -188,19 +188,53 @@ function petHuntMoves(r: RosterRow, res: TrackResult, ctx: MoveContext): Move[] 
   return out;
 }
 
+/* ─── hunting bow planning ─── */
+
+export interface BowOption {
+  name: string;
+  quality: string;
+  huntEff: number;
+  combatLevel: number;
+  dexterity: number;
+  price: number | null;
+  /** Missing requirement for this character (e.g. "needs CL 90"), null = can equip now. */
+  blocker: string | null;
+}
+
+export function bowOptions(r: RosterRow, ctx: Pick<MoveContext, 'price'>): BowOption[] {
+  return HUNTING_BOWS.map((b) => ({ ...b, price: ctx.price(b.name) || null, blocker: bowBlocker(b, r.combat_level ?? 0, r.dexterity ?? 0) }));
+}
+
+/**
+ * Bow to suggest for a hunt efficiency target (same rule as eggs): the lowest rarity that reaches it,
+ * and within that rarity the STRONGEST bow you can equip now (ties: cheaper). If none is equippable
+ * yet, the closest-to-equippable one that reaches it, with the requirement shown.
+ */
+export function recommendBow(options: BowOption[], need: number): BowOption | null {
+  const reach = options.filter((o) => o.huntEff >= need && o.price);
+  for (const q of ['Legendary', 'Mythic']) {
+    const pick = reach.filter((o) => o.quality === q && !o.blocker).sort((a, b) => b.huntEff - a.huntEff || a.price! - b.price!)[0];
+    if (pick) return pick;
+  }
+  const blocked = reach.sort((a, b) => a.combatLevel - b.combatLevel || a.price! - b.price!)[0];
+  if (blocked) return blocked;
+  // No recent sales for any bow that gets there (e.g. Sting / Divinity): still name the strongest you can equip.
+  return options.filter((o) => o.huntEff >= need).sort((a, b) => Number(!!a.blocker) - Number(!!b.blocker) || b.huntEff - a.huntEff)[0] ?? null;
+}
+
 function bowMoves(r: RosterRow, res: TrackResult, ctx: MoveContext): Move[] {
-  const need = ctx.goals.tracks.bow.thresholds[res.tier];
+  const ths = ctx.goals.tracks.bow.thresholds;
+  const need = ths[res.tier];
   if (need == null || !ctx.marketAccess) return [];
-  const options = HUNTING_BOWS.filter((b) => b.huntEff >= need)
-    .map((b) => ({ b, price: ctx.price(b.name), blocker: bowBlocker(b, r.combat_level ?? 0, r.dexterity ?? 0) }))
-    .filter((o) => o.price);
-  const pick = options.filter((o) => !o.blocker).sort((a, b) => a.price! - b.price!)[0] ?? options.sort((a, b) => a.price! - b.price!)[0];
+  const pick = recommendBow(r.hunting.bowOptions.length ? r.hunting.bowOptions : bowOptions(r, ctx), need);
   if (!pick) return [];
   return [{
-    track: 'bow', toTier: res.tier + 1, kind: 'buy',
-    title: `Buy ${pick.b.name} (+${pick.b.huntEff}%)`,
-    detail: pick.blocker ? `${pick.blocker} first` : 'set it on /combat or the roster afterwards',
+    track: 'bow', toTier: ths.filter((t) => pick.huntEff >= t).length, kind: 'buy',
+    title: `Buy ${pick.name} (+${pick.huntEff}%)`,
+    detail: pick.blocker ? `${pick.blocker} first` : `strongest ${pick.quality} bow you can equip; set it on /combat or the roster afterwards`,
     cost: pick.price,
+    costNote: pick.price ? undefined : 'no recent sales',
+    weigh: 'bow',
   }];
 }
 
@@ -216,9 +250,15 @@ export interface BattleSpeciesOption {
   species: string | null;
   label: string;
   quality: string;
-  /** Total hits over every mob here (fewer = better), and the worst single mob. */
+  /** Total hits over every mob here at its own level (fewer = better), and the worst single mob. */
   hits: number;
   worst: number;
+  /** Per-mob breakdown, e.g. "4×2" = four mobs die in 2 hits. */
+  dist: string;
+  /** Hits per mob here, fewest first (one square each in the UI, like the Lineup). */
+  perMob: (number | null)[];
+  /** CL 100+: highest scaled level where every mob still dies in 2 hits (null = can't pick a scale). */
+  twoHitLv: number | null;
   /** Damage taken per kill, summed over the mobs (defence saves food). */
   taken: number;
   dmg: number;
@@ -235,11 +275,22 @@ export function priceBattleOptions(options: BattleSpeciesOption[], ctx: Pick<Mov
   }
 }
 
-/** Owned pet that only needs levels / evolutions to reach a battle pet tier step. */
+/**
+ * Owned pet that only needs levels / evolutions to reach a battle pet tier step. Prefers the pet
+ * shown as "best battle pet" here, then the species that battles best here at L100, then level.
+ */
 export function ownedForBattleStep(r: RosterRow, step: [number, number, number]) {
+  const best = r.battle.bestPet;
+  const rank = (species: string) => {
+    const i = r.battle.speciesOptions.findIndex((o) => o.species === species);
+    return i < 0 ? 999 : i;
+  };
   return r.pets
     .filter((p) => (QUALITY_RANK[p.tier] ?? 0) >= step[0] && PET_STATS[p.species])
-    .sort((a, b) => (QUALITY_RANK[b.tier] ?? 0) - (QUALITY_RANK[a.tier] ?? 0) || b.level - a.level)[0] ?? null;
+    .sort((a, b) => {
+      const isBest = (p: typeof a) => (best && p.species === best.species && p.level === best.level ? 1 : 0);
+      return isBest(b) - isBest(a) || (QUALITY_RANK[b.tier] ?? 0) - (QUALITY_RANK[a.tier] ?? 0) || rank(a.species) - rank(b.species) || b.level - a.level;
+    })[0] ?? null;
 }
 
 /** Strongest species of a quality for battling here that can be bought (has a price). */
@@ -274,7 +325,7 @@ function battlePetMoves(r: RosterRow, res: TrackResult, ctx: MoveContext): Move[
     track: 'battle_pet', toTier: reaches(buyQ), kind: 'buy',
     title: pick.species ? `Buy ${/^[AEIOU]/.test(pick.species) ? 'an' : 'a'} ${pick.species} egg` : 'Buy a Mythic egg',
     detail: pick.species
-      ? `strongest ${pick.quality} for battling here (hits, then damage taken); level to L100`
+      ? `strongest ${pick.quality} for battling here (hits, then 2-hit scaling, then damage); level to L100`
       : 'any Mythic works about the same here; level it to L100',
     cost: pick.price,
     costNote: pick.note,

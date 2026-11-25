@@ -154,7 +154,7 @@ function memberEmbed(r: RosterRow, roster: Roster, goals: GoalSet) {
       {
         name: `⚔️ Battle · ${roster.zone.name ?? ''}`,
         value: [
-          `Pet: ${b.bestPet ? `${b.bestPet.species} L${b.bestPet.level}` : '—'} · Potions: ${b.loadout ? (b.preset ? `${b.preset.label} preset` : 'custom') : 'not set'}${b.loadoutSource === 'own' ? '' : b.loadoutSource === 'provisional' ? ' (provisional)' : ' (default)'}`,
+          `Pet: ${b.bestPet ? `${b.bestPet.species} L${b.bestPet.level}${b.bestPet.evolution ? ` E${b.bestPet.evolution}` : ''}` : '—'} · Potions: ${b.loadout ? (b.preset ? `${b.preset.label} preset` : 'custom') : 'not set'}${b.loadoutSource === 'own' ? '' : b.loadoutSource === 'provisional' ? ' (provisional)' : ' (default)'}`,
           `Hits: ${hits}${b.max2HitLevel && b.canScale && !b.scaleFixed ? ` · 2 hits to Lv ${b.max2HitLevel}` : ''}`,
         ].join('\n'),
       },
@@ -162,6 +162,18 @@ function memberEmbed(r: RosterRow, roster: Roster, goals: GoalSet) {
         name: '🏹 Hunting',
         value: `Pet hunt power **${r.hunting.squadPower.toLocaleString()}** (best ${Math.min(20, r.hunting.eligibleCount)}/20 pets) · HM ${r.hunting_mastery ?? '?'} · Bow ${r.hunting.bow ? `${r.hunting.bow.name} +${r.hunting.bow.huntEff}%` : '—'}`,
       },
+      ...(() => {
+        // Gear-to-buy goals: battle pet, pet hunt and hunting bow (same moves as the site's drawer).
+        const pets = r.moves.filter((m) => m.track === 'battle_pet' || m.track === 'pet_hunt' || m.track === 'bow');
+        if (!pets.length) return [];
+        return [{
+          name: '🐾 Pets & bow plan',
+          value: pets
+            .map((m) => `${m.track === 'battle_pet' ? '⚔️' : m.track === 'bow' ? '🎯' : '🏹'} ${m.title}${m.cost != null ? ` · ${fmtGold(m.cost)}g${m.costNote ? ` (${m.costNote})` : ''}` : ''} → ${TIER_EMOJI[m.toTier]} ${TIERS[m.toTier - 1] ?? ''}`)
+            .join('\n')
+            .slice(0, 1024),
+        }];
+      })(),
       {
         name: '🎯 Goals',
         value: results.map((x) => `${TIER_EMOJI[x.tier]} ${TRACKS.find((t) => t.id === x.id)!.label}`).join(' · ').slice(0, 1024),
