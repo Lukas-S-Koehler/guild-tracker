@@ -1,0 +1,36 @@
+name: Assault Roster Sync
+
+on:
+  schedule:
+    # 03:30 UTC daily — away from the 11:18 price sync and 11:48 activity fetch, which share the super admin key
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync-roster:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Refresh assault roster snapshots
+        run: |
+          # Each call works ~4 min (API keys allow ~20 requests/min, 3 per character).
+          # Call again while characters remain, at most 8 times.
+          for i in 1 2 3 4 5 6 7 8; do
+            response=$(curl -s -L -w "\n%{http_code}" -X POST "${{ secrets.SITE_URL }}/api/cron/assault-roster" \
+              -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+              -H "Content-Type: application/json")
+            http_code=$(echo "$response" | tail -1)
+            body=$(echo "$response" | head -n -1)
+            echo "Run $i: HTTP $http_code $body"
+            if [ "$http_code" != "200" ]; then
+              echo "ERROR: roster sync failed"
+              exit 1
+            fi
+            remaining=$(echo "$body" | sed -n 's/.*"remaining":\([0-9]*\).*/\1/p')
+            if [ "${remaining:-0}" = "0" ]; then
+              echo "Done."
+              exit 0
+            fi
+          done
+          echo "Stopped after 8 runs with characters still remaining."

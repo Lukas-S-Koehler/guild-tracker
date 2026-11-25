@@ -2,7 +2,7 @@ import { createAdminClient } from '@/lib/supabase-server';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { PET_STATS, resolveSpeciesName } from './pet-data';
 
-const SUPER_ADMIN_USER_ID = '5f33bb41-86ab-4024-a1da-6a2fea5fb36b';
+export const SUPER_ADMIN_USER_ID = '5f33bb41-86ab-4024-a1da-6a2fea5fb36b';
 export const SYNC_COOLDOWN_MS = 2 * 60 * 1000;
 
 export const PROFILE_COLUMNS =
@@ -116,6 +116,8 @@ export async function fetchCharacterSnapshot(userId: string, hashedId: string) {
     pets_available: pets.length > 0,
     /** true when the shared key saw no pets: keep the pets already stored instead of wiping them */
     keep_stored_pets: petsMissing,
+    /** whose key read the character: 'own' (the user's) or 'shared' (super admin fallback) */
+    key_source: (usedFallback ? 'shared' : 'own') as 'own' | 'shared',
     notice,
   };
 }
@@ -136,7 +138,7 @@ export async function syncProfile(userId: string, profileId: string, force = fal
   }
 
   const snap = await fetchCharacterSnapshot(userId, profile.hashed_id);
-  const { pets_available: _ignored, keep_stored_pets, notice, pets, ...row } = snap;
+  const { pets_available: _ignored, keep_stored_pets, notice, pets, key_source: _src, ...row } = snap;
   const { data, error } = await supabase
     .from('combat_profiles')
     .update({ ...row, ...(keep_stored_pets ? {} : { pets }), last_sync: new Date().toISOString(), updated_at: new Date().toISOString() })

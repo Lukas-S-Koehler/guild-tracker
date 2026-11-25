@@ -69,6 +69,9 @@ export const PET_STATS: Record<string, PetBaseStats> = {
   Ollo: { name: "Ollo", quality: "Epic", agility: { base: 3, perLevel: 0.2 }, accuracy: { base: 6, perLevel: 0.74 }, protection: { base: 7, perLevel: 0.65 }, attackPower: { base: 8, perLevel: 0.65 } },
   Rattles: { name: "Rattles", quality: "Epic", agility: { base: 3, perLevel: 0.52 }, accuracy: { base: 6, perLevel: 0.54 }, protection: { base: 7, perLevel: 0.55 }, attackPower: { base: 7, perLevel: 0.65 } },
   Nutmeg: { name: "Nutmeg", quality: "Epic", agility: { base: 3, perLevel: 0.6 }, accuracy: { base: 6, perLevel: 0.54 }, protection: { base: 7, perLevel: 0.5 }, attackPower: { base: 7, perLevel: 0.62 } },
+  Splash: { name: "Splash", quality: "Epic", agility: { base: 3, perLevel: 0.66 }, accuracy: { base: 6, perLevel: 0.56 }, protection: { base: 7, perLevel: 0.44 }, attackPower: { base: 7, perLevel: 0.59 } },
+  Lumo: { name: "Lumo", quality: "Epic", agility: { base: 3, perLevel: 0.68 }, accuracy: { base: 6, perLevel: 0.61 }, protection: { base: 7, perLevel: 0.35 }, attackPower: { base: 8, perLevel: 0.61 } },
+  Gromley: { name: "Gromley", quality: "Epic", agility: { base: 3, perLevel: 0.45 }, accuracy: { base: 6, perLevel: 0.6 }, protection: { base: 7, perLevel: 0.5 }, attackPower: { base: 8, perLevel: 0.7 } },
 };
 
 /**
@@ -199,6 +202,7 @@ export const PET_EXTRA: Record<string, { critDamage: { base: number; perLevel: n
   Ollo: { critDamage: { base: 4, perLevel: 0.4 }, critChance: { base: 7, perLevel: 0.01 }, maxHealth: { base: 85, perLevel: 15 } },
   Rattles: { critDamage: { base: 4, perLevel: 0.4 }, critChance: { base: 7, perLevel: 0.01 }, maxHealth: { base: 85, perLevel: 15 } },
   Nutmeg: { critDamage: { base: 4, perLevel: 0.4 }, critChance: { base: 7, perLevel: 0.01 }, maxHealth: { base: 85, perLevel: 15 } },
+  Gromley: { critDamage: { base: 4, perLevel: 0.41 }, critChance: { base: 7, perLevel: 0.01 }, maxHealth: { base: 85, perLevel: 16 } },
 };
 
 /** Pets missing from the sheet's crit/HP columns fall back to the first pet of the same quality. */

@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const snap = await fetchCharacterSnapshot(auth.user.id, member.hashed_id);
-    const { pets_available, keep_stored_pets, notice, pets, ...row } = snap;
+    const { pets_available, keep_stored_pets, notice, pets, key_source: _src, ...row } = snap;
     const { data, error } = await supabase
       .from('combat_profiles')
       .upsert(
