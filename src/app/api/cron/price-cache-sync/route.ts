@@ -80,12 +80,13 @@ export async function POST(req: NextRequest) {
 
   async function processOne(item_name: string) {
     try {
-      const { price, itemId } = await api.getItemPrice(item_name);
+      const { price, itemId, source } = await api.getItemPrice(item_name);
       if (price > 0) {
         await supabase.from('market_cache').upsert({
           item_name,
           item_id: itemId ?? null,
           price,
+          price_source: source,
           cached_at: now,
         }, { onConflict: 'item_name' });
         await Promise.all([

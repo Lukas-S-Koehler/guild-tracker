@@ -104,7 +104,7 @@ export function MovesList({ moves }: { moves: Move[] }) {
       <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Next best moves</div>
       {list.slice(0, 5).map((m, i) => {
         const Icon = MOVE_ICON[m.kind];
-        const label = m.track === 'setup' ? 'Setup' : defOf(m.track).label;
+        const label = m.track === 'setup' ? 'Setup' : m.track === 'class' ? 'Class' : defOf(m.track).label;
         return (
           <div key={i} className={`flex items-start gap-2 rounded-md border px-2.5 py-1.5 text-xs ${i === 0 ? 'border-crystal/40 bg-crystal/5' : ''}`}>
             <Icon className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />

@@ -150,6 +150,25 @@ const SLOT_LABEL: Record<RosterPotion['slot'], string> = {
   attack: 'Attack', protection: 'Protection', combo: 'Attack + Prot', battle_xp: 'Battle XP', combat_xp: 'Combat XP',
 };
 
+const RSVP_STYLE: Record<string, string> = {
+  in: 'border-emerald-500/50 bg-emerald-500/10 text-emerald-500',
+  maybe: 'border-amber-500/50 bg-amber-500/10 text-amber-500',
+  out: 'border-red-500/50 bg-red-500/10 text-red-400',
+  no_reply: 'border-dashed text-muted-foreground',
+  none: 'text-muted-foreground',
+};
+const RSVP_LABEL: Record<string, string> = { in: 'In', maybe: 'Maybe', out: 'Out', no_reply: 'No reply', none: '—' };
+
+function RsvpPill({ r }: { r: RosterRow }) {
+  const e = r.rsvp.effective;
+  const auto = !r.rsvp.answer && e === 'in';
+  return (
+    <span className={`rounded border px-1.5 py-0.5 text-[11px] whitespace-nowrap ${RSVP_STYLE[e]}`} title={auto ? 'Auto: counted in unless they say otherwise' : undefined}>
+      {RSVP_LABEL[e]}{auto ? ' (auto)' : ''}
+    </span>
+  );
+}
+
 const PARTICIPATION_LABEL: Record<Participation, string> = { auto: 'Auto', opt_in: 'Opt-in', none: 'Not assaulting' };
 const PARTICIPATION_HINT: Record<Participation, string> = {
   auto: 'Always in: counted for every assault',
@@ -164,6 +183,7 @@ function RosterTable({ rows, onOpen, compact }: { rows: RosterRow[]; onOpen: (r:
         <thead>
           <tr className="text-left text-xs text-muted-foreground border-b">
             <th className="py-2 pr-3 font-medium">Character</th>
+            {!compact && <th className="py-2 pr-3 font-medium" title="Answer for the next wave">Next wave</th>}
             {!compact && <th className="py-2 pr-3 font-medium" title="Strongest battle pet they own for this location (not the one equipped right now)">Battle pet</th>}
             {!compact && <th className="py-2 pr-3 font-medium" title="Hits per mob at this location with gear from /combat, default potion loadout and the best battle pet. Scaling shown at CL 100+.">Hits</th>}
             {!compact && <th className="py-2 pr-3 font-medium">Loadout</th>}
@@ -196,6 +216,7 @@ function RosterTable({ rows, onOpen, compact }: { rows: RosterRow[]; onOpen: (r:
                   </div>
                 </div>
               </td>
+              {!compact && <td className="py-2 pr-3"><RsvpPill r={r} /></td>}
               {!compact && (
                 <td className="py-2 pr-3 whitespace-nowrap text-xs">
                   {r.battle.bestPet ? <PetLabel species={r.battle.bestPet.species} level={r.battle.bestPet.level} tier={r.battle.bestPet.tier} /> : <span className="text-muted-foreground">—</span>}
@@ -235,8 +256,8 @@ function Stat({ label, value }: { label: string; value: string | number }) {
 }
 
 function Drawer({
-  r, zoneName, isOwner, isStaff, goals, onClose, onChanged,
-}: { r: RosterRow; zoneName: string | null; isOwner: boolean; isStaff: boolean; goals: GoalSet | null; onClose: () => void; onChanged: () => void }) {
+  r, zoneName, isOwner, isStaff, goals, nextWave, onClose, onChanged,
+}: { r: RosterRow; zoneName: string | null; isOwner: boolean; isStaff: boolean; goals: GoalSet | null; nextWave: number | null; onClose: () => void; onChanged: () => void }) {
   const canEditBow = isOwner || isStaff;
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -451,6 +472,36 @@ function Drawer({
           </div>
         </section>
 
+        {nextWave && r.participation !== 'none' && (
+          <section className="rounded-lg border p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">Next wave</h3>
+              <span className="text-xs text-muted-foreground">{new Date(nextWave * 1000).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+            </div>
+            {canEditBow ? (
+              <div className="flex flex-wrap gap-1.5 items-center">
+                {(['in', 'maybe', 'out'] as const).map((o) => (
+                  <button
+                    key={o}
+                    type="button"
+                    disabled={!!busy}
+                    onClick={() => patch({ rsvp: r.rsvp.answer === o ? null : o }, 'rsvp')}
+                    className={`rounded-md border px-2.5 py-1 text-xs ${r.rsvp.answer === o ? RSVP_STYLE[o] : 'text-muted-foreground hover:bg-muted'}`}
+                  >
+                    {o === 'in' ? "I'm in" : o === 'maybe' ? 'Maybe' : "Can't make it"}
+                  </button>
+                ))}
+                <RsvpPill r={r} />
+              </div>
+            ) : (
+              <RsvpPill r={r} />
+            )}
+            <p className="text-[11px] text-muted-foreground">
+              {r.participation === 'auto' ? 'Auto: counted in unless you say otherwise.' : 'Opt-in: only counted once you say you\'re in.'} Also on the Discord notice before each wave.
+            </p>
+          </section>
+        )}
+
         <section className="rounded-lg border p-3 space-y-2">
           <h3 className="text-sm font-semibold">Assault participation</h3>
           {(() => {
@@ -496,7 +547,7 @@ export default function AssaultRosterPage() {
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [showOthers, setShowOthers] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'auto' | 'opt_in'>('all');
+  const [filter, setFilter] = useState<'all' | 'auto' | 'opt_in' | 'no_reply'>('all');
   const [view, setView] = useState<'lineup' | 'goals'>('lineup');
   const [refreshing, setRefreshing] = useState<string | null>(null);
 
@@ -517,7 +568,7 @@ export default function AssaultRosterPage() {
   const rows = useMemo(() => data?.roster.rows ?? [], [data]);
   const active = rows.filter((r) => r.participation !== 'none');
   const others = rows.filter((r) => r.participation === 'none');
-  const shown = active.filter((r) => filter === 'all' || r.participation === filter);
+  const shown = active.filter((r) => filter === 'all' || (filter === 'no_reply' ? r.rsvp.effective === 'no_reply' : r.participation === filter));
   const potionUse = useMemo(() => {
     const m = new Map<number, { p: RosterPotion; n: number }>();
     for (const r of rows) if (r.participation !== 'none') for (const p of r.battle.loadoutPotions) m.set(p.id, { p, n: (m.get(p.id)?.n ?? 0) + 1 });
@@ -645,9 +696,9 @@ export default function AssaultRosterPage() {
         />
         <Tile
           icon={Target}
-          label="Setups filled in"
-          value={`${active.filter((r) => r.battle.loadout).length} loadouts · ${active.filter((r) => r.hunting.bow).length} bows`}
-          sub={`of ${active.length}`}
+          label={roster.nextWave ? `Next wave ${new Date(roster.nextWave.unix * 1000).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : 'Next wave'}
+          value={roster.nextWave ? `${roster.nextWave.counts.in} in` : 'none scheduled'}
+          sub={roster.nextWave ? `${roster.nextWave.counts.maybe} maybe · ${roster.nextWave.counts.out} out · ${roster.nextWave.counts.no_reply} no reply` : undefined}
         />
       </div>
 
@@ -664,14 +715,14 @@ export default function AssaultRosterPage() {
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <CardTitle className="text-base">{data.guild.name}</CardTitle>
             <div className="flex gap-1">
-              {(['all', 'auto', 'opt_in'] as const).map((f) => (
+              {(['all', 'auto', 'opt_in', 'no_reply'] as const).map((f) => (
                 <button
                   key={f}
                   type="button"
                   onClick={() => setFilter(f)}
                   className={`rounded-md border px-2 py-0.5 text-xs ${filter === f ? 'border-primary bg-primary/10' : 'text-muted-foreground hover:bg-muted'}`}
                 >
-                  {f === 'all' ? 'All' : PARTICIPATION_LABEL[f]}
+                  {f === 'all' ? 'All' : f === 'no_reply' ? 'No reply' : PARTICIPATION_LABEL[f]}
                 </button>
               ))}
             </div>
@@ -735,6 +786,7 @@ export default function AssaultRosterPage() {
           isOwner={data.mine.includes(current.member_id)}
           isStaff={data.guild.isStaff}
           goals={roster.zone.isTracked ? data.goals : null}
+          nextWave={roster.nextWave?.unix ?? null}
           onClose={() => setOpen(null)}
           onChanged={() => load(data.guild.id, zoneId)}
         />

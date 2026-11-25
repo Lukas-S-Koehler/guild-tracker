@@ -80,13 +80,14 @@ export async function POST(req: NextRequest) {
 
     for (const { item_name } of items) {
       try {
-        const { price, itemId } = await api.getItemPrice(item_name);
+        const { price, itemId, source } = await api.getItemPrice(item_name);
         if (price > 0) {
           const now = new Date().toISOString();
           await supabase.from('market_cache').upsert({
             item_name,
             item_id: itemId ?? null,
             price,
+            price_source: source,
             cached_at: now,
           }, { onConflict: 'item_name' });
           await supabase.from('combat_potions').update({ market_price: price, avg_recent_sales: String(price), last_price_sync: now }).eq('name', item_name);
@@ -106,13 +107,14 @@ export async function POST(req: NextRequest) {
   if (body.item_name) {
     const item_name = body.item_name as string;
     try {
-      const { price, itemId } = await api.getItemPrice(item_name);
+      const { price, itemId, source } = await api.getItemPrice(item_name);
       if (price > 0) {
         const now = new Date().toISOString();
         await supabase.from('market_cache').upsert({
           item_name,
           item_id: itemId ?? null,
           price,
+          price_source: source,
           cached_at: now,
         }, { onConflict: 'item_name' });
         await supabase.from('combat_potions').update({ market_price: price, avg_recent_sales: String(price), last_price_sync: now }).eq('name', item_name);

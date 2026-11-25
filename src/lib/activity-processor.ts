@@ -126,13 +126,14 @@ export async function processActivityEvents(
       const api = new IdleMMOApi(apiKey);
       for (const itemName of uncached) {
         try {
-          const { price, itemId } = await api.getItemPrice(itemName);
+          const { price, itemId, source } = await api.getItemPrice(itemName);
           priceMap[itemName] = price ?? 0;
           if (price > 0) {
             await supabase.from('market_cache').upsert({
               item_name: itemName,
               item_id: itemId,
               price,
+              price_source: source,
               cached_at: new Date().toISOString(),
             }, { onConflict: 'item_name' });
           }

@@ -113,3 +113,29 @@ UPDATE assault_potion_presets SET sort_order = 1 WHERE id = 'free';
 UPDATE assault_potion_presets SET sort_order = 2 WHERE id = 'budget';
 UPDATE assault_potion_presets SET sort_order = 5 WHERE id = 'mid';
 UPDATE assault_potion_presets SET sort_order = 6 WHERE id = 'whale';
+
+-- ============================================================================
+-- Step 5b: where a market price came from. 'vendor' = no sales or history, so the
+-- price is the vendor value and can be far below what rare items really sell for.
+-- The roster only suggests buys priced from 'sales' or 'history'.
+-- Run BEFORE deploying: the price jobs write this column.
+-- ============================================================================
+ALTER TABLE market_cache ADD COLUMN IF NOT EXISTS price_source TEXT;
+
+-- ============================================================================
+-- Step 6: RSVP per assault wave. Auto members count as "in" unless they answer
+-- otherwise; opt-in members only count once they answer "in".
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS assault_rsvps (
+  guild_id TEXT NOT NULL,
+  wave_unix BIGINT NOT NULL,          -- launch time of the wave (unix seconds)
+  member_id UUID NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK (status IN ('in', 'maybe', 'out')),
+  source TEXT NOT NULL DEFAULT 'web' CHECK (source IN ('web', 'discord')),
+  updated_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  discord_id TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (guild_id, wave_unix, member_id)
+);
+CREATE INDEX IF NOT EXISTS idx_assault_rsvps_wave ON assault_rsvps(guild_id, wave_unix);
+ALTER TABLE assault_rsvps ENABLE ROW LEVEL SECURITY;

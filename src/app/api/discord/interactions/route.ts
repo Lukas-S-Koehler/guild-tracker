@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { handleRsvpComponent } from '@/lib/assault-rsvp-discord';
 import { outranks, outrankError, rankOfRole } from '@/lib/role-hierarchy';
 import { waitUntil } from '@vercel/functions';
 import { createAdminClient } from '@/lib/supabase-server';
@@ -265,6 +266,14 @@ export async function POST(req: NextRequest) {
 
   if (interaction.type === INTERACTION_TYPE_COMPONENT && interaction.data?.custom_id === 'bump_click') {
     return handleBumpClick(interaction);
+  }
+
+  if (
+    interaction.type === INTERACTION_TYPE_COMPONENT &&
+    typeof interaction.data?.custom_id === 'string' &&
+    interaction.data.custom_id.startsWith('rsvp:')
+  ) {
+    return handleRsvpComponent(interaction as Parameters<typeof handleRsvpComponent>[0]);
   }
 
   if (

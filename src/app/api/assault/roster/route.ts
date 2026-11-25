@@ -5,6 +5,7 @@ import { buildRoster, viewableRosterGuilds, PARTICIPATION, type Participation } 
 import { getAllClaimLocks } from '@/lib/account-service';
 import { huntingBow } from '@/lib/combat/hunting-gear';
 import { mergeGoals } from '@/lib/roster-goals';
+import { RSVP_STATUSES, nextWaveUnix, setRsvp, type RsvpStatus } from '@/lib/assault-rsvp';
 import { RANK, rankInGuild } from '@/lib/role-hierarchy';
 
 export const dynamic = 'force-dynamic';
@@ -48,11 +49,12 @@ export async function GET(req: NextRequest) {
  * PATCH /api/assault/roster { member_id, hunting_bow?, participation? }
  * hunting_bow: owner or guild staff.
  * participation: owner may switch auto ↔ opt_in; only staff set or clear 'none' (user rule).
+ * rsvp: answer for the next wave ('in' | 'maybe' | 'out', null = clear). Owner or guild staff.
  */
 export async function PATCH(req: NextRequest) {
   const user = await requireUser(req);
   if (isResponse(user)) return user;
-  const body = (await req.json().catch(() => ({}))) as { member_id?: string; hunting_bow?: string | null; participation?: Participation };
+  const body = (await req.json().catch(() => ({}))) as { member_id?: string; hunting_bow?: string | null; participation?: Participation; rsvp?: RsvpStatus | null };
   if (!body.member_id) return NextResponse.json({ error: 'member_id required' }, { status: 400 });
 
   const supabase = createAdminClient();
@@ -63,6 +65,16 @@ export async function PATCH(req: NextRequest) {
   const isStaff = !!guilds.find((g) => g.id === row.guild_id)?.isStaff;
   const lock = (await getAllClaimLocks(supabase)).get(row.member_id);
   const isOwner = lock?.status === 'approved' && lock.user_id === user.id;
+
+  if (body.rsvp !== undefined) {
+    if (!isOwner && !isStaff) return NextResponse.json({ error: 'Only the owner or guild staff can answer for this character' }, { status: 403 });
+    if (body.rsvp !== null && !RSVP_STATUSES.includes(body.rsvp)) return NextResponse.json({ error: 'Unknown answer' }, { status: 400 });
+    if (row.participation === 'none') return NextResponse.json({ error: 'Marked as not assaulting' }, { status: 400 });
+    const wave = await nextWaveUnix(row.guild_id);
+    if (!wave) return NextResponse.json({ error: 'No upcoming wave scheduled' }, { status: 400 });
+    await setRsvp({ guildId: row.guild_id, waveUnix: wave, memberIds: [row.member_id], status: body.rsvp, source: 'web', userId: user.id }, supabase);
+    return NextResponse.json({ ok: true });
+  }
 
   const update: Record<string, unknown> = {};
   if (body.hunting_bow !== undefined) {

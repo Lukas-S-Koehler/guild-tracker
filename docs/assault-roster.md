@@ -80,9 +80,13 @@ Per member, computed in `buildRoster` at the guild's assault zone, top 6 kept on
 1. **Setup** (missing prerequisites, with a Fix link) always first.
 2. **Free / training**: level owned pets to L100 (pet hunt power), level/evolve an owned pet of the right quality (battle pet), train pet mastery / hunting mastery / slayer, "reach CL 100 to pick your scaling".
 3. **Buy** (only with market access; Banished/Cursed skip): cheapest bow reaching the next bow tier (CL/DEX checked), one egg species that fits the tier (each pet ≥ target / 20 encounters at L100, so Bronze = Refined … Dream = Legendary), cheapest egg of the next battle pet quality, next tiered potion preset (cost per assault), cheapest single gear swap bought at tier 1 that lifts the battle tier.
-Ranking: missing minimum (+100) first, then importance weight × cost factor (log scale) × progress. Prices = `market_cache` (weighted median of recent sales); the daily price cron now also tracks hunting bows, pet eggs and every gear item. Mythic eggs use the fixed ≈20M estimate.
+Ranking: missing minimum (+100) first, then importance weight × cost factor (log scale) × progress. Prices = `market_cache` (weighted median of recent sales); the daily price cron now also tracks hunting bows, pet eggs and every gear item. Mythic eggs use the fixed ≈20M estimate. Prices are only trusted when they come from real sales or market history (`market_cache.price_source` = sales/history); a vendor fallback (e.g. Divinity 3M vendor vs 60M+ real) is never suggested. Egg buys are only suggested when the member's own pets, levelled to L100, can't reach the tier (levelling is free). "Switch class to Ranger" is always suggested for non-Rangers (best assault class), right after the top goal move.
 
 UI: red **Setup & eligibility** block (prerequisites + below-minimum elements, with Fix links) at the top of the roster for your own characters and in the drawer; "Next best moves" list in the drawer; Goals table shows each member's top move with cost.
+
+## 7a. RSVP (built 2026-11-25)
+
+`assault_rsvps` (guild, wave launch unix, member, in/maybe/out, source web/discord). Effective answer: auto = in unless they answered otherwise, opt-in = no reply until they answer, none = never counted. Next wave = `nextAssaultLaunchUnix` of the guild's assault config. Web: "Next wave" column + tile (in · maybe · out · no reply), drawer buttons (owner or staff), "No reply" filter. Discord: pre-launch notices (steps with a negative offset, e.g. the 24h notice) get I'm in / Maybe / Can't make it buttons (`rsvp:<guild>:<wave>:<status>`); the clicker's characters in that guild (members.discord_id + site account link) are all set, not-assaulting ones skipped, reply is ephemeral.
 
 ## 7. Cohesion extras (v1)
 

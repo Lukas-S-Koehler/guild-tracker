@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { postToChannelReturnId } from '@/lib/discord-api';
+import { postToChannelReturnId, postToChannelRich } from '@/lib/discord-api';
+import { rsvpComponents } from '@/lib/assault-rsvp-discord';
 import {
   listAssaultConfigs,
   listSteps,
@@ -105,7 +106,10 @@ export async function POST(req: NextRequest) {
             results.push({ guild_id: config.guild_id, step_key: step.step_key, launch_date: launchDate, ok: true, skipped: 'claimed by another run' });
             continue;
           }
-          const res = await postToChannelReturnId(config.announcement_channel_id, content);
+          // Pre-launch notices carry RSVP buttons for this wave (Assault Roster step 6).
+          const res = step.offset_minutes < 0
+            ? await postToChannelRich(config.announcement_channel_id, { content, components: rsvpComponents(config.guild_id, launchUnix) })
+            : await postToChannelReturnId(config.announcement_channel_id, content);
           if (!res.ok) {
             await releaseSent(config.guild_id, step.id, launchDate); // allow retry next tick
             results.push({ guild_id: config.guild_id, step_key: step.step_key, launch_date: launchDate, ok: false, error: res.error });

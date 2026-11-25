@@ -180,14 +180,18 @@ export class IdleMMOApi {
     return res.json();
   }
 
-  async getItemPrice(itemName: string): Promise<{ price: number; itemId: string | null }> {
+  /**
+   * Market price: weighted median of recent sales, else the latest history average, else the vendor price.
+   * `source` says which: a vendor fallback can be far below the real value of rare items (e.g. mythic bows).
+   */
+  async getItemPrice(itemName: string): Promise<{ price: number; itemId: string | null; source: 'sales' | 'history' | 'vendor' | 'none' }> {
     try {
       // Step 1: Search for item
       const searchUrl = `${IDLEMMO_BASE_URL}/v1/item/search?query=${encodeURIComponent(itemName)}`;
       const searchData = await this.fetch<{ items: SearchItem[] }>(searchUrl);
 
       if (!searchData.items || searchData.items.length === 0) {
-        return { price: 0, itemId: null };
+        return { price: 0, itemId: null, source: 'none' };
       }
 
       // Prioritize exact match (case-insensitive)
@@ -206,6 +210,7 @@ export class IdleMMOApi {
       const marketData = await this.fetch<MarketHistoryResponse>(marketUrl);
 
       let price = vendorPrice;
+      let source: 'sales' | 'history' | 'vendor' = 'vendor';
 
       const sales = marketData.latest_sold ?? [];
 
@@ -215,15 +220,17 @@ export class IdleMMOApi {
           weight: Math.max(1, s.quantity ?? 1),
         }));
         price = weightedMedian(samples);
+        source = 'sales';
       } else if (marketData.history_data && marketData.history_data.length > 0) {
         const latestData = marketData.history_data[marketData.history_data.length - 1];
         price = latestData.average_price || vendorPrice;
+        if (latestData.average_price) source = 'history';
       }
 
-      return { price, itemId: hashedId };
+      return { price, itemId: hashedId, source };
     } catch (error) {
       console.error(`Error fetching price for "${itemName}":`, error);
-      return { price: 0, itemId: null };
+      return { price: 0, itemId: null, source: 'none' };
     }
   }
 

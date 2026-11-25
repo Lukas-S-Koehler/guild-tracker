@@ -22,6 +22,7 @@ import { RECOMMENDED_PRESET_ID } from '@/lib/potion-rules';
 import { battleTier, mergeGoals, type GoalSet } from '@/lib/roster-goals';
 import { computeMoves, type Move } from '@/lib/roster-moves';
 import { hasMarketAccess } from '@/lib/combat/class-talents';
+import { effectiveRsvp, nextWaveUnix, rsvpsForWave, type EffectiveRsvp, type RsvpStatus } from '@/lib/assault-rsvp';
 import { HAND_SLOT_CONFLICTS } from '@/lib/combat/character-stats';
 import { withPotions } from '@/app/combat/potion-slots';
 import type { PotionRow } from '@/app/combat/types';
@@ -156,6 +157,8 @@ export interface RosterRow {
   pets_hidden: boolean;
   /** Next best moves, best first (setup first). */
   moves: Move[];
+  /** RSVP for the next wave: their answer and what it counts as. */
+  rsvp: { answer: RsvpStatus | null; effective: EffectiveRsvp };
   /** auto = always in · opt_in = chooses per assault · none = not assaulting (staff-set). */
   participation: Participation;
   key_source: string | null;
@@ -168,6 +171,8 @@ export interface RosterRow {
 export interface Roster {
   guild: { id: string; name: string; nickname: string | null };
   zone: { id: number | null; name: string | null; enemyCount: number; isTracked: boolean };
+  /** Next scheduled wave and who's coming. */
+  nextWave: { unix: number; counts: Record<EffectiveRsvp, number> } | null;
   /** Assault locations to switch between (ids 1–10). */
   zones: { id: number; name: string; minLevel: number; maxLevel: number }[];
   trackedZoneId: number | null;
@@ -232,10 +237,18 @@ export async function buildRoster(
     supabase.from('assault_roster').select('*').eq('guild_id', guildId),
     supabase.from('assault_configs').select('tracked_zone_id, zone_name').eq('guild_id', guildId).maybeSingle(),
     supabase.from('assault_roster_goals').select('goals').eq('guild_id', guildId).maybeSingle(),
-    supabase.from('market_cache').select('item_name, price'),
+    supabase.from('market_cache').select('item_name, price, price_source'),
   ]);
   const goals: GoalSet = mergeGoals(goalRow?.goals);
-  const priceByName = new Map((market ?? []).filter((m) => (m.price ?? 0) > 0).map((m) => [String(m.item_name).toLowerCase(), m.price as number]));
+  const waveUnix = await nextWaveUnix(guildId);
+  const answers = waveUnix ? await rsvpsForWave(guildId, waveUnix, supabase) : new Map<string, RsvpStatus>();
+  // Only trust prices from real sales or market history: a vendor fallback can be a fraction of what
+  // rare items sell for (Divinity: 3M vendor vs 60M+ real), so those are never suggested as buys.
+  const priceByName = new Map(
+    (market ?? [])
+      .filter((m) => (m.price ?? 0) > 0 && (m.price_source === 'sales' || m.price_source === 'history'))
+      .map((m) => [String(m.item_name).toLowerCase(), m.price as number])
+  );
   const priceOf = (name: string) => priceByName.get(name.toLowerCase()) ?? null;
   if (!guild || !guild.is_assault) return null;
   const rows = snaps ?? [];
@@ -535,6 +548,11 @@ export async function buildRoster(
       })(),
       pets_hidden: !!r.pets_hidden,
       moves: [] as Move[],
+      rsvp: (() => {
+        const part = (PARTICIPATION.includes(r.participation) ? r.participation : 'auto') as Participation;
+        const answer = answers.get(r.member_id) ?? null;
+        return { answer, effective: effectiveRsvp(part, answer) };
+      })(),
       participation: (PARTICIPATION.includes(r.participation) ? r.participation : 'auto') as Participation,
       key_source: r.key_source ?? null,
       last_sync: r.last_sync ?? null,
@@ -575,6 +593,15 @@ export async function buildRoster(
     zone: { id: zoneId, name: zoneMap.get(zoneId ?? -1)?.name ?? (config?.zone_name as string) ?? null, enemyCount: zoneEnemies.length, isTracked: zoneId === trackedZoneId },
     zones,
     trackedZoneId,
+    nextWave: waveUnix
+      ? {
+          unix: waveUnix,
+          counts: out.reduce(
+            (c, r) => ({ ...c, [r.rsvp.effective]: (c[r.rsvp.effective] ?? 0) + 1 }),
+            { in: 0, maybe: 0, out: 0, no_reply: 0, none: 0 } as Record<EffectiveRsvp, number>
+          ),
+        }
+      : null,
     rows: out,
     generatedAt: new Date().toISOString(),
   };

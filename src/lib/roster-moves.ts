@@ -13,7 +13,7 @@ import { petHuntEstimate, HUNT_STABLE_SIZE } from './combat/pet-hunting';
 export type MoveKind = 'setup' | 'free' | 'train' | 'buy';
 
 export interface Move {
-  track: TrackId | 'setup';
+  track: TrackId | 'setup' | 'class';
   /** Tier this move reaches on that element (1..5); 0 for setup. */
   toTier: number;
   kind: MoveKind;
@@ -77,8 +77,13 @@ function petHuntMoves(r: RosterRow, res: TrackResult, ctx: MoveContext): Move[] 
 
   // Buy: one egg species that fits the tier (each pet ≥ target / 20 at L100), cheapest total.
   if (!ctx.marketAccess) return out;
+  // Only buy when your own pets, even levelled to L100, can't get there (levelling is free).
+  if (levelled >= target) return out;
   const perPet = target / HUNT_STABLE_SIZE;
-  const stable = r.pets.filter((p) => p.eligible).map((p) => p.citadelEncounters).sort((a, b) => b - a).slice(0, HUNT_STABLE_SIZE);
+  const stable = r.pets
+    .map((p) => petHuntEstimate(p.species, 100, pm, p.evolution)?.citadelEncounters ?? 0)
+    .sort((a, b) => b - a)
+    .slice(0, HUNT_STABLE_SIZE);
   let best: { s: string; n: number; cost: number; power: number; note?: string } | null = null;
   for (const s of Object.keys(PET_EGGS)) {
     const p = eggPrice(s, ctx);
@@ -104,7 +109,7 @@ function petHuntMoves(r: RosterRow, res: TrackResult, ctx: MoveContext): Move[] 
     out.push({
       track: 'pet_hunt', toTier: tierOf(best.power), kind: 'buy',
       title: `Buy ${best.n}× ${best.s} ${best.n > 1 ? 'eggs' : 'egg'}`,
-      detail: `levelled to L100 → ≈${best.power.toLocaleString()} encounters`,
+      detail: `on top of your own pets levelled to L100 → ≈${best.power.toLocaleString()} encounters`,
       cost: best.cost,
       costNote: best.note,
     });
@@ -232,5 +237,15 @@ export function computeMoves(r: RosterRow, ctx: MoveContext): Move[] {
     }
   }
   moves.sort((a, b) => b.score - a.score);
-  return [...setup, ...moves.map(({ score: _s, ...m }) => m)];
+  const ranked = moves.map(({ score: _s, ...m }) => m);
+  // Ranger is the best assault class: always suggest it (right after the top goal move).
+  if ((r.character_class ?? '').toUpperCase() !== 'RANGER') {
+    ranked.splice(Math.min(1, ranked.length), 0, {
+      track: 'class', toTier: 0, kind: 'free',
+      title: 'Switch class to Ranger',
+      detail: 'Best class for assaults: Eagle Eye +5% crit chance, Nature\'s Aid +15 crit damage',
+      cost: null,
+    });
+  }
+  return [...setup, ...ranked];
 }
