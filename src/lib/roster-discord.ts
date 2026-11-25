@@ -88,7 +88,20 @@ function summaryEmbed(roster: Roster, goals: GoalSet) {
     });
   }
   const dreams = active.filter((r) => r.battle.computed && r.battle.enemies.every((e) => (e.hits ?? 99) <= 2));
-  if (dreams.length) fields.push({ name: '⚔️ All mobs in 2 hits', value: names(dreams, 12), inline: true });
+  if (dreams.length) {
+    // CL 100+ who can pick a scale: show how far they still 2-hit everything (highest first).
+    const scaleOf = (r: RosterRow) => {
+      const base = Math.max(0, ...r.battle.enemies.map((e) => e.level));
+      return r.battle.canScale && !r.battle.scaleFixed && r.battle.max2HitLevel && r.battle.max2HitLevel > base ? r.battle.max2HitLevel : null;
+    };
+    const sorted = [...dreams].sort((a, b) => (scaleOf(b) ?? 0) - (scaleOf(a) ?? 0));
+    const shown = sorted.slice(0, 12).map((r) => (scaleOf(r) ? `${r.ign} (Lv ${scaleOf(r)})` : r.ign));
+    fields.push({
+      name: '⚔️ All mobs in 2 hits',
+      value: `${shown.join(', ')}${sorted.length > 12 ? ` +${sorted.length - 12}` : ''}\n-# (Lv X) = still 2 hits when scaled to Lv X`.slice(0, 1024),
+      inline: true,
+    });
+  }
 
   return {
     title: `🛡️ ${roster.guild.name} · assault roster`,
