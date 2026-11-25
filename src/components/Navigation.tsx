@@ -93,6 +93,7 @@ export default function Navigation() {
             { href: '/me/assault', label: 'My assault', desc: 'Your season, waves, ranks, loadout', icon: Gauge },
             { href: '/assault/conquest', label: 'Conquest', desc: 'Every location, every guild', icon: Globe },
             { href: '/assault/stats', label: 'Season stats', desc: 'Standing and waves this season', icon: BarChart3 },
+            { href: '/assault/roster', label: 'Roster', desc: "Everyone's battle + hunting setup", icon: Users },
           ],
         },
         {

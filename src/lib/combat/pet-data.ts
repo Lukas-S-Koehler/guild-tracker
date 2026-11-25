@@ -75,6 +75,22 @@ export const PET_STATS: Record<string, PetBaseStats> = {
 };
 
 /**
+ * Event pets: stored as quality "Epic" (same stamina drain) but shown as their own tier.
+ * Admin-added pets with quality "Event" join this set at runtime (custom-pets.ts).
+ */
+export const EVENT_PETS = new Set<string>([
+  'Ravenwing', 'Snowrunner', 'Lovebuzz', 'Thistlehop', 'Nyx', 'Wingsley', 'Nova',
+  'Ollo', 'Rattles', 'Nutmeg', 'Splash', 'Lumo', 'Gromley',
+]);
+
+/** Display tier: the pet's quality, or "Event" for event pets. */
+export function petTier(species: string | null | undefined): string | null {
+  if (!species) return null;
+  if (EVENT_PETS.has(species)) return 'Event';
+  return PET_STATS[species]?.quality ?? null;
+}
+
+/**
  * Pet mastery bonus table.
  * Mastery level 44-100 grants a percentage boost to all pet stats.
  */

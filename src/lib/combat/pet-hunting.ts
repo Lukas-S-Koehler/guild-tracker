@@ -110,28 +110,22 @@ export interface PetHuntEstimate {
 
 const at = (g: Growth, level: number) => g.base + (level - 1) * g.perLevel;
 
-/** Returns null for species we have no hunting data for. */
-export function petHuntEstimate(
+/** Hunting estimate from raw stat growths (used for built-in pets and admin previews). */
+export function huntEstimateFromStats(
   species: string,
+  quality: string,
+  growth: { agility: Growth; moveSpeed: Growth; stamina: Growth },
   level: number,
   petMasteryLevel: number,
   evolution = 0
-): PetHuntEstimate | null {
-  const hunt = PET_HUNT_STATS[species];
-  const combat = PET_STATS[species];
-  if (!hunt) return null;
-  const quality = combat?.quality ?? 'Epic';
+): PetHuntEstimate {
   const L = Math.min(100, Math.max(1, Math.floor(level || 1)));
   const mult = 1 + (getPetMasteryBonus(petMasteryLevel) + Math.min(5, Math.max(0, evolution)) * 5) / 100;
-
-  const agility = combat ? Math.round(Math.floor(at(combat.agility, L) + 1e-9) * mult) : 0;
-  const moveSpeed = Math.round(Math.round(at(hunt.moveSpeed, L) * 10 + 1e-9) / 10 * mult * 100) / 100;
-  const maxStamina = Math.floor(at(hunt.stamina, L) + 1e-9);
+  const agility = Math.round(Math.floor(at(growth.agility, L) + 1e-9) * mult);
+  const moveSpeed = Math.round(Math.round(at(growth.moveSpeed, L) * 10 + 1e-9) / 10 * mult * 100) / 100;
+  const maxStamina = Math.floor(at(growth.stamina, L) + 1e-9);
   const huntSeconds = maxStamina / (HUNT_DRAIN[quality] ?? HUNT_DRAIN.Epic);
-  const secondsPerEnemy = Math.max(
-    30,
-    199.91 - 0.7237 * Math.min(agility, CITADEL_AGILITY_CAP) - 0.3978 * moveSpeed
-  );
+  const secondsPerEnemy = Math.max(30, 199.91 - 0.7237 * Math.min(agility, CITADEL_AGILITY_CAP) - 0.3978 * moveSpeed);
   return {
     species,
     quality,
@@ -145,12 +139,38 @@ export function petHuntEstimate(
   };
 }
 
-/** Squad hunt power: sum of Citadel encounters per hunt over the best N pets (N = squad size). */
+/** Returns null for species we have no hunting data for. */
+export function petHuntEstimate(
+  species: string,
+  level: number,
+  petMasteryLevel: number,
+  evolution = 0
+): PetHuntEstimate | null {
+  const hunt = PET_HUNT_STATS[species];
+  const combat = PET_STATS[species];
+  if (!hunt || !combat) return null;
+  return huntEstimateFromStats(
+    species,
+    combat.quality,
+    { agility: combat.agility, moveSpeed: hunt.moveSpeed, stamina: hunt.stamina },
+    level,
+    petMasteryLevel,
+    evolution
+  );
+}
+
+/**
+ * Pets that hunt well together: a squad hunts, then sleeps to recover stamina (sleep takes longer
+ * than the hunt), so two rotating groups are needed. The roster evaluates the best 20 pets (user).
+ */
+export const HUNT_STABLE_SIZE = 20;
+
+/** Hunt power: sum of Citadel encounters per hunt over the best `size` pets. */
 export function squadHuntPower(
   pets: { species: string | null; level: number; evolution?: number }[],
-  petMasteryLevel: number
+  petMasteryLevel: number,
+  size: number = petSquadSize(petMasteryLevel)
 ): { power: number; squad: PetHuntEstimate[]; size: number } {
-  const size = petSquadSize(petMasteryLevel);
   const estimates = pets
     .map((p) => (p.species ? petHuntEstimate(p.species, p.level, petMasteryLevel, p.evolution ?? 0) : null))
     .filter((e): e is PetHuntEstimate => e !== null)

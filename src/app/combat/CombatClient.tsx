@@ -37,6 +37,7 @@ import {
   protectionForEnemyDamage,
 } from '@/lib/combat/formulas';
 import { PET_STATS, getPetMasteryBonus } from '@/lib/combat/pet-data';
+import { registerCustomPets } from '@/lib/combat/custom-pets';
 import { hasMarketAccess, CLASS_TALENTS } from '@/lib/combat/class-talents';
 import { FOODS, foodByName, type Food } from '@/lib/combat/foods';
 import { formatDuration, runAdvisor, type AdvisorOption, type AdvisorPotion } from '@/lib/combat/advisor';
@@ -202,6 +203,7 @@ export default function CombatClient() {
       const res = await api.get('/api/combat/bootstrap');
       const data = await res.json();
       if (!res.ok) return setError(data.error ?? 'Failed to load');
+      registerCustomPets(data.customPets ?? []);
       setBoot(data);
       const chars: AccountCharacter[] = (data.characters ?? []).filter((c: AccountCharacter) => c.in_dream_guild && c.hashed_id);
       // ?setup=<id> (from /me/assault): open that setup's character.

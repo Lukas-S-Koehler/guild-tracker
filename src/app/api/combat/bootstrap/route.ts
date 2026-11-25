@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase-server';
 import { requireUser, isResponse } from '@/lib/user-auth';
 import { getAccountCharacters } from '@/lib/account-service';
 import { PROFILE_COLUMNS, canCalibrateStats } from '@/lib/combat/profile-service';
+import { ensureCustomPets } from '@/lib/combat/custom-pets-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +29,8 @@ export async function GET(req: NextRequest) {
     .from('assault_potion_loadouts')
     .select('id, name, is_default, combat_potion_ids, user_id, updated_at')
     .order('updated_at', { ascending: false });
-  const [canCalibrate, loadouts, profiles, setups, gear, potions, enemies] = await Promise.all([
+  const [customPets, canCalibrate, loadouts, profiles, setups, gear, potions, enemies] = await Promise.all([
+    ensureCustomPets(),
     canCalibrateStats(user.id, characters, supabase),
     link?.discord_id ? loadoutQ.or(`user_id.eq.${user.id},discord_user_id.eq.${link.discord_id}`) : loadoutQ.eq('user_id', user.id),
     supabase.from('combat_profiles').select(PROFILE_COLUMNS).eq('user_id', auth.user.id).order('created_at'),
@@ -61,6 +63,7 @@ export async function GET(req: NextRequest) {
     gear: gear.data ?? [],
     potions: potions.data ?? [],
     enemies: enemies.data ?? [],
+    customPets,
     characters,
     canCalibrate,
     // Default first (web default beats Discord default, same as /me/assault), then most recent.

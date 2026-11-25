@@ -22,6 +22,7 @@ import RecruitPanel from '@/components/admin/RecruitPanel';
 import LiveMessagesPanel from '@/components/admin/LiveMessagesPanel';
 import DataManagementPanel from '@/components/admin/DataManagementPanel';
 import PriceCachePanel from '@/components/admin/PriceCachePanel';
+import PetsPanel from '@/components/admin/PetsPanel';
 import { AltSyncTools, DiscordSwitches } from '@/components/admin/SuperAdminTools';
 import { RoleSyncPanel } from '@/components/admin/RoleSyncPanel';
 
@@ -136,6 +137,7 @@ const TABS: HubTab[] = [
     subs: [
       { id: 'data', label: 'Data management', access: 'SUPER', render: () => <DataManagementPanel /> },
       { id: 'prices', label: 'Price cache', access: 'SUPER', render: () => <PriceCachePanel /> },
+      { id: 'pets', label: 'Pets', access: 'SUPER', render: () => <PetsPanel /> },
     ],
   },
 ];

@@ -1,0 +1,472 @@
+/**
+ * Assault Roster read model (docs/assault-roster.md §2): what every assaulter in a guild runs
+ * for battle and hunting, built from `assault_roster` snapshots plus /combat profiles,
+ * default potion loadouts and the guild's tracked assault zone.
+ */
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { createAdminClient } from '@/lib/supabase-server';
+import { getAccountCharacters, getAllClaimLocks } from '@/lib/account-service';
+import { RANK, rankInGuild } from '@/lib/role-hierarchy';
+import { SUPER_ADMIN_EMAIL } from '@/lib/auth-helpers';
+import { ensureCustomPets } from '@/lib/combat/custom-pets-server';
+import { resolveSpeciesName, petTier, PET_STATS } from '@/lib/combat/pet-data';
+import { petHuntEstimate, squadHuntPower, petSquadSize, HUNT_STABLE_SIZE, type PetHuntEstimate } from '@/lib/combat/pet-hunting';
+import { huntingBow, type HuntingBow } from '@/lib/combat/hunting-gear';
+import {
+  applyBuffs, buildCharacterStats, slayerByEnemy, NO_BUFFS, ZERO_STATS,
+  type ApiEffect, type BuffState, type GearItem, type GearSelection, type StatLevels,
+} from '@/lib/combat/character-stats';
+import { matchup, estimateHP, HP_TARGETS, type FighterStats } from '@/lib/combat/formulas';
+import { MAX_LOCATION_ID } from '@/lib/assault-plan';
+import { RECOMMENDED_PRESET_ID } from '@/lib/potion-rules';
+import { withPotions } from '@/app/combat/potion-slots';
+import type { PotionRow } from '@/app/combat/types';
+
+/* ─── access ─── */
+
+export interface RosterGuild {
+  id: string;
+  name: string;
+  nickname: string | null;
+  /** Viewer is officer+ there (or super admin): may refresh the guild and flag non-assaulters. */
+  isStaff: boolean;
+}
+
+/** Assault guilds the viewer may see: their own (character or site role there) or all for super admin. */
+export async function viewableRosterGuilds(
+  user: { id: string; email?: string },
+  supabase: SupabaseClient = createAdminClient()
+): Promise<RosterGuild[]> {
+  const { data: guilds } = await supabase.from('guilds').select('id, name, nickname').eq('is_assault', true).order('name');
+  const all = (guilds ?? []).map((g) => ({ id: String(g.id), name: g.name as string, nickname: (g.nickname as string) ?? null }));
+  const isSuper = user.email === SUPER_ADMIN_EMAIL;
+  let mine: Set<string>;
+  if (isSuper) mine = new Set(all.map((g) => g.id));
+  else {
+    const [chars, { data: roles }] = await Promise.all([
+      getAccountCharacters(user.id, supabase),
+      supabase.from('guild_leaders').select('guild_id').eq('user_id', user.id),
+    ]);
+    mine = new Set([
+      ...chars.filter((c) => c.in_dream_guild && c.guild_id).map((c) => c.guild_id as string),
+      ...(roles ?? []).map((r) => String(r.guild_id)),
+    ]);
+  }
+  const visible = all.filter((g) => mine.has(g.id));
+  return Promise.all(
+    visible.map(async (g) => ({ ...g, isStaff: (await rankInGuild(supabase, user, g.id)) >= RANK.OFFICER }))
+  );
+}
+
+/* ─── read model ─── */
+
+export type Participation = 'auto' | 'opt_in' | 'none';
+export const PARTICIPATION: Participation[] = ['auto', 'opt_in', 'none'];
+
+/** A potion in someone's default loadout, with the slot it fills. */
+export interface RosterPotion {
+  id: number;
+  name: string;
+  image_url: string | null;
+  slot: 'attack' | 'protection' | 'combo' | 'battle_xp' | 'combat_xp';
+  /** Short effect label, e.g. "+20% AP", "+30/15%", "+50% Battle XP". */
+  effect: string;
+}
+
+export interface RosterPet extends PetHuntEstimate {
+  name: string;
+  /** Quality, or "Event" for event pets (display only). */
+  tier: string;
+  /** Pet level ≥ the location's lowest enemy level (pets below can't hunt there). */
+  eligible: boolean;
+  evolution: number;
+  equipped: boolean;
+  inSquad: boolean;
+}
+
+export interface RosterRow {
+  member_id: string;
+  ign: string;
+  character_class: string | null;
+  image_url: string | null;
+  position: string | null;
+  combat_level: number | null;
+  hunting_mastery: number | null;
+  pet_mastery: number | null;
+  dexterity: number | null;
+  /** Pet equipped in game right now (often a hunter, not the assault pet). */
+  equipped_pet: { species: string | null; level: number; evolution: number; tier: string | null } | null;
+  battle: {
+    gearSet: boolean;
+    loadout: string | null;
+    loadoutPotions: RosterPotion[];
+    /** The /assault/potions preset this loadout matches exactly, or null = custom. */
+    preset: { id: string; label: string; recommended: boolean } | null;
+    /** Best battle pet among ALL owned pets for this zone (fewest hits, then highest 2-hit scaling, then damage). */
+    bestPet: { species: string; level: number; evolution: number; tier: string | null; equipped: boolean } | null;
+    /** Hits are only meaningful with gear set on /combat. */
+    computed: boolean;
+    stats: { attackPower: number; protection: number; agility: number; accuracy: number; critChance: number; critDamage: number } | null;
+    enemies: { id: number; name: string; level: number; hits: number | null }[];
+    /** e.g. [{hits:2,count:2},{hits:3,count:4}] at the zone's own levels. */
+    dist: { hits: number; count: number }[];
+    worstHits: number | null;
+    /** Enemy scaling on the roster: CL 100+ only, up to Lv 150 (user rule). */
+    canScale: boolean;
+    scaleMax: number;
+    /** Highest scaled level where EVERY zone enemy still dies in 2 hits; null if not all 2 hits at base. */
+    max2HitLevel: number | null;
+  };
+  hunting: {
+    bow: HuntingBow | null;
+    squadSize: number;
+    /** Pets evaluated for hunting (two rotating squads: hunt, then sleep). */
+    stableSize: number;
+    /** Citadel est. encounters per hunt over the best `stableSize` ELIGIBLE pets. */
+    squadPower: number;
+    /** Pets must be at least this level to hunt at the selected location. */
+    minPetLevel: number;
+    eligibleCount: number;
+    bestPet: { species: string; level: number; citadelEncounters: number } | null;
+    petCount: number;
+    byQuality: Record<string, number>;
+    unknownPets: string[];
+  };
+  pets: RosterPet[];
+  pets_hidden: boolean;
+  /** auto = always in · opt_in = chooses per assault · none = not assaulting (staff-set). */
+  participation: Participation;
+  key_source: string | null;
+  last_sync: string | null;
+  last_error: string | null;
+  owner_user_id: string | null;
+  has_combat_profile: boolean;
+}
+
+export interface Roster {
+  guild: { id: string; name: string; nickname: string | null };
+  zone: { id: number | null; name: string | null; enemyCount: number; isTracked: boolean };
+  /** Assault locations to switch between (ids 1–10). */
+  zones: { id: number; name: string; minLevel: number; maxLevel: number }[];
+  trackedZoneId: number | null;
+  rows: RosterRow[];
+  generatedAt: string;
+}
+
+interface SnapPet {
+  name: string;
+  species: string | null;
+  image_url: string | null;
+  level: number;
+  quality: string | null;
+  equipped?: boolean;
+  evolution?: number;
+}
+
+const lvl = (skills: Record<string, { level?: number }> | null | undefined, key: string) =>
+  typeof skills?.[key]?.level === 'number' ? (skills[key].level as number) : null;
+
+type Enemy = { id: number; name: string; level: number; health: number };
+
+const scaleRange = (cl: number) => (cl >= 100 ? { allowed: true, max: 150 } : { allowed: false, max: 0 });
+
+/** Same rule as /combat: scaled mobs use the calibrated HP curve (citadel mobs have their own). */
+const resolveAt = (e: Enemy, scaled: number | null) => {
+  const level = scaled && scaled > e.level ? scaled : e.level;
+  return { level, hp: level === e.level ? e.health : estimateHP(HP_TARGETS[e.name] ? e.name : 'Standard Mob', level) };
+};
+
+function hitsAt(f: FighterStats, enemies: Enemy[], slayer: Record<number, number>, scaled: number | null) {
+  return enemies.map((e) => matchup(f, resolveAt(e, scaled), slayer[e.id] ?? 0));
+}
+
+function max2HitLevel(f: FighterStats, enemies: Enemy[], slayer: Record<number, number>, scaleMax: number, canScale: boolean): number | null {
+  const allTwo = (L: number | null) => hitsAt(f, enemies, slayer, L).every((m) => m.hits != null && m.hits <= 2);
+  if (!enemies.length || !allTwo(null)) return null;
+  const base = Math.max(...enemies.map((e) => e.level));
+  if (!canScale || scaleMax <= base) return base;
+  let lo = base;
+  let hi = scaleMax;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (allTwo(mid)) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
+export async function buildRoster(
+  guildId: string,
+  supabase: SupabaseClient = createAdminClient(),
+  zoneOverride?: number | null
+): Promise<Roster | null> {
+  await ensureCustomPets();
+  const [{ data: guild }, { data: snaps }, { data: config }] = await Promise.all([
+    supabase.from('guilds').select('id, name, nickname, is_assault').eq('id', guildId).maybeSingle(),
+    supabase.from('assault_roster').select('*').eq('guild_id', guildId),
+    supabase.from('assault_configs').select('tracked_zone_id, zone_name').eq('guild_id', guildId).maybeSingle(),
+  ]);
+  if (!guild || !guild.is_assault) return null;
+  const rows = snaps ?? [];
+  const memberIds = rows.map((r) => r.member_id as string);
+  const hashed = rows.map((r) => r.hashed_id as string);
+  const trackedZoneId = (config?.tracked_zone_id as number | null) ?? null;
+  const zoneId = zoneOverride && zoneOverride >= 1 && zoneOverride <= MAX_LOCATION_ID ? zoneOverride : trackedZoneId;
+
+  const [{ data: members }, { data: profiles }, { data: potions }, { data: enemies }, locks, { data: xpPotions }] = await Promise.all([
+    memberIds.length ? supabase.from('members').select('id, position').in('id', memberIds) : Promise.resolve({ data: [] }),
+    hashed.length
+      ? supabase.from('combat_profiles').select('hashed_id, user_id, gear, settings, updated_at').in('hashed_id', hashed).order('updated_at', { ascending: false })
+      : Promise.resolve({ data: [] }),
+    supabase.from('combat_potions').select('id, name, quality, is_tradeable, attack_power_bonus, protection_bonus, duration_minutes, market_price, avg_recent_sales, image_url'),
+    supabase.from('combat_enemies').select('id, name, level, health, zone_id, zone_name').gte('zone_id', 1).lte('zone_id', MAX_LOCATION_ID),
+    getAllClaimLocks(supabase),
+    supabase.from('xp_potions').select('id, name, category, xp_value, efficiency_value, image_url'),
+  ]);
+
+  const positionOf = new Map((members ?? []).map((m) => [m.id as string, (m.position as string) ?? null]));
+  const profileOf = new Map<string, { user_id: string; gear: GearSelection[]; settings: Record<string, unknown> }>();
+  for (const p of profiles ?? []) if (!profileOf.has(p.hashed_id)) profileOf.set(p.hashed_id, p as never);
+
+  const gearIds = Array.from(new Set(Array.from(profileOf.values()).flatMap((p) => (p.gear ?? []).map((g) => g.gear_item_id))));
+  const { data: gearRows } = gearIds.length
+    ? await supabase
+        .from('gear_items')
+        .select('id, name, slot, quality, agility, accuracy, protection, attack_power, critical_damage, combat_level, tier_modifiers, image_url, max_tier')
+        .in('id', gearIds)
+    : { data: [] };
+  const gearCatalog = new Map<number, GearItem>((gearRows ?? []).map((g) => [g.id as number, g as GearItem]));
+  const potionById = new Map<number, PotionRow>((potions ?? []).map((p) => [p.id as number, p as PotionRow]));
+  const xpById = new Map((xpPotions ?? []).map((p) => [p.id as number, p as { id: number; name: string; category: 'battle_xp' | 'combat_xp'; xp_value: number; efficiency_value: number; image_url: string | null }]));
+  const potionsOf = (l: { ids: number[]; xpIds: number[] }): RosterPotion[] => {
+    const out: RosterPotion[] = [];
+    for (const id of l.ids) {
+      const p = potionById.get(id);
+      if (!p) continue;
+      const slot = p.attack_power_bonus > 0 && p.protection_bonus > 0 ? 'combo' : p.attack_power_bonus > 0 ? 'attack' : 'protection';
+      const effect = slot === 'combo' ? `+${p.attack_power_bonus}/${p.protection_bonus}%` : slot === 'attack' ? `+${p.attack_power_bonus}% AP` : `+${p.protection_bonus}% Prot`;
+      out.push({ id, name: p.name, image_url: p.image_url, slot, effect });
+    }
+    for (const id of l.xpIds) {
+      const p = xpById.get(id);
+      if (!p) continue;
+      const label = p.category === 'battle_xp' ? 'Battle XP' : 'Combat XP';
+      const effect = p.xp_value ? `+${p.xp_value}% ${label}` : p.efficiency_value ? `+${p.efficiency_value}% eff` : label;
+      out.push({ id, name: p.name, image_url: p.image_url, slot: p.category, effect });
+    }
+    const order = ['combo', 'attack', 'protection', 'battle_xp', 'combat_xp'];
+    return out.sort((a, b) => order.indexOf(a.slot) - order.indexOf(b.slot));
+  };
+
+  // Default potion loadout per owner (web default beats Discord, like /combat).
+  const ownerOf = (memberId: string) => {
+    const l = locks.get(memberId);
+    return l?.status === 'approved' ? l.user_id : null;
+  };
+  const owners = Array.from(new Set(memberIds.map(ownerOf).filter(Boolean))) as string[];
+  const loadoutOf = new Map<string, { name: string; ids: number[]; xpIds: number[] }>();
+  const { data: presetRows } = await supabase.from('assault_potion_presets').select('id, label, combat_potion_ids, xp_potion_ids').order('sort_order');
+  const key = (ids: number[]) => [...ids].sort((a, b) => a - b).join(',');
+  const presetOf = (l: { ids: number[]; xpIds: number[] }) => {
+    const p = (presetRows ?? []).find((x) => key(x.combat_potion_ids ?? []) === key(l.ids) && key(x.xp_potion_ids ?? []) === key(l.xpIds));
+    return p ? { id: p.id as string, label: p.label as string, recommended: p.id === RECOMMENDED_PRESET_ID } : null;
+  };
+  if (owners.length) {
+    const { data: links } = await supabase.from('user_discord_links').select('user_id, discord_id').in('user_id', owners);
+    const discordToUser = new Map((links ?? []).map((l) => [l.discord_id as string, l.user_id as string]));
+    const { data: loadouts } = await supabase
+      .from('assault_potion_loadouts')
+      .select('name, combat_potion_ids, xp_potion_ids, user_id, discord_user_id')
+      .eq('is_default', true);
+    for (const l of loadouts ?? []) {
+      const viaWeb = l.user_id && owners.includes(l.user_id) ? (l.user_id as string) : null;
+      const viaDiscord = l.discord_user_id ? discordToUser.get(l.discord_user_id as string) ?? null : null;
+      const uid = viaWeb ?? viaDiscord;
+      if (!uid || (loadoutOf.has(uid) && !viaWeb)) continue;
+      loadoutOf.set(uid, { name: l.name as string, ids: (l.combat_potion_ids ?? []) as number[], xpIds: (l.xp_potion_ids ?? []) as number[] });
+    }
+  }
+
+  const allEnemies = (enemies ?? []) as (Enemy & { zone_id: number; zone_name: string })[];
+  const zoneEnemies: Enemy[] = allEnemies.filter((e) => e.zone_id === zoneId);
+  const zoneMap = new Map<number, { id: number; name: string; minLevel: number; maxLevel: number }>();
+  for (const e of allEnemies) {
+    const z = zoneMap.get(e.zone_id) ?? { id: e.zone_id, name: e.zone_name, minLevel: e.level, maxLevel: e.level };
+    z.minLevel = Math.min(z.minLevel, e.level);
+    z.maxLevel = Math.max(z.maxLevel, e.level);
+    zoneMap.set(e.zone_id, z);
+  }
+  const zones = Array.from(zoneMap.values()).sort((a, b) => a.minLevel - b.minLevel);
+  const minPetLevel = zoneEnemies.length ? Math.min(...zoneEnemies.map((e) => e.level)) : 1;
+
+  const out: RosterRow[] = rows.map((r) => {
+    const skills = r.skills as Record<string, { level?: number }> | null;
+    const pm = lvl(skills, 'pet-mastery') ?? 0;
+    const pets: SnapPet[] = (r.pets ?? []) as SnapPet[];
+    const resolved = pets.map((p) => ({ ...p, species: p.species ?? resolveSpeciesName(p.name, p.image_url) }));
+    // Pets below the location's lowest enemy level can't hunt there (user rule).
+    const squad = squadHuntPower(
+      resolved.filter((p) => p.level >= minPetLevel).map((p) => ({ species: p.species, level: p.level, evolution: p.evolution ?? 0 })),
+      pm,
+      HUNT_STABLE_SIZE
+    );
+    const squadTop = new Map<string, number>();
+    for (const s of squad.squad) squadTop.set(`${s.species}:${s.level}`, (squadTop.get(`${s.species}:${s.level}`) ?? 0) + 1);
+
+    const petRows: RosterPet[] = [];
+    for (const p of resolved) {
+      const est = p.species ? petHuntEstimate(p.species, p.level, pm, p.evolution ?? 0) : null;
+      if (!est) continue;
+      const k = `${est.species}:${est.level}`;
+      const inSquad = (squadTop.get(k) ?? 0) > 0;
+      const eligible = est.level >= minPetLevel;
+      const counted = eligible && inSquad;
+      if (counted) squadTop.set(k, (squadTop.get(k) ?? 0) - 1);
+      petRows.push({ ...est, name: p.name, tier: petTier(est.species) ?? est.quality, evolution: p.evolution ?? 0, equipped: !!p.equipped, inSquad: counted, eligible });
+    }
+    petRows.sort((a, b) => Number(b.eligible) - Number(a.eligible) || b.citadelEncounters - a.citadelEncounters);
+
+    const byQuality: Record<string, number> = {};
+    for (const p of petRows) byQuality[p.tier] = (byQuality[p.tier] ?? 0) + 1;
+
+    const ep = r.equipped_pet as { species: string | null; name: string; image_url: string | null; level: number; evolution?: number; quality?: string } | null;
+    const epSpecies = ep ? ep.species ?? resolveSpeciesName(ep.name, ep.image_url) : null;
+
+    // Battle: best pet among everything owned, evaluated on the selected zone.
+    const profile = profileOf.get(r.hashed_id);
+    const owner = ownerOf(r.member_id);
+    const loadout = owner ? loadoutOf.get(owner) ?? null : null;
+    const gearSet = !!profile && (profile.gear ?? []).length > 0;
+    const cl = lvl(skills, 'combat') ?? 0;
+    const scale = scaleRange(cl);
+    const slayer = slayerByEnemy(r.effects as ApiEffect[]);
+    const buffs: BuffState = loadout ? withPotions(NO_BUFFS, loadout.ids, potionById) : NO_BUFFS;
+    const patted = profile?.settings?.petPatted !== false; // assault-ready: battle pet patted (5Ps)
+    const fighterWith = (pet: { species: string; level: number; evolution: number } | null) => {
+      const char = buildCharacterStats({
+        stats: r.stats as StatLevels | null,
+        skills: skills as Record<string, { level: number }> | null,
+        characterClass: r.character_class,
+        pet: pet ? { species: pet.species, level: pet.level, mastery: pm, patted, evolution: pet.evolution } : null,
+        gear: gearSet ? profile!.gear : [],
+        gearCatalog,
+        manual: ZERO_STATS,
+      });
+      const b = applyBuffs(char, buffs);
+      return { ...b, critChance: char.critChance.total, critDamage: char.critDamage.total, damageFlat: char.damageFlat.total } as FighterStats;
+    };
+
+    const candidates = new Map<string, { species: string; level: number; evolution: number; equipped: boolean }>();
+    for (const p of resolved) {
+      if (!p.species || !PET_STATS[p.species]) continue;
+      const key = `${p.species}:${p.level}:${p.evolution ?? 0}`;
+      if (!candidates.has(key) || p.equipped) candidates.set(key, { species: p.species, level: p.level, evolution: p.evolution ?? 0, equipped: !!p.equipped });
+    }
+    if (epSpecies && PET_STATS[epSpecies]) {
+      const key = `${epSpecies}:${ep!.level}:${ep!.evolution ?? 0}`;
+      candidates.set(key, { species: epSpecies, level: ep!.level, evolution: ep!.evolution ?? 0, equipped: true });
+    }
+
+    let bestPet: RosterRow['battle']['bestPet'] = null;
+    let bestFighter: FighterStats | null = null;
+    if (zoneEnemies.length) {
+      // Rank by total hits on the zone, then damage; the top few also by 2-hit scaling headroom.
+      const ranked = Array.from(candidates.values())
+        .map((c) => {
+          const f = fighterWith(c);
+          const ms = hitsAt(f, zoneEnemies, slayer, null);
+          return { c, f, hits: ms.reduce((t, m) => t + (m.hits ?? 99), 0), dmg: ms.reduce((t, m) => t + m.damage, 0) };
+        })
+        .sort((a, b) => a.hits - b.hits || b.dmg - a.dmg)
+        .slice(0, 4)
+        .map((x) => ({ ...x, two: max2HitLevel(x.f, zoneEnemies, slayer, scale.max, scale.allowed) ?? 0 }))
+        .sort((a, b) => a.hits - b.hits || b.two - a.two || b.dmg - a.dmg);
+      if (ranked[0]) {
+        bestPet = { ...ranked[0].c, tier: petTier(ranked[0].c.species) };
+        bestFighter = ranked[0].f;
+      }
+    } else if (candidates.size) {
+      // No zone to test against: strongest by raw damage-relevant stats.
+      const top = Array.from(candidates.values())
+        .map((c) => ({ c, f: fighterWith(c) }))
+        .sort((a, b) => b.f.attackPower + b.f.accuracy - (a.f.attackPower + a.f.accuracy))[0];
+      bestPet = { ...top.c, tier: petTier(top.c.species) };
+      bestFighter = top.f;
+    }
+
+    const computed = gearSet && zoneEnemies.length > 0 && !!bestFighter;
+    const fighter = bestFighter ?? fighterWith(null);
+    const enemyHits = computed
+      ? zoneEnemies
+          .map((e) => ({ id: e.id, name: e.name, level: e.level, hits: matchup(fighter, { level: e.level, hp: e.health }, slayer[e.id] ?? 0).hits }))
+          .sort((a, b) => (a.hits ?? 99) - (b.hits ?? 99) || a.level - b.level)
+      : [];
+    const distMap = new Map<number, number>();
+    for (const e of enemyHits) if (e.hits != null) distMap.set(e.hits, (distMap.get(e.hits) ?? 0) + 1);
+    const dist = Array.from(distMap.entries()).sort((a, b) => a[0] - b[0]).map(([hits, count]) => ({ hits, count }));
+    const worstHits = enemyHits.length ? Math.max(...enemyHits.map((e) => e.hits ?? 99)) : null;
+
+    const best = squad.squad[0];
+    return {
+      member_id: r.member_id,
+      ign: r.ign,
+      character_class: r.character_class,
+      image_url: r.image_url,
+      position: positionOf.get(r.member_id) ?? null,
+      combat_level: lvl(skills, 'combat'),
+      hunting_mastery: lvl(skills, 'hunting-mastery'),
+      pet_mastery: lvl(skills, 'pet-mastery'),
+      dexterity: (r.stats as StatLevels | null)?.dexterity?.level ?? null,
+      equipped_pet: ep ? { species: epSpecies, level: ep.level, evolution: ep.evolution ?? 0, tier: petTier(epSpecies) } : null,
+      battle: {
+        gearSet,
+        loadout: loadout?.name ?? null,
+        loadoutPotions: loadout ? potionsOf(loadout) : [],
+        preset: loadout ? presetOf(loadout) : null,
+        bestPet,
+        computed,
+        stats: computed
+          ? { attackPower: fighter.attackPower, protection: fighter.protection, agility: fighter.agility, accuracy: fighter.accuracy, critChance: fighter.critChance, critDamage: fighter.critDamage }
+          : null,
+        enemies: enemyHits,
+        dist,
+        worstHits: worstHits === 99 ? null : worstHits,
+        canScale: scale.allowed,
+        scaleMax: scale.max,
+        max2HitLevel: computed ? max2HitLevel(fighter, zoneEnemies, slayer, scale.max, scale.allowed) : null,
+      },
+      hunting: {
+        bow: huntingBow(r.hunting_bow),
+        squadSize: petSquadSize(pm),
+        stableSize: HUNT_STABLE_SIZE,
+        minPetLevel,
+        eligibleCount: petRows.filter((p) => p.eligible).length,
+        squadPower: squad.power,
+        bestPet: best ? { species: best.species, level: best.level, citadelEncounters: best.citadelEncounters } : null,
+        petCount: pets.length,
+        byQuality,
+        unknownPets: Array.from(new Set(resolved.filter((p) => !p.species).map((p) => p.name))),
+      },
+      pets: petRows,
+      pets_hidden: !!r.pets_hidden,
+      participation: (PARTICIPATION.includes(r.participation) ? r.participation : 'auto') as Participation,
+      key_source: r.key_source ?? null,
+      last_sync: r.last_sync ?? null,
+      last_error: r.last_error ?? null,
+      owner_user_id: owner,
+      has_combat_profile: !!profile,
+    };
+  });
+
+  const pOrder = (p: Participation) => PARTICIPATION.indexOf(p);
+  out.sort((a, b) => pOrder(a.participation) - pOrder(b.participation) || (b.combat_level ?? 0) - (a.combat_level ?? 0) || b.hunting.squadPower - a.hunting.squadPower);
+
+  return {
+    guild: { id: String(guild.id), name: guild.name, nickname: guild.nickname ?? null },
+    zone: { id: zoneId, name: zoneMap.get(zoneId ?? -1)?.name ?? (config?.zone_name as string) ?? null, enemyCount: zoneEnemies.length, isTracked: zoneId === trackedZoneId },
+    zones,
+    trackedZoneId,
+    rows: out,
+    generatedAt: new Date().toISOString(),
+  };
+}

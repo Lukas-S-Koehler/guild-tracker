@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase-server';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
 import { PET_STATS, resolveSpeciesName } from './pet-data';
+import { ensureCustomPets } from './custom-pets-server';
 
 export const SUPER_ADMIN_USER_ID = '5f33bb41-86ab-4024-a1da-6a2fea5fb36b';
 export const SYNC_COOLDOWN_MS = 2 * 60 * 1000;
@@ -30,7 +31,7 @@ const isAuthError = (e: unknown) => e instanceof Error && /API Error: (401|403)\
  * user why something is missing and how to fix it.
  */
 export async function fetchCharacterSnapshot(userId: string, hashedId: string) {
-  const { own, fallback } = await apiKeysFor(userId);
+  const [{ own, fallback }] = await Promise.all([apiKeysFor(userId), ensureCustomPets()]);
   if (!own && !fallback) throw new Error('No IdleMMO API key available — add yours in /setup.');
 
   let usedFallback = !own;
