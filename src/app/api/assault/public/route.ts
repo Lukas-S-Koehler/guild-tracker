@@ -1,10 +1,14 @@
+import { requireAccess } from '@/lib/access-server';
+import { isResponse } from '@/lib/user-auth';
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { nextAssaultLaunchUnix } from '@/lib/assault-service';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: Request) {
+  const gate = await requireAccess(req, 'member');
+  if (isResponse(gate)) return gate;
   const supabase = createAdminClient();
 
   const { data: assaultGuilds } = await supabase

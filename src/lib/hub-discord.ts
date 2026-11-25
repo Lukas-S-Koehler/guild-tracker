@@ -23,6 +23,7 @@ import { personalRecapEmbed } from '@/lib/assault-recap';
 import { buildProfile, findProfileAccount } from '@/lib/profile';
 import { profilePath } from '@/lib/profile-path';
 import { ROSTER_COMMAND } from '@/lib/roster-discord';
+import { ELIGIBILITY_COMMAND } from '@/lib/eligibility-discord';
 import { ROSTER_DEFAULT_COMMAND } from '@/lib/roster-default-discord';
 import { CHAR_BOARDS, NETWORK_BOARDS, getNetworkBoards, placeOf, type CharBoardKey, type NetworkBoardKey } from '@/lib/network-boards';
 import { KUDOS_PER_WEEK, REASON_MAX, REASON_MIN, discordSafe, giveKudos, giverStatus, memberIdByIgn, receivedKudos } from '@/lib/kudos';
@@ -793,6 +794,7 @@ const MEMBER_HELP: [string, string[]][] = [
     '`/assault me` your assault season + recap · `/assault checklist` your prep checklist · `/assault potions` pick your loadout · `/assault loadout`',
     '`/roster` your own setup, tiers and next best moves · `/roster ign:` one member\'s · `/roster guild:` the guild summary (next wave, goals, setup)',
     '`/roster-default` your assault default: Auto (in unless you say out) · Opt-in (in when you say so) · Not assaulting. Single waves: the RSVP buttons',
+    '`/eligibility` could your characters outside DE / DI join? Tiers + next moves per assault guild, and an "Interested" button once you meet the minimum',
     '`/assault top` · `/assault season` · `/assault zones` rankings',
     '`/assault conquest-info` how conquest works',
   ]],
@@ -802,6 +804,7 @@ const STAFF_HELP: [string, string[]][] = [
   [`🛡️ Leadership role <@&${LEADERSHIP_ROLE_ID}>`, [
     '`/warn user: reason:` warn and DM (only people ranked below you in game)',
     '`/map ign: user:` link a character to a Discord user (also syncs their guild roles)',
+    '`/eligibility ign:` (deputy+) any character we know, measured against the DE / DI goals (scouting)',
     '`/make-main ign:` set the main of an alt account',
     '`/lookup user:` anyone\'s linked characters',
     '`/guide publish` post or refresh the guide in this channel',
@@ -857,6 +860,7 @@ export async function registerHubCommands() {
     { name: 'claim', description: 'Link your Discord to the Dream Guilds website and claim your character' },
     ROSTER_COMMAND,
     ROSTER_DEFAULT_COMMAND,
+    ELIGIBILITY_COMMAND,
     {
       name: 'me',
       description: 'Your daily check, streaks and stats (📢 Share button posts it)',

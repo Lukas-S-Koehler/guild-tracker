@@ -27,9 +27,19 @@ const label = (g: { name: string; tier: number } | undefined) => (g ? `${g.name}
 
 /**
  * Gear the character has saved on /combat. Leaders can edit it for members ranked below them;
- * every save goes through a confirmation that lists the changes.
+ * every save goes through a confirmation that lists the changes. `onSave` replaces the leader
+ * endpoint (the owner's own editor on /assault/eligibility); it returns an error or null.
  */
-export function GearSection({ r, canEdit, onSaved }: { r: RosterRow; canEdit: boolean; onSaved: () => void }) {
+export function GearSection({
+  r, canEdit, onSaved, onSave, startOpen,
+}: {
+  r: RosterRow;
+  canEdit: boolean;
+  onSaved: () => void;
+  onSave?: (gear: GearSelection[]) => Promise<string | null>;
+  /** Open the editor straight away (nothing saved yet). */
+  startOpen?: boolean;
+}) {
   const [editing, setEditing] = useState(false);
   const [catalog, setCatalog] = useState<CatalogItem[] | null>(null);
   const [draft, setDraft] = useState<GearSelection[]>([]);
@@ -44,6 +54,8 @@ export function GearSection({ r, canEdit, onSaved }: { r: RosterRow; canEdit: bo
     setConfirming(false);
     setMsg(null);
   }, [r.member_id, savedKey]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (startOpen && canEdit && !r.battle.gearSet) startEdit(); }, [r.member_id, startOpen]);
 
   const startEdit = async () => {
     setMsg(null);
@@ -73,6 +85,9 @@ export function GearSection({ r, canEdit, onSaved }: { r: RosterRow; canEdit: bo
     return same ? null : { slot: slotLabel, from: label(before), to: label(draftItem(key)) };
   }).filter((c): c is NonNullable<typeof c> => !!c);
 
+  // Empty can be saved on purpose ("nothing equipped") while gear doesn't count as set yet.
+  const saveEmpty = !draft.length && !r.battle.gearSet;
+
   const equip = (slot: string, itemId: number | null) => {
     let next = draft.filter((g) => g.slot !== slot);
     if (itemId) {
@@ -87,15 +102,21 @@ export function GearSection({ r, canEdit, onSaved }: { r: RosterRow; canEdit: bo
   const save = async () => {
     setBusy(true);
     setMsg(null);
-    const res = await fetch('/api/assault/roster/gear', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ member_id: r.member_id, gear: draft }),
-    });
-    const json = await res.json().catch(() => ({}));
+    let error: string | null = null;
+    if (onSave) {
+      error = await onSave(draft);
+    } else {
+      const res = await fetch('/api/assault/roster/gear', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ member_id: r.member_id, gear: draft }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) error = json.error ?? 'Save failed';
+    }
     setBusy(false);
     setConfirming(false);
-    if (!res.ok) return setMsg(json.error ?? 'Save failed');
+    if (error) return setMsg(error);
     setEditing(false);
     onSaved();
   };
@@ -140,7 +161,7 @@ export function GearSection({ r, canEdit, onSaved }: { r: RosterRow; canEdit: bo
             })}
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">No gear saved on /combat yet.</p>
+          <p className="text-xs text-muted-foreground">{r.battle.gearSet ? 'Saved: nothing equipped.' : 'No gear saved yet.'}</p>
         )
       ) : !catalog ? (
         <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin" /></div>
@@ -180,7 +201,10 @@ export function GearSection({ r, canEdit, onSaved }: { r: RosterRow; canEdit: bo
 
           {confirming ? (
             <div className="rounded-md border border-amber-500/50 bg-amber-500/5 p-2 space-y-2">
-              <p className="text-xs font-medium">Save these gear changes for {r.ign}? This also changes their /combat gear.</p>
+              <p className="text-xs font-medium">
+                {onSave ? `Save this gear for ${r.ign}?` : `Save these gear changes for ${r.ign}? This also changes their /combat gear.`}
+              </p>
+              {!draft.length && <p className="text-[11px] text-muted-foreground">Nothing equipped: battle is measured without gear.</p>}
               <ul className="text-[11px] space-y-0.5">
                 {changes.map((c) => (
                   <li key={c.slot}>
@@ -197,9 +221,12 @@ export function GearSection({ r, canEdit, onSaved }: { r: RosterRow; canEdit: bo
             </div>
           ) : (
             <div className="flex gap-2 items-center">
-              <Button size="sm" className="h-7 text-xs" disabled={!changes.length} onClick={() => setConfirming(true)}>
-                Save{changes.length ? ` (${changes.length} change${changes.length > 1 ? 's' : ''})` : ''}
+              <Button size="sm" className="h-7 text-xs" disabled={!changes.length && !saveEmpty} onClick={() => setConfirming(true)}>
+                {saveEmpty && !changes.length ? 'Save: nothing equipped' : `Save${changes.length ? ` (${changes.length} change${changes.length > 1 ? 's' : ''})` : ''}`}
               </Button>
+              {draft.length > 0 && (
+                <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={busy} onClick={() => setDraft([])}>Nothing equipped</Button>
+              )}
               <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setEditing(false)}>Cancel</Button>
             </div>
           )}

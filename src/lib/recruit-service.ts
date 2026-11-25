@@ -24,12 +24,27 @@ export interface Prospect {
   messaged_by_name: string | null;
   updated_by_name: string | null;
   updated_at: string;
+  /** Join interest from /assault/eligibility: the assault guild and their verdict for it then. */
+  interest_guild_id: string | null;
+  interest_tiers: InterestSnapshot | null;
+  interest_at: string | null;
+}
+
+/** What staff see about an interested player (stored on the prospect). */
+export interface InterestSnapshot {
+  guild_name: string;
+  member_id: string | null;
+  meets: boolean;
+  tiers: Record<string, number>;
+  below: string[];
+  combat_level: number | null;
+  character_class: string | null;
 }
 
 export interface Actor { id: string; name: string | null }
 
 const COLS =
-  'id, ign, status, location, language, note, messaged_at, replied_at, joined_at, joined_guild_id, recheck_after, messaged_by_name, updated_by_name, updated_at';
+  'id, ign, status, location, language, note, messaged_at, replied_at, joined_at, joined_guild_id, recheck_after, messaged_by_name, updated_by_name, updated_at, interest_guild_id, interest_tiers, interest_at';
 const DAY_MS = 86_400_000;
 const key = (ign: string) => ign.toLowerCase();
 
@@ -77,6 +92,8 @@ export async function detectJoins(supabase: SupabaseClient): Promise<number> {
   for (const p of open) {
     const guild = inDream.get(key(p.ign));
     if (!guild) continue;
+    // Interested players may already be in a Dream guild: joined = they reached the assault guild they asked for.
+    if (p.interest_guild_id && guild !== p.interest_guild_id) continue;
     await supabase
       .from('recruit_prospects')
       .update({ status: 'joined', joined_at: now, joined_guild_id: guild, recheck_after: null, updated_at: now })
@@ -87,6 +104,8 @@ export async function detectJoins(supabase: SupabaseClient): Promise<number> {
 }
 
 export interface Funnel {
+  /** Raised their hand on /assault/eligibility, not contacted yet. */
+  interested: number;
   messaged: number; replied: number; joined: number; declined: number; skipped: number;
   by_location: { location: string; messaged: number; joined: number }[];
 }
@@ -102,6 +121,7 @@ function funnel(rows: Prospect[]): Funnel {
     locs.set(l, v);
   }
   return {
+    interested: rows.filter((r) => r.status === 'interested').length,
     messaged: contacted.length,
     replied: contacted.filter((r) => r.replied_at || r.status === 'joined' || r.status === 'declined').length,
     joined: rows.filter((r) => r.status === 'joined').length,
@@ -188,6 +208,40 @@ export async function setStatus(supabase: SupabaseClient, input: SetStatusInput,
   const { data, error } = await q.select(COLS).single();
   if (error) throw new Error(error.message);
   return data as Prospect;
+}
+
+/**
+ * A player said "interested in joining <assault guild>" (eligibility page or Discord). Creates the
+ * prospect or moves it to interested; never touches someone who already joined. Returns the
+ * previous status (null = new) so callers can skip repeat Discord notes.
+ */
+export async function registerInterest(
+  supabase: SupabaseClient,
+  input: { ign: string; guild_id: string; user_id: string; snapshot: InterestSnapshot }
+): Promise<{ prospect: Prospect; previous: RecruitStatus | null; sameGuild: boolean }> {
+  const ign = input.ign.trim();
+  const { data: existing } = await supabase.from('recruit_prospects').select(COLS).ilike('ign', ign.replace(/[\\%_]/g, (c) => `\\${c}`)).maybeSingle();
+  const prev = (existing as Prospect | null) ?? null;
+  const now = new Date().toISOString();
+  const patch: Record<string, unknown> = {
+    ign: prev?.ign ?? ign,
+    interest_guild_id: input.guild_id,
+    interest_member_id: input.snapshot.member_id,
+    interest_user_id: input.user_id,
+    interest_tiers: input.snapshot,
+    interest_at: now,
+    updated_at: now,
+  };
+  if (prev?.status !== 'joined') {
+    patch.status = 'interested';
+    patch.recheck_after = null;
+  }
+  const q = prev
+    ? supabase.from('recruit_prospects').update(patch).eq('id', prev.id)
+    : supabase.from('recruit_prospects').insert(patch);
+  const { data, error } = await q.select(COLS).single();
+  if (error) throw new Error(error.message);
+  return { prospect: data as Prospect, previous: prev?.status ?? null, sameGuild: prev?.interest_guild_id === input.guild_id };
 }
 
 export async function updateNote(supabase: SupabaseClient, id: string, note: string | null, actor: Actor) {

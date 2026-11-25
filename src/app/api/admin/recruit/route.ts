@@ -6,7 +6,7 @@ import type { RecruitLanguage, RecruitStatus } from '@/lib/recruit-parse';
 
 export const dynamic = 'force-dynamic';
 
-const STATUSES: RecruitStatus[] = ['messaged', 'replied', 'joined', 'declined', 'skip_guild', 'skip_weak'];
+const STATUSES: RecruitStatus[] = ['interested', 'messaged', 'replied', 'joined', 'declined', 'skip_guild', 'skip_weak'];
 
 /** Recruit tracker: shared across Dream guilds, deputies and up. */
 export async function GET(req: NextRequest) {

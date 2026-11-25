@@ -10,6 +10,9 @@ import { useApiClient } from '@/lib/api-client';
 import { copyToClipboard } from '@/lib/utils';
 import { TEMPLATES, type RecruitLanguage, type RecruitStatus } from '@/lib/recruit-parse';
 import type { Funnel, NearbyRow, Prospect } from '@/lib/recruit-service';
+import type { GuildRubric, ScoutRow } from '@/lib/assault-eligibility';
+import { TRACKS } from '@/lib/roster-goals';
+import { RecruitCheckCard } from '@/components/admin/RecruitCheck';
 
 /**
  * Recruit tracker. Paste the in-game Nearby list → see who still needs checking; one click to copy
@@ -17,10 +20,11 @@ import type { Funnel, NearbyRow, Prospect } from '@/lib/recruit-service';
  */
 
 const STATUS_LABEL: Record<RecruitStatus, string> = {
-  messaged: 'Messaged', replied: 'Replied', joined: 'Joined', declined: 'Declined',
+  interested: 'Interested', messaged: 'Messaged', replied: 'Replied', joined: 'Joined', declined: 'Declined',
   skip_guild: 'Has guild', skip_weak: 'Too weak',
 };
 const STATUS_CLASS: Record<RecruitStatus, string> = {
+  interested: 'bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/40',
   messaged: 'bg-blue-500/15 text-blue-400 border-blue-500/40',
   replied: 'bg-amber-500/15 text-amber-400 border-amber-500/40',
   joined: 'bg-green-500/15 text-green-400 border-green-500/40',
@@ -55,6 +59,12 @@ function Name({ ign, tag }: { ign: string; tag?: string | null }) {
 
 function prospectLine(p: Prospect) {
   const bits: string[] = [];
+  if (p.interest_at && p.interest_tiers) {
+    const t = p.interest_tiers;
+    bits.push(
+      `wants ${t.guild_name} ${fmtDate(p.interest_at)} · CL ${t.combat_level ?? '?'} ${t.character_class ?? ''} · ${t.meets ? 'meets the minimum' : `below Bronze: ${t.below.join(', ') || 'setup'}`}`
+    );
+  }
   if (p.messaged_at) bits.push(`messaged ${fmtDate(p.messaged_at)}${p.messaged_by_name ? ` by ${p.messaged_by_name}` : ''}`);
   if (p.status === 'skip_guild' || p.status === 'skip_weak') {
     bits.push(`checked ${fmtDate(p.updated_at)}${p.updated_by_name ? ` by ${p.updated_by_name}` : ''}`);
@@ -133,6 +143,7 @@ export default function RecruitPanel() {
           <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 p-2">{message}</p>
           {funnel && (
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+              {funnel.interested > 0 && <span className="text-fuchsia-300"><b>{funnel.interested}</b> interested</span>}
               <span><b>{funnel.messaged}</b> messaged</span>
               <span><b>{funnel.replied}</b> replied {funnel.messaged > 0 && <span className="text-muted-foreground">({Math.round((funnel.replied / funnel.messaged) * 100)}%)</span>}</span>
               <span className="text-green-500"><b>{funnel.joined}</b> joined {funnel.messaged > 0 && <span className="text-muted-foreground">({Math.round((funnel.joined / funnel.messaged) * 100)}%)</span>}</span>
@@ -149,6 +160,8 @@ export default function RecruitPanel() {
         </CardContent>
       </Card>
 
+      <RecruitCheckCard api={api} />
+      <ScoutCard api={api} />
       <NearbyCard api={api} message={message} location={location} lang={lang} setStatus={setStatus} />
       <ImportCard api={api} onDone={load} />
       {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : (
@@ -176,6 +189,95 @@ function CopyButton({ text, label, onCopied, variant = 'outline' }: {
 }
 
 type Api = ReturnType<typeof useApiClient>;
+
+const TIER_WORD = ['–', 'Bronze', 'Silver', 'Gold', 'Crystal', 'Dream'];
+const TIER_TEXT = ['text-muted-foreground', 'text-amber-600', 'text-zinc-300', 'text-yellow-400', 'text-sky-300', 'text-crystal'];
+
+/**
+ * Scouting: claimed characters outside the assault guilds that meet an assault guild's minimum
+ * (from /assault/eligibility snapshots, refreshed daily), players who said "interested" first.
+ */
+function ScoutCard({ api }: { api: Api }) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<{ rubrics: GuildRubric[]; rows: ScoutRow[] } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open || data) return;
+    (async () => {
+      const res = await api.get('/api/admin/recruit/scout');
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) return setErr(d.error ?? `Failed (${res.status})`);
+      setData(d);
+    })();
+  }, [open, data, api]);
+  const core = TRACKS.filter((t) => t.importance === 'core' || t.importance === 'high');
+  return (
+    <Card>
+      <CardHeader className="pb-3 cursor-pointer" onClick={() => setOpen((v) => !v)}>
+        <CardTitle className="text-base flex items-center gap-1">
+          {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          Scouting: our players who could assault{data ? ` (${data.rows.length})` : ''}
+        </CardTitle>
+        <CardDescription>
+          Claimed characters outside the assault guilds that meet a guild&apos;s minimum (its roster goals at its assault zone). Interested ones first. Refreshed daily.
+        </CardDescription>
+      </CardHeader>
+      {open && (
+        <CardContent>
+          {err && <p className="text-sm text-destructive">{err}</p>}
+          {!data && !err && <Loader2 className="h-5 w-5 animate-spin" />}
+          {data && !data.rows.length && <p className="text-sm text-muted-foreground">Nobody yet.</p>}
+          {data && data.rows.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-muted-foreground border-b">
+                    <th className="py-2 pr-3 font-medium">Character</th>
+                    {data.rubrics.map((g) => <th key={g.id} className="py-2 pr-3 font-medium">{g.nickname ?? g.name}</th>)}
+                    <th className="py-2 font-medium">Interest</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((r) => (
+                    <tr key={r.hashed_id} className="border-b last:border-0 align-top">
+                      <td className="py-2 pr-3 whitespace-nowrap">
+                        <Name ign={r.ign} />
+                        <div className="text-xs text-muted-foreground">CL {r.combat_level ?? '?'} · {r.character_class ?? '?'} · {r.guild_name ?? 'no Dream guild'}</div>
+                      </td>
+                      {data.rubrics.map((g) => {
+                        const v = r.verdicts[g.id];
+                        if (!v) return <td key={g.id} className="py-2 pr-3 text-xs text-muted-foreground">—</td>;
+                        return (
+                          <td key={g.id} className="py-2 pr-3 text-xs">
+                            <div className={v.meets ? 'text-green-500' : 'text-muted-foreground'}>{v.meets ? '✓ meets the minimum' : `below Bronze: ${v.below.length + v.setup.length}`}</div>
+                            <div className="flex flex-wrap gap-x-2">
+                              {core.map((t) => (
+                                <span key={t.id} className="text-muted-foreground">{t.label} <span className={TIER_TEXT[v.tiers[t.id] ?? 0]}>{TIER_WORD[v.tiers[t.id] ?? 0]}</span></span>
+                              ))}
+                            </div>
+                          </td>
+                        );
+                      })}
+                      <td className="py-2 text-xs whitespace-nowrap">
+                        {r.interest ? (
+                          <span className="rounded border border-fuchsia-500/40 bg-fuchsia-500/15 px-1.5 py-0.5 text-fuchsia-300">
+                            {data.rubrics.find((g) => g.id === r.interest!.guild_id)?.nickname ?? 'a guild'} · {fmtDate(r.interest.at)}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
 type SetStatus = (ign: string, status: RecruitStatus, extra?: Record<string, unknown>) => Promise<Prospect | null>;
 
 function NearbyCard({ api, message, location, lang, setStatus }: {
@@ -325,6 +427,7 @@ function ImportCard({ api, onDone }: { api: Api; onDone: () => void }) {
 }
 
 const FILTERS: { id: string; label: string; match: (p: Prospect) => boolean }[] = [
+  { id: 'interested', label: 'Interested', match: (p) => p.status === 'interested' },
   { id: 'open', label: 'Waiting', match: (p) => p.status === 'messaged' || p.status === 'replied' },
   { id: 'joined', label: 'Joined', match: (p) => p.status === 'joined' },
   { id: 'declined', label: 'Declined', match: (p) => p.status === 'declined' },

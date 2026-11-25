@@ -11,7 +11,8 @@ import {
 import type { Participation, Roster, RosterGuild, RosterPotion, RosterRow } from '@/lib/assault-roster';
 import { HUNTING_BOWS, bowBlocker } from '@/lib/combat/hunting-gear';
 import type { GoalSet } from '@/lib/roster-goals';
-import { GoalsSection, GoalsView, Reminders, SetupEligibility, TierChip } from '@/components/assault/RosterGoals';
+import { EligibilityVerdict, GoalsSection, GoalsView, Reminders, SetupEligibility, TierChip } from '@/components/assault/RosterGoals';
+import { fmtGold } from '@/lib/roster-moves';
 import { TRACKS, belowMinimum, evaluateGoals, meetsMinimum, prerequisites } from '@/lib/roster-goals';
 import { GearSection } from '@/components/assault/RosterGear';
 
@@ -648,9 +649,21 @@ function OutsidersTable({
     setBusy(null);
     if (err) setMsg(`${r.ign}: ${err}`);
   };
+  // Own characters below the minimum: same verdict as /assault/eligibility (what's missing + top 3 moves).
+  const ownBelow = goals ? rows.filter((r) => mine.includes(r.member_id) && !meetsMinimum(r, evaluateGoals(r, goals))) : [];
   return (
     <div className="space-y-2">
       {msg && <p className="text-xs text-red-500">{msg}</p>}
+      {goals && ownBelow.length > 0 && (
+        <div className="grid gap-2 md:grid-cols-2">
+          {ownBelow.map((r) => (
+            <div key={r.member_id} className="rounded-md border p-2.5 space-y-1 cursor-pointer hover:bg-muted/30" onClick={() => onOpen(r)}>
+              <div className="text-sm font-semibold">{r.ign}: could join once</div>
+              <EligibilityVerdict r={r} goals={goals} />
+            </div>
+          ))}
+        </div>
+      )}
       <div className="overflow-x-auto -mx-4 px-4">
         <table className="w-full text-sm">
           <thead>
@@ -658,6 +671,7 @@ function OutsidersTable({
               <th className="py-2 pl-2 pr-3 font-medium">Character</th>
               <th className="py-2 pr-3 font-medium" title="Measured against the guild's roster goals at its assault zone">Assault minimum</th>
               <th className="py-2 pr-3 font-medium" title="Core goal elements">Battle · Pet hunt · Battle pet</th>
+              <th className="py-2 pr-3 font-medium" title="Best next move towards the minimum (setup first)">Next move</th>
               <th className="py-2 pr-3 font-medium" title="Not assaulting = out unless they say in for a wave">Next wave</th>
               <th className="py-2 font-medium" />
             </tr>
@@ -688,6 +702,17 @@ function OutsidersTable({
                       </span>
                     ) : (
                       <span className="text-xs tabular-nums">{r.hunting.squadPower.toLocaleString()} hunt power</span>
+                    )}
+                  </td>
+                  <td className="py-2 pr-3 text-xs text-muted-foreground max-w-[16rem]">
+                    {goals && r.moves[0] ? (
+                      <span title={r.moves[0].detail}>
+                        {r.moves[0].kind === 'setup' ? <span className="text-amber-500">Set up: </span> : null}
+                        {r.moves[0].title}
+                        {r.moves[0].cost != null && <span className="text-yellow-400"> · {fmtGold(r.moves[0].cost)}g</span>}
+                      </span>
+                    ) : (
+                      '—'
                     )}
                   </td>
                   <td className="py-2 pr-3">{nextWave ? <RsvpPill r={r} /> : <span className="text-xs text-muted-foreground">none scheduled</span>}</td>

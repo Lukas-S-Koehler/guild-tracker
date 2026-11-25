@@ -1,3 +1,5 @@
+import { requireAccess } from '@/lib/access-server';
+import { isResponse } from '@/lib/user-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { getCurrentSeason } from '@/lib/assault-standings-service';
@@ -13,6 +15,8 @@ interface ContribRow { run_id: string; character_id: number; character_name: str
 
 // GET ?season=13  -> every assault wave (per guild + location) with per-member wave XP
 export async function GET(req: NextRequest) {
+  const gate = await requireAccess(req, 'member');
+  if (isResponse(gate)) return gate;
   try {
     const { searchParams } = new URL(req.url);
     const season = parseInt(searchParams.get('season') ?? '', 10) || (await getCurrentSeason());

@@ -228,12 +228,13 @@ function bowMoves(r: RosterRow, res: TrackResult, ctx: MoveContext): Move[] {
   if (need == null || !ctx.marketAccess) return [];
   const pick = recommendBow(r.hunting.bowOptions.length ? r.hunting.bowOptions : bowOptions(r, ctx), need);
   if (!pick) return [];
+  // Equip first (many already own a bow), buying is the fallback (user rule).
   return [{
     track: 'bow', toTier: ths.filter((t) => pick.huntEff >= t).length, kind: 'buy',
-    title: `Buy ${pick.name} (+${pick.huntEff}%)`,
-    detail: pick.blocker ? `${pick.blocker} first` : `strongest ${pick.quality} bow you can equip; set it on /combat or the roster afterwards`,
+    title: `${r.hunting.bow ? 'Equip a stronger hunting bow' : 'Equip a hunting bow'} (+${need}% hunt eff or more)`,
+    detail: `Have one? Pick it in the bow picker. Don't have one? Buy ${pick.name} (+${pick.huntEff}%)${pick.blocker ? `, ${pick.blocker} first` : `, the strongest ${pick.quality} bow you can equip`}.`,
     cost: pick.price,
-    costNote: pick.price ? undefined : 'no recent sales',
+    costNote: pick.price ? 'if you buy one' : 'no recent sales',
     weigh: 'bow',
   }];
 }

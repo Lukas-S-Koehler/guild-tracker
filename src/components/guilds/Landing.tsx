@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Loader2, Swords, Droplets, ArrowRight, Check } from 'lucide-react';
+import { Loader2, Swords, Droplets, ArrowRight, Check, Crown, Medal } from 'lucide-react';
 import { PERK_GROUPS } from '@/lib/hub-perks';
 import type { GuildDirectory } from '@/lib/guild-directory';
 import { raidTiers } from '@/lib/guild-fit';
@@ -85,6 +85,16 @@ export default function Landing() {
                 </li>
               )}
             </ul>
+            <div className="border-t pt-3">
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                <Link href="/assault/leaderboard" className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
+                  <Medal className="h-3.5 w-3.5" />Assault leaderboard
+                </Link>
+                <Link href="/assault/hall-of-fame" className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
+                  <Crown className="h-3.5 w-3.5" />Hall of fame
+                </Link>
+              </div>
+            </div>
           </div>
         </div>
       </section>

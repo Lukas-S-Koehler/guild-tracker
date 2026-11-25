@@ -5,8 +5,9 @@ import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, MapPin, BookOpen, CheckSquare, BarChart3, Settings, Swords, FlaskConical, Trophy, Clock, Landmark, Medal, Globe, Crown } from 'lucide-react';
+import { Loader2, MapPin, BookOpen, CheckSquare, BarChart3, Settings, Swords, FlaskConical, Trophy, Clock, Landmark, Medal, Globe, Crown, Users, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAccess } from '@/lib/use-access';
 import { DREAM_BADGE_URL } from '@/lib/dream-badge';
 import MyAssaultStrip from '@/components/assault/MyAssaultStrip';
 
@@ -84,6 +85,7 @@ function WeekdayChips({ days }: { days: number[] | null }) {
 }
 
 function GuildHero({ g, standings, nowMs }: { g: GuildSummary; standings: Standings | null; nowMs: number }) {
+  const { assaulter } = useAccess();
   const live = g.active_run && new Date(g.active_run.ends_at).getTime() > nowMs ? g.active_run : null;
   const target = live ? Math.floor(new Date(live.ends_at).getTime() / 1000) : g.next_launch_unix;
   const sg = standings?.guilds.find(x => x.guild_id === g.external_guild_id);
@@ -188,8 +190,8 @@ function GuildHero({ g, standings, nowMs }: { g: GuildSummary; standings: Standi
         <div className="flex gap-2 flex-wrap">
           <Link href="/assault/leaderboard"><Button size="sm"><Medal className="h-4 w-4 mr-1" />Member leaderboard</Button></Link>
           <Link href="/assault/stats"><Button size="sm" variant="outline"><BarChart3 className="h-4 w-4 mr-1" />Season stats</Button></Link>
-          <Link href="/assault/checklist"><Button size="sm" variant="outline"><CheckSquare className="h-4 w-4 mr-1" />Checklist</Button></Link>
-          <Link href="/assault/locations"><Button size="sm" variant="outline"><MapPin className="h-4 w-4 mr-1" />Locations</Button></Link>
+          {assaulter && <Link href="/assault/checklist"><Button size="sm" variant="outline"><CheckSquare className="h-4 w-4 mr-1" />Checklist</Button></Link>}
+          <Link href="/assault/roster"><Button size="sm" variant="outline"><Users className="h-4 w-4 mr-1" />Roster</Button></Link>
         </div>
       </CardContent>
     </Card>
@@ -198,6 +200,7 @@ function GuildHero({ g, standings, nowMs }: { g: GuildSummary; standings: Standi
 
 export default function AssaultLandingPage() {
   const { hasRole, isSuperAdmin } = useAuth();
+  const { assaulter } = useAccess();
   const canAdmin = isSuperAdmin || hasRole('DEPUTY');
   const [guilds, setGuilds] = useState<GuildSummary[] | null>(null);
   const [standings, setStandings] = useState<Standings | null>(null);
@@ -218,16 +221,22 @@ export default function AssaultLandingPage() {
     .sort((a, b) => (a.next_launch_unix ?? Infinity) - (b.next_launch_unix ?? Infinity));
   const pausedGuilds = (guilds ?? []).filter(g => !g.active);
 
+  // Prep tools are for the assault guilds; everyone else gets the eligibility checklist (src/lib/use-access.ts).
   const tools = [
-    { href: '/me/assault', icon: Swords, title: 'My assault', desc: 'Your season, waves, ranks, loadout.' },
+    ...(assaulter ? [{ href: '/me/assault', icon: Swords, title: 'My assault', desc: 'Your season, waves, ranks, loadout.' }] : []),
     { href: '/assault/stats', icon: BarChart3, title: 'Stats', desc: 'Season standing, member leaderboards.' },
     { href: '/assault/hall-of-fame', icon: Crown, title: 'Hall of Fame', desc: 'Best finishes, all-time top assaulters.' },
     { href: '/assault/leaderboard', icon: Medal, title: 'Leaderboard', desc: 'Member assault rankings.' },
     { href: '/assault/conquest', icon: Globe, title: 'Conquest', desc: 'Every location, every guild.' },
     { href: '/assault/locations', icon: MapPin, title: 'Locations', desc: 'Enemies, drops, gold per hour.' },
-    { href: '/assault/guide', icon: BookOpen, title: 'Guide', desc: 'Zone info, 5Ps, hits-to-kill, gear.' },
-    { href: '/assault/checklist', icon: CheckSquare, title: 'Checklist', desc: 'Track your prep each launch.' },
-    { href: '/assault/potions', icon: FlaskConical, title: 'Potions', desc: 'Plan stacks, costs, restacks.' },
+    ...(assaulter
+      ? [
+          { href: '/assault/guide', icon: BookOpen, title: 'Guide', desc: 'Zone info, 5Ps, hits-to-kill, gear.' },
+          { href: '/assault/checklist', icon: CheckSquare, title: 'Checklist', desc: 'Track your prep each launch.' },
+          { href: '/assault/potions', icon: FlaskConical, title: 'Potions', desc: 'Plan stacks, costs, restacks.' },
+        ]
+      : [{ href: '/assault/eligibility', icon: ShieldCheck, title: 'Eligibility', desc: 'Minimum checklist to join the assaults.' }]),
+    { href: '/assault/roster', icon: Users, title: 'Roster', desc: "Everyone's battle + hunting setup." },
     ...(canAdmin ? [{ href: '/admin?tab=assault', icon: Settings, title: 'Admin', desc: 'Schedule, pings, location.' }] : []),
   ];
 

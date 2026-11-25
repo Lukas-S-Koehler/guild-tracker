@@ -2,7 +2,8 @@
  * Parsers for text copied out of IdleMMO for the recruit tracker. Pure, used by client and API.
  */
 
-export type RecruitStatus = 'messaged' | 'replied' | 'joined' | 'declined' | 'skip_guild' | 'skip_weak';
+/** interested = the player raised their hand on /assault/eligibility (or /eligibility in Discord). */
+export type RecruitStatus = 'interested' | 'messaged' | 'replied' | 'joined' | 'declined' | 'skip_guild' | 'skip_weak';
 export type RecruitLanguage = 'en' | 'de';
 
 /** Days a skip lasts before the player shows as "to check" again. */
@@ -10,7 +11,7 @@ export const RECHECK_DAYS: Partial<Record<RecruitStatus, number>> = { skip_guild
 
 /** Statuses an inbox import may set, in the order they can only move forward. */
 const PROGRESS: Record<RecruitStatus, number> = {
-  skip_guild: 0, skip_weak: 0, messaged: 1, replied: 2, declined: 3, joined: 4,
+  skip_guild: 0, skip_weak: 0, interested: 0, messaged: 1, replied: 2, declined: 3, joined: 4,
 };
 /** True when an automatic update from `from` to `to` moves forward (manual edits ignore this). */
 export const isForward = (from: RecruitStatus | null | undefined, to: RecruitStatus) =>

@@ -15,12 +15,13 @@ import {
 import { Badge } from '@/components/ui/badge';
 import {
   ChevronDown, User, LogOut, Users, Shield, Crown, Gauge, Castle, Activity, Trophy, Swords, Globe, BarChart3, Medal,
-  BookOpen, MapPin, CheckSquare, FlaskConical, Calculator,
+  BookOpen, MapPin, CheckSquare, FlaskConical, Calculator, ShieldCheck,
   KeyRound, UserCircle, type LucideIcon,
 } from 'lucide-react';
 import { DreamWordmark } from '@/components/brand/DreamMark';
+import { useAccess } from '@/lib/use-access';
 
-type NavItem = { href: string; label: string; desc?: string; icon: LucideIcon };
+type NavItem = { href: string; label: string; desc?: string; icon: LucideIcon; show?: boolean };
 type NavSection = { title?: string; items: NavItem[] };
 type NavEntry =
   | { kind: 'link'; href: string; label: string; icon: LucideIcon; show: boolean; also?: string[] }
@@ -75,6 +76,8 @@ export default function Navigation() {
   const isStaff = atLeast('OFFICER');
   const signedIn = !!user && !isGuest;
   const member = signedIn && (isSuperAdmin || hasRole('MEMBER'));
+  // Assault pages follow the same rules as their page gates (src/lib/use-access.ts).
+  const { member: dreamMember, assaulter, outsideDream } = useAccess();
 
   // Top bar: plain links for the pages members use daily, a dropdown only where a page
   // family needs one (Assault's sub-pages, staff tools). Avatar menu holds account things.
@@ -84,16 +87,17 @@ export default function Navigation() {
     { kind: 'link', href: '/overview', label: 'Activity', icon: Activity, show: member },
     { kind: 'link', href: '/leaderboard', label: 'Leaderboard', icon: Trophy, show: member },
     {
-      kind: 'menu', key: 'assault', label: 'Assault', icon: Swords, show: member, matchPrefix: '/assault',
+      // Every signed-in user: rankings + eligibility. Live pages for Dream members, prep for assaulters.
+      kind: 'menu', key: 'assault', label: 'Assault', icon: Swords, show: signedIn, matchPrefix: '/assault',
       sections: [
         {
           title: 'Live',
           items: [
-            { href: '/assault', label: 'Assault hub', desc: 'Next launch, guild status', icon: Swords },
-            { href: '/me/assault', label: 'My assault', desc: 'Your season, waves, ranks, loadout', icon: Gauge },
-            { href: '/assault/conquest', label: 'Conquest', desc: 'Every location, every guild', icon: Globe },
-            { href: '/assault/stats', label: 'Season stats', desc: 'Standing and waves this season', icon: BarChart3 },
-            { href: '/assault/roster', label: 'Roster', desc: "Everyone's battle + hunting setup", icon: Users },
+            { href: '/assault', label: 'Assault hub', desc: 'Next launch, guild status', icon: Swords, show: dreamMember },
+            { href: '/me/assault', label: 'My assault', desc: 'Your season, waves, ranks, loadout', icon: Gauge, show: assaulter },
+            { href: '/assault/conquest', label: 'Conquest', desc: 'Every location, every guild', icon: Globe, show: dreamMember },
+            { href: '/assault/stats', label: 'Season stats', desc: 'Standing and waves this season', icon: BarChart3, show: dreamMember },
+            { href: '/assault/roster', label: 'Roster', desc: "Everyone's battle + hunting setup", icon: Users, show: dreamMember },
           ],
         },
         {
@@ -106,10 +110,11 @@ export default function Navigation() {
         {
           title: 'Prep',
           items: [
-            { href: '/assault/guide', label: 'Guide', desc: 'Zones, 5Ps, hits-to-kill, gear', icon: BookOpen },
-            { href: '/assault/locations', label: 'Locations', desc: 'Enemies, drops, gold per hour', icon: MapPin },
-            { href: '/assault/checklist', label: 'Checklist', desc: 'Track your prep each launch', icon: CheckSquare },
-            { href: '/assault/potions', label: 'Potions', desc: 'Stacks, costs, restacks', icon: FlaskConical },
+            { href: '/assault/eligibility', label: 'Eligibility', desc: 'Minimum checklist to join an assault guild', icon: ShieldCheck },
+            { href: '/assault/guide', label: 'Guide', desc: 'Zones, 5Ps, hits-to-kill, gear', icon: BookOpen, show: assaulter },
+            { href: '/assault/locations', label: 'Locations', desc: 'Enemies, drops, gold per hour', icon: MapPin, show: dreamMember },
+            { href: '/assault/checklist', label: 'Checklist', desc: 'Track your prep each launch', icon: CheckSquare, show: assaulter },
+            { href: '/assault/potions', label: 'Potions', desc: 'Stacks, costs, restacks', icon: FlaskConical, show: assaulter },
           ],
         },
       ],
@@ -123,7 +128,13 @@ export default function Navigation() {
   const isActive = (href: string) => pathname === href || (href !== '/' && pathname.startsWith(href + '/'));
   // Exact match for links whose sub-pages live in the same menu (e.g. /assault vs /assault/stats).
   const isExact = (href: string) => pathname === href;
-  const visibleEntries = entries.filter((e) => e.show);
+  const visibleEntries = entries
+    .filter((e) => e.show)
+    .map((e) =>
+      e.kind === 'menu'
+        ? { ...e, sections: e.sections.map((sec) => ({ ...sec, items: sec.items.filter((i) => i.show !== false) })).filter((sec) => sec.items.length) }
+        : e
+    );
 
   return (
     <header className="border-b border-crystal/10 sticky top-0 z-50 w-full max-w-[100vw] overflow-x-clip bg-background/80 backdrop-blur-md">
@@ -321,6 +332,14 @@ export default function Navigation() {
                           My characters
                         </Link>
                       </DropdownMenuItem>
+                      {outsideDream && (
+                        <DropdownMenuItem asChild>
+                          <Link href="/assault/eligibility" className="cursor-pointer">
+                            <ShieldCheck className="h-4 w-4 mr-2" />
+                            Assault eligibility
+                          </Link>
+                        </DropdownMenuItem>
+                      )}
                       <DropdownMenuItem asChild>
                         <Link href="/setup" className="cursor-pointer">
                           <KeyRound className="h-4 w-4 mr-2" />

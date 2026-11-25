@@ -1,3 +1,5 @@
+import { requireAccess } from '@/lib/access-server';
+import { isResponse } from '@/lib/user-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getCurrentSeason,
@@ -11,6 +13,8 @@ import {
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
+  const gate = await requireAccess(req, 'member');
+  if (isResponse(gate)) return gate;
   try {
     const { searchParams } = new URL(req.url);
     const current = await getCurrentSeason();

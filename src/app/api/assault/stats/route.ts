@@ -1,3 +1,5 @@
+import { requireAccess } from '@/lib/access-server';
+import { isResponse } from '@/lib/user-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 
@@ -24,6 +26,8 @@ interface RunRow {
 }
 
 export async function GET(req: NextRequest) {
+  const gate = await requireAccess(req, 'member');
+  if (isResponse(gate)) return gate;
   const { searchParams } = new URL(req.url);
   const season = searchParams.get('season');
   const guildId = searchParams.get('guild_id');

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { handleRsvpComponent } from '@/lib/assault-rsvp-discord';
 import { handleRosterAutocomplete, handleRosterCommand } from '@/lib/roster-discord';
+import { handleEligibilityCommand, handleEligibilityComponent } from '@/lib/eligibility-discord';
 import { handleRosterDefaultAutocomplete, handleRosterDefaultCommand, handleRosterDefaultComponent } from '@/lib/roster-default-discord';
 import { outranks, outrankError, rankOfRole } from '@/lib/role-hierarchy';
 import { waitUntil } from '@vercel/functions';
@@ -195,6 +196,10 @@ export async function POST(req: NextRequest) {
       if (name === 'kudos') return handleKudos(hub);
       if (name === 'roster') return handleRosterCommand(interaction as Parameters<typeof handleRosterCommand>[0]);
       if (name === 'roster-default') return handleRosterDefaultCommand(interaction as Parameters<typeof handleRosterDefaultCommand>[0]);
+      if (name === 'eligibility') return handleEligibilityCommand(interaction as Parameters<typeof handleEligibilityCommand>[0]);
+    }
+    if (interaction.type === INTERACTION_TYPE_COMPONENT && typeof interaction.data?.custom_id === 'string' && interaction.data.custom_id.startsWith('elig:')) {
+      return handleEligibilityComponent(interaction as Parameters<typeof handleEligibilityComponent>[0]);
     }
   }
 

@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import Link from 'next/link';
-import { AlertTriangle, ChevronDown, ChevronRight, CircleDashed, Coins, Dumbbell, FlaskConical, Gift, Scale, ShieldCheck, Sparkles, Star, Wrench } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Circle, CircleDashed, Coins, Dumbbell, FlaskConical, Gift, Scale, ShieldCheck, Sparkles, Star, Wrench } from 'lucide-react';
 import {
   BATTLE_PET_LADDER, EGG_RARITIES, QUALITY_BY_RANK, fmtGold, huntPlans, ownedForBattleStep, recommendBattle, recommendBow, recommendHunt, type Move,
 } from '@/lib/roster-moves';
@@ -111,6 +111,226 @@ export function SetupEligibility({ r, goals, showName }: { r: RosterRow; goals: 
       )}
       {missing.length > 0 && <p className="text-[11px] text-muted-foreground">Until the setup is done some goals can&apos;t be measured.</p>}
       <Reminders r={r} />
+    </div>
+  );
+}
+
+/**
+ * Compact "could they join?" verdict (eligibility page columns, roster's not-assaulting section):
+ * meets the minimum ✓/✗, setup still missing, elements below Bronze, then the top moves.
+ */
+export function EligibilityVerdict({ r, goals, moves = 3 }: { r: RosterRow; goals: GoalSet; moves?: number }) {
+  const results = evaluateGoals(r, goals);
+  const ok = meetsMinimum(r, results);
+  const setup = prerequisites(r).filter((p) => !p.ok);
+  const below = belowMinimum(r, results).filter((x) => x.measured);
+  const top = r.moves.filter((m) => m.kind !== 'setup').slice(0, moves);
+  return (
+    <div className="space-y-1.5 text-xs">
+      {ok ? (
+        <div className="inline-flex items-center gap-1 rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-emerald-500">
+          <ShieldCheck className="h-3.5 w-3.5" />Meets the minimum (Bronze)
+        </div>
+      ) : (
+        <div className="inline-flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-amber-500">
+          <CircleDashed className="h-3.5 w-3.5" />Not at the minimum yet
+        </div>
+      )}
+      {setup.length > 0 && (
+        <div className="text-muted-foreground">
+          Set up first: {setup.map((p, i) => (
+            <span key={p.id}>{i ? ' · ' : ''}<Link href={p.id === 'gear' ? '/combat' : '/setup'} className="text-amber-400 hover:underline">{p.label}</Link></span>
+          ))}
+        </div>
+      )}
+      {below.length > 0 && (
+        <div className="text-muted-foreground">
+          Goals to reach Bronze: {below.map((x, i) => <span key={x.id}>{i ? ' · ' : ''}<b className="text-foreground">{defOf(x.id).label}</b> ({x.next})</span>)}
+        </div>
+      )}
+      {top.length > 0 && (
+        <ol className="space-y-0.5">
+          {top.map((m, i) => {
+            const Icon = MOVE_ICON[m.kind];
+            return (
+              <li key={i} className="flex items-start gap-1.5" title={m.detail}>
+                <Icon className="h-3 w-3 mt-0.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0">
+                  {m.title}
+                  {m.cost != null && <span className="text-yellow-400"> · {fmtGold(m.cost)}g{m.costNote ? ` ${m.costNote}` : ''}</span>}
+                  {m.toTier > 0 && <span className={TEXT_STYLE[m.toTier]}> → {tierName(m.toTier)}</span>}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+      <Reminders r={r} />
+    </div>
+  );
+}
+
+/* ─── minimum checklist (eligibility page) ─── */
+
+type CheckState = 'done' | 'todo' | 'waiting' | 'reminder' | 'optional';
+
+const CHECK_ICON: Record<CheckState, ReactNode> = {
+  done: <CheckCircle2 className="h-5 w-5 text-emerald-500" />,
+  todo: <Circle className="h-5 w-5 text-amber-500" />,
+  waiting: <CircleDashed className="h-5 w-5 text-muted-foreground" />,
+  reminder: <FlaskConical className="h-5 w-5 text-amber-500" />,
+  optional: <Star className="h-5 w-5 text-muted-foreground" />,
+};
+
+function CheckRow({
+  state, title, need, current, move, open, onToggle, children,
+}: {
+  state: CheckState;
+  title: string;
+  /** What Bronze (the minimum) asks for. */
+  need: string;
+  current?: string | null;
+  move?: Move;
+  open: boolean;
+  onToggle: () => void;
+  children?: ReactNode;
+}) {
+  const expandable = !!children;
+  return (
+    <li className={`rounded-lg border ${state === 'done' ? 'border-emerald-500/25' : state === 'todo' ? 'border-amber-500/40' : ''}`}>
+      <button
+        type="button"
+        disabled={!expandable}
+        onClick={onToggle}
+        className="w-full flex items-start gap-3 p-3 text-left disabled:cursor-default"
+      >
+        <span className="mt-0.5 shrink-0">{CHECK_ICON[state]}</span>
+        <span className="min-w-0 flex-1 space-y-0.5">
+          <span className="flex items-center justify-between gap-2">
+            <span className={`text-sm font-medium ${state === 'done' ? 'text-muted-foreground' : ''}`}>{title}</span>
+            {current && <span className="text-xs text-muted-foreground text-right">{current}</span>}
+          </span>
+          <span className="block text-xs text-muted-foreground">{need}</span>
+          {move && state !== 'done' && (
+            <span className="block text-xs">
+              <span className="text-crystal">Next: </span>
+              {move.title}
+              {move.cost != null && <span className="text-yellow-400"> · {fmtGold(move.cost)}g{move.costNote ? ` ${move.costNote}` : ''}</span>}
+              {move.detail && <span className="block text-[11px] text-muted-foreground">{move.detail}</span>}
+            </span>
+          )}
+        </span>
+        {expandable && (open ? <ChevronDown className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />)}
+      </button>
+      {expandable && open && <div className="border-t px-3 pb-3 pt-2 space-y-2">{children}</div>}
+    </li>
+  );
+}
+
+/**
+ * The minimum (Bronze) as a checklist: setup first, then every element that counts, then the
+ * reminders and the bonus. Same maths as the roster (`evaluateGoals`, `meetsMinimum`). `slots`
+ * puts editors inside a row (the owner's gear and bow on /assault/eligibility).
+ */
+export function MinimumChecklist({
+  r, goals, slots = {},
+}: {
+  r: RosterRow;
+  goals: GoalSet;
+  slots?: { gear?: ReactNode; bow?: ReactNode };
+}) {
+  const results = evaluateGoals(r, goals);
+  const blocking = new Set(belowMinimum(r, results).map((x) => x.id));
+  const pre = prerequisites(r);
+  const gearOk = pre.find((p) => p.id === 'gear')!.ok;
+  const petsOk = pre.find((p) => p.id === 'pets')!.ok;
+  const firstOpen = !gearOk ? 'gear' : !petsOk ? 'pets' : results.find((x) => blocking.has(x.id) && x.measured)?.id ?? null;
+  const [open, setOpen] = useState<string | null>(firstOpen);
+  const toggle = (id: string) => setOpen(open === id ? null : id);
+  const moveFor = (id: string) => r.moves.find((m) => m.track === id && m.kind !== 'setup');
+
+  const counted = results.filter((x) => defOf(x.id).importance !== 'bonus' && x.id !== 'potions');
+  const total = 2 + counted.length;
+  const done = (gearOk ? 1 : 0) + (petsOk ? 1 : 0) + counted.filter((x) => x.measured && x.tier >= 1).length;
+  const ok = meetsMinimum(r, results);
+  const slayer = results.find((x) => x.id === 'slayer')!;
+  const weigh = (id: TrackResult['id'], tier: number) =>
+    id === 'pet_hunt' ? <HuntWeigh r={r} goals={goals} current={tier} />
+    : id === 'battle_pet' ? <BattleWeigh r={r} current={tier} />
+    : id === 'bow' ? <BowWeigh r={r} goals={goals} current={tier} />
+    : null;
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between text-sm">
+          <span className={ok ? 'font-semibold text-emerald-500' : 'font-medium'}>
+            {ok ? 'Minimum reached' : `${done} of ${total} done`}
+          </span>
+          <span className="text-xs text-muted-foreground">Minimum = Bronze on everything below</span>
+        </div>
+        <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+          <div className={`h-full ${ok ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${Math.round((done / total) * 100)}%` }} />
+        </div>
+      </div>
+
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Set up</div>
+      <ul className="space-y-2">
+        <CheckRow
+          state={gearOk ? 'done' : 'todo'}
+          title="Gear saved"
+          need="The game doesn't share gear, so pick yours once (or save it with nothing equipped). Battle is measured with it."
+          current={gearOk ? (r.gear.length ? `${r.gear.length} slot${r.gear.length === 1 ? '' : 's'}` : 'nothing equipped') : null}
+          open={open === 'gear'}
+          onToggle={() => toggle('gear')}
+        >
+          {slots.gear ?? <Link href="/combat" className="text-xs text-crystal hover:underline">Pick your gear on /combat</Link>}
+        </CheckRow>
+        <CheckRow
+          state={petsOk ? 'done' : 'todo'}
+          title="Pets visible"
+          need={petsOk ? 'Your pets can be read from the game.' : 'Unhide pets in the game settings, or add your API key in /setup. Measured on the last known list meanwhile.'}
+          open={open === 'pets'}
+          onToggle={() => toggle('pets')}
+        />
+      </ul>
+
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">At the minimum</div>
+      <ul className="space-y-2">
+        {counted.map((res) => {
+          const def = defOf(res.id);
+          const state: CheckState = !res.measured ? 'waiting' : res.tier >= 1 ? 'done' : 'todo';
+          const weighView = res.measured && res.tier < 5 ? weigh(res.id, res.tier) : null;
+          const editor = res.id === 'bow' ? slots.bow : null;
+          const body = editor || weighView ? <>{editor}{weighView}</> : undefined;
+          return (
+            <CheckRow
+              key={res.id}
+              state={state}
+              title={def.label}
+              need={`${state === 'waiting' ? 'Save your gear first. ' : ''}Needs ${def.tierText(0, goals.tracks[res.id].thresholds, goals)}${res.id === 'battle' ? ' (with the default potion preset)' : ''}`}
+              current={res.measured ? `${res.current}${res.tier >= 1 ? ` · ${tierName(res.tier)}` : ''}` : null}
+              move={res.measured ? moveFor(res.id) : undefined}
+              open={open === res.id}
+              onToggle={() => toggle(res.id)}
+            >
+              {body}
+            </CheckRow>
+          );
+        })}
+      </ul>
+
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Bonus</div>
+      <ul className="space-y-2">
+        <CheckRow
+          state={slayer.measured && slayer.tier >= 1 ? 'done' : 'optional'}
+          title="Slayer (bonus)"
+          need={`Nice to have: ${defOf('slayer').tierText(0, goals.tracks.slayer.thresholds, goals)}.`}
+          current={slayer.measured ? slayer.current : null}
+          open={false}
+          onToggle={() => undefined}
+        />
+      </ul>
     </div>
   );
 }
@@ -342,9 +562,9 @@ function BowWeigh({ r, goals, current }: { r: RosterRow; goals: GoalSet; current
 }
 
 /** Next best moves list (drawer). Pet and bow moves can open the weigh-options view. */
-export function MovesList({ r, goals }: { r: RosterRow; goals: GoalSet }) {
+export function MovesList({ r, goals, noPotions }: { r: RosterRow; goals: GoalSet; noPotions?: boolean }) {
   const [open, setOpen] = useState<string | null>(null);
-  const list = r.moves.filter((m) => m.kind !== 'setup');
+  const list = r.moves.filter((m) => m.kind !== 'setup' && !(noPotions && m.track === 'potions'));
   if (!list.length) return null;
   const results = evaluateGoals(r, goals);
   const tierOfTrack = (id: string) => results.find((x) => x.id === id)?.tier ?? 0;
@@ -393,14 +613,15 @@ export function MovesList({ r, goals }: { r: RosterRow; goals: GoalSet }) {
 }
 
 /** Goals card inside the member drawer. */
-export function GoalsSection({ r, goals }: { r: RosterRow; goals: GoalSet }) {
-  const results = evaluateGoals(r, goals);
+/** `eligibility`: the checklist already covers setup + minimum, and potions come after joining. */
+export function GoalsSection({ r, goals, eligibility }: { r: RosterRow; goals: GoalSet; eligibility?: boolean }) {
+  const results = evaluateGoals(r, goals).filter((x) => !(eligibility && x.id === 'potions'));
   const [weigh, setWeigh] = useState<string | null>(null);
   return (
     <section className="rounded-lg border p-3 space-y-3">
       <h3 className="text-sm font-semibold flex items-center gap-1.5"><Sparkles className="h-4 w-4" />Goals</h3>
-      <SetupEligibility r={r} goals={goals} />
-      <MovesList r={r} goals={goals} />
+      {!eligibility && <SetupEligibility r={r} goals={goals} />}
+      <MovesList r={r} goals={goals} noPotions={eligibility} />
       {results.map((res) => {
         const def = defOf(res.id);
         return (
