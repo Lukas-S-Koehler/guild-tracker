@@ -51,7 +51,7 @@ export const TRACKS: TrackDef[] = [
     editable: false,
     defaults: [],
     tierText: (t, _ths, g) =>
-      ['all mobs ≤4 hits', 'all mobs ≤3 hits', 'half the mobs 2 hits, rest 3', 'all mobs 2 hits', `all 2 hits scaled to Lv ${g.battle.dreamScale}+ (CL 100)`][t],
+      ['all mobs ≤4 hits', 'all mobs ≤3 hits', 'all mobs 2 hits (unscaled)', `all 2 hits scaled to Lv ${g.battle.crystalScale}+ (CL 100)`, `all 2 hits scaled to Lv ${g.battle.dreamScale} (CL 100)`][t],
   },
   {
     id: 'pet_hunt',
@@ -121,13 +121,13 @@ export const TRACKS: TrackDef[] = [
 
 export interface GoalSet {
   tracks: Record<TrackId, { thresholds: number[] }>;
-  battle: { dreamScale: number };
+  battle: { crystalScale: number; dreamScale: number };
 }
 
 export function defaultGoals(): GoalSet {
   return {
     tracks: Object.fromEntries(TRACKS.map((t) => [t.id, { thresholds: [...t.defaults] }])) as GoalSet['tracks'],
-    battle: { dreamScale: 150 },
+    battle: { crystalScale: 120, dreamScale: 150 },
   };
 }
 
@@ -141,8 +141,11 @@ export function mergeGoals(stored: unknown): GoalSet {
       g.tracks[t.id].thresholds = ths.map(Number);
     }
   }
+  const cs = Number((src.battle as { crystalScale?: unknown } | undefined)?.crystalScale);
   const ds = Number(src.battle?.dreamScale);
+  if (Number.isFinite(cs) && cs >= 100 && cs <= 150) g.battle.crystalScale = Math.round(cs);
   if (Number.isFinite(ds) && ds >= 100 && ds <= 150) g.battle.dreamScale = Math.round(ds);
+  if (g.battle.dreamScale < g.battle.crystalScale) g.battle.dreamScale = g.battle.crystalScale;
   return g;
 }
 
@@ -182,6 +185,19 @@ function numeric(value: number, ths: number[], fmt: (v: number) => string): Omit
   return { tier, measured: true, current: fmt(value), progress: to == null ? 1 : Math.max(0, Math.min(1, (value - from) / (to - from || 1))), nextIdx: tier };
 }
 
+/** Battle tier from hits per mob (unscaled) and the 2-hit scaling ceiling (CL 100 only). */
+export function battleTier(hits: number[], canPickScale: boolean, max2HitLevel: number | null, g: GoalSet): number {
+  if (!hits.length) return 0;
+  const worst = Math.max(...hits);
+  let tier = 0;
+  if (worst <= 4) tier = 1;
+  if (worst <= 3) tier = 2;
+  if (worst <= 2) tier = 3;
+  if (worst <= 2 && canPickScale && (max2HitLevel ?? 0) >= g.battle.crystalScale) tier = 4;
+  if (worst <= 2 && canPickScale && (max2HitLevel ?? 0) >= g.battle.dreamScale) tier = 5;
+  return tier;
+}
+
 export function evaluateTrack(r: RosterRow, def: TrackDef, g: GoalSet): TrackResult {
   const ths = g.tracks[def.id].thresholds;
   const nextText = (tier: number) => (tier >= 5 ? null : def.tierText(tier, ths, g));
@@ -194,16 +210,15 @@ export function evaluateTrack(r: RosterRow, def: TrackDef, g: GoalSet): TrackRes
       const b = r.battle;
       if (!b.computed) return out(0, 'gear not set', 0, false);
       const hits = b.enemies.map((e) => e.hits ?? 99);
-      const worst = Math.max(...hits);
+      const tier = battleTier(hits, !b.scaleFixed && b.canScale, b.max2HitLevel, g);
       const twos = hits.filter((h) => h <= 2).length;
-      let tier = 0;
-      if (worst <= 4) tier = 1;
-      if (worst <= 3) tier = 2;
-      if (worst <= 3 && twos * 2 >= hits.length) tier = 3;
-      if (worst <= 2) tier = 4;
-      if (worst <= 2 && b.canScale && !b.scaleFixed && (b.max2HitLevel ?? 0) >= g.battle.dreamScale) tier = 5;
+      const worst = Math.max(...hits);
       const current = worst <= 2 ? (b.canScale && !b.scaleFixed && b.max2HitLevel ? `all 2 hits, to Lv ${b.max2HitLevel}` : 'all 2 hits') : `${twos}/${hits.length} at 2 hits, worst ${worst}`;
-      return out(tier, current, tier === 4 && b.max2HitLevel ? Math.max(0, (b.max2HitLevel - 100) / (g.battle.dreamScale - 100)) : twos / Math.max(1, hits.length));
+      const progress =
+        tier === 3 || tier === 4
+          ? Math.max(0, ((b.max2HitLevel ?? 100) - 100) / ((tier === 3 ? g.battle.crystalScale : g.battle.dreamScale) - 100 || 1))
+          : twos / Math.max(1, hits.length);
+      return out(tier, current, Math.min(1, progress));
     }
     case 'battle_pet': {
       const p = r.battle.bestPet;

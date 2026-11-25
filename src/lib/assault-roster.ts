@@ -19,6 +19,10 @@ import {
 import { matchup, estimateHP, HP_TARGETS, type FighterStats } from '@/lib/combat/formulas';
 import { MAX_LOCATION_ID } from '@/lib/assault-plan';
 import { RECOMMENDED_PRESET_ID } from '@/lib/potion-rules';
+import { battleTier, mergeGoals, type GoalSet } from '@/lib/roster-goals';
+import { computeMoves, type Move } from '@/lib/roster-moves';
+import { hasMarketAccess } from '@/lib/combat/class-talents';
+import { HAND_SLOT_CONFLICTS } from '@/lib/combat/character-stats';
 import { withPotions } from '@/app/combat/potion-slots';
 import type { PotionRow } from '@/app/combat/types';
 
@@ -120,6 +124,8 @@ export interface RosterRow {
     scaleFixed: boolean;
     /** Highest scaled level where EVERY zone enemy still dies in 2 hits; null if not all 2 hits at base. */
     max2HitLevel: number | null;
+    /** Cheapest single gear swap (base tier, market price) that reaches the next battle tier. */
+    upgrade: { item: string; slot: string; price: number; toTier: number } | null;
   };
   hunting: {
     bow: HuntingBow | null;
@@ -148,6 +154,8 @@ export interface RosterRow {
     minPct: number;
   };
   pets_hidden: boolean;
+  /** Next best moves, best first (setup first). */
+  moves: Move[];
   /** auto = always in · opt_in = chooses per assault · none = not assaulting (staff-set). */
   participation: Participation;
   key_source: string | null;
@@ -219,11 +227,16 @@ export async function buildRoster(
   zoneOverride?: number | null
 ): Promise<Roster | null> {
   await ensureCustomPets();
-  const [{ data: guild }, { data: snaps }, { data: config }] = await Promise.all([
+  const [{ data: guild }, { data: snaps }, { data: config }, { data: goalRow }, { data: market }] = await Promise.all([
     supabase.from('guilds').select('id, name, nickname, is_assault').eq('id', guildId).maybeSingle(),
     supabase.from('assault_roster').select('*').eq('guild_id', guildId),
     supabase.from('assault_configs').select('tracked_zone_id, zone_name').eq('guild_id', guildId).maybeSingle(),
+    supabase.from('assault_roster_goals').select('goals').eq('guild_id', guildId).maybeSingle(),
+    supabase.from('market_cache').select('item_name, price'),
   ]);
+  const goals: GoalSet = mergeGoals(goalRow?.goals);
+  const priceByName = new Map((market ?? []).filter((m) => (m.price ?? 0) > 0).map((m) => [String(m.item_name).toLowerCase(), m.price as number]));
+  const priceOf = (name: string) => priceByName.get(name.toLowerCase()) ?? null;
   if (!guild || !guild.is_assault) return null;
   const rows = snaps ?? [];
   const memberIds = rows.map((r) => r.member_id as string);
@@ -239,7 +252,7 @@ export async function buildRoster(
     supabase.from('combat_potions').select('id, name, quality, is_tradeable, attack_power_bonus, protection_bonus, duration_minutes, market_price, avg_recent_sales, image_url'),
     supabase.from('combat_enemies').select('id, name, level, health, zone_id, zone_name').gte('zone_id', 1).lte('zone_id', MAX_LOCATION_ID),
     getAllClaimLocks(supabase),
-    supabase.from('xp_potions').select('id, name, category, xp_value, efficiency_value, image_url'),
+    supabase.from('xp_potions').select('id, name, category, xp_value, efficiency_value, image_url, market_price'),
   ]);
 
   const positionOf = new Map((members ?? []).map((m) => [m.id as string, (m.position as string) ?? null]));
@@ -247,13 +260,10 @@ export async function buildRoster(
   const profileOf = new Map<string, { user_id: string; gear: GearSelection[]; settings: Record<string, unknown> }>();
   for (const p of profiles ?? []) if (!profileOf.has(p.hashed_id)) profileOf.set(p.hashed_id, p as never);
 
-  const gearIds = Array.from(new Set(Array.from(profileOf.values()).flatMap((p) => (p.gear ?? []).map((g) => g.gear_item_id))));
-  const { data: gearRows } = gearIds.length
-    ? await supabase
-        .from('gear_items')
-        .select('id, name, slot, quality, agility, accuracy, protection, attack_power, critical_damage, combat_level, tier_modifiers, image_url, max_tier')
-        .in('id', gearIds)
-    : { data: [] };
+  // Whole catalog: owned gear for stats, the rest for "next best move" gear swaps.
+  const { data: gearRows } = await supabase
+    .from('gear_items')
+    .select('id, name, slot, quality, agility, accuracy, protection, attack_power, critical_damage, combat_level, tier_modifiers, image_url, max_tier');
   const gearCatalog = new Map<number, GearItem>((gearRows ?? []).map((g) => [g.id as number, g as GearItem]));
   const potionById = new Map<number, PotionRow>((potions ?? []).map((p) => [p.id as number, p as PotionRow]));
   const xpById = new Map((xpPotions ?? []).map((p) => [p.id as number, p as { id: number; name: string; category: 'battle_xp' | 'combat_xp'; xp_value: number; efficiency_value: number; image_url: string | null }]));
@@ -379,13 +389,13 @@ export async function buildRoster(
     const slayer = slayerByEnemy(r.effects as ApiEffect[]);
     const buffs: BuffState = loadout ? withPotions(NO_BUFFS, loadout.ids, potionById) : NO_BUFFS;
     const patted = profile?.settings?.petPatted !== false; // assault-ready: battle pet patted (5Ps)
-    const fighterWith = (pet: { species: string; level: number; evolution: number } | null) => {
+    const fighterWith = (pet: { species: string; level: number; evolution: number } | null, gearOverride?: GearSelection[]) => {
       const char = buildCharacterStats({
         stats: r.stats as StatLevels | null,
         skills: skills as Record<string, { level: number }> | null,
         characterClass: r.character_class,
         pet: pet ? { species: pet.species, level: pet.level, mastery: pm, patted, evolution: pet.evolution } : null,
-        gear: gearSet ? profile!.gear : [],
+        gear: gearOverride ?? (gearSet ? profile!.gear : []),
         gearCatalog,
         manual: ZERO_STATS,
       });
@@ -443,6 +453,30 @@ export async function buildRoster(
     const dist = Array.from(distMap.entries()).sort((a, b) => a[0] - b[0]).map(([hits, count]) => ({ hits, count }));
     const worstHits = enemyHits.length ? Math.max(...enemyHits.map((e) => e.hits ?? 99)) : null;
 
+    // Cheapest single gear swap (bought at tier 1) that reaches the next battle tier.
+    let upgrade: RosterRow['battle']['upgrade'] = null;
+    const canPick = scale.allowed && !scale.fixed;
+    const curMax2 = computed ? max2HitLevel(fighter, zoneEnemies, slayer, scale.max, scale.allowed, scale.fixed) : null;
+    if (computed && hasMarketAccess(r.character_class)) {
+      const curTier = battleTier(enemyHits.map((e) => e.hits ?? 99), canPick, curMax2, goals);
+      if (curTier < 5 && !(curTier >= 3 && !canPick)) {
+        const pet = bestPet ? { species: bestPet.species, level: bestPet.level, evolution: bestPet.evolution } : null;
+        const owned = new Set(profile!.gear.map((g) => g.gear_item_id));
+        for (const item of Array.from(gearCatalog.values())) {
+          if (item.combat_level > cl || owned.has(item.id)) continue;
+          const price = priceOf(item.name);
+          if (!price || (upgrade && price >= upgrade.price)) continue;
+          const clears = new Set([item.slot, ...(HAND_SLOT_CONFLICTS[item.slot] ?? [])]);
+          const gear = [...profile!.gear.filter((g) => !clears.has(g.slot)), { slot: item.slot, gear_item_id: item.id, tier: 1 }];
+          const f = fighterWith(pet, gear);
+          const hs = hitsAt(f, zoneEnemies, slayer, null).map((m) => m.hits ?? 99);
+          const m2 = Math.max(...hs) <= 2 ? max2HitLevel(f, zoneEnemies, slayer, scale.max, scale.allowed, scale.fixed) : null;
+          const t = battleTier(hs, canPick, m2, goals);
+          if (t > curTier) upgrade = { item: item.name, slot: item.slot, price, toTier: t };
+        }
+      }
+    }
+
     const best = squad.squad[0];
     return {
       member_id: r.member_id,
@@ -472,7 +506,8 @@ export async function buildRoster(
         canScale: scale.allowed,
         scaleMax: scale.max,
         scaleFixed: scale.fixed,
-        max2HitLevel: computed ? max2HitLevel(fighter, zoneEnemies, slayer, scale.max, scale.allowed, scale.fixed) : null,
+        max2HitLevel: curMax2,
+        upgrade,
       },
       hunting: {
         bow: huntingBow(bowOf.get(r.member_id)),
@@ -499,6 +534,7 @@ export async function buildRoster(
         };
       })(),
       pets_hidden: !!r.pets_hidden,
+      moves: [] as Move[],
       participation: (PARTICIPATION.includes(r.participation) ? r.participation : 'auto') as Participation,
       key_source: r.key_source ?? null,
       last_sync: r.last_sync ?? null,
@@ -507,6 +543,29 @@ export async function buildRoster(
       has_combat_profile: !!profile,
     };
   });
+
+  // Next best moves need the finished rows (goals evaluate on them).
+  const presetCost = (p: { combat_potion_ids?: number[]; xp_potion_ids?: number[] }) => {
+    let total = 0;
+    let unknown = false;
+    for (const id of p.combat_potion_ids ?? []) {
+      const c = potionById.get(id);
+      if (!c || !c.is_tradeable) continue;
+      if (c.market_price == null) unknown = true; else total += c.market_price;
+    }
+    for (const id of p.xp_potion_ids ?? []) {
+      const x = xpById.get(id) as { market_price?: number | null } | undefined;
+      if (!x) continue;
+      if (x.market_price == null) unknown = true; else total += x.market_price;
+    }
+    return unknown && !total ? null : total;
+  };
+  const tieredPresets = (presetRows ?? [])
+    .filter((p) => Number((p as { assault_tier?: number }).assault_tier ?? 0) > 0)
+    .map((p) => ({ id: p.id as string, label: p.label as string, tier: Number((p as { assault_tier?: number }).assault_tier), cost: presetCost(p) }));
+  for (const row of out) {
+    row.moves = computeMoves(row, { goals, price: priceOf, presets: tieredPresets, marketAccess: hasMarketAccess(row.character_class) }).slice(0, 6);
+  }
 
   const pOrder = (p: Participation) => PARTICIPATION.indexOf(p);
   out.sort((a, b) => pOrder(a.participation) - pOrder(b.participation) || (b.combat_level ?? 0) - (a.combat_level ?? 0) || b.hunting.squadPower - a.hunting.squadPower);

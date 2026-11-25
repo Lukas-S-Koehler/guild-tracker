@@ -63,7 +63,7 @@ Tiers: **Bronze** = minimum requirement · **Silver** = cost-effective, almost a
 
 | Element | Importance | Bronze | Silver | Gold | Crystal | Dream |
 |---|---|---|---|---|---|---|
-| Battle (hits on every zone mob) | Core | all ≤4 | all ≤3 | half at 2, rest ≤3 | all 2 | all 2 scaled to Lv 150 (CL 100 only; leaders may lower to e.g. 130) |
+| Battle (hits on every zone mob) | Core | all ≤4 | all ≤3 | all 2 unscaled | all 2 scaled to Lv 120 (CL 100) | all 2 scaled to Lv 150 (CL 100) |
 | Pet hunt power (best 20 eligible pets) | Core | 600 | 1,200 | 1,800 | 2,500 (≈20 Epic Vulpinas L100) | 4,000 (≈20 Legendary L100) |
 | Pet mastery | High | 50 (6 pets) | 63 (7) | 75 (8) | 88 (9) | 100 (10) |
 | Battle pet (best owned) | High | Epic L80+ | Epic L100 | Legendary L100 | Mythic L80+ | Mythic L100 evo 5 |
@@ -74,17 +74,15 @@ Tiers: **Bronze** = minimum requirement · **Silver** = cost-effective, almost a
 
 Event pets rank between Premium and Epic, so they don't count as Epic for the battle pet ladder. Potion tier = best preset (with `assault_potion_presets.assault_tier`) the loadout matches or beats on AP %, Prot %, Battle XP %, Combat XP %. Silver = Thunderfury + Dragonblood + Wraithbane, Gold = Phoenix Ashes + Dragonblood + Wraithbane (proposed, user may change). Weights for next best moves: Core 3, High 2, Medium 1, Bonus 0.5. Next step = missing prerequisite → missing Bronze on a non-bonus element → best weight × progress. "Meets the minimum" = prerequisites + every non-bonus element at Bronze.
 
-## 6. Upgrade priority ("Next best moves")
+## 6. Next best moves (built 2026-11-25, `src/lib/roster-moves.ts`)
 
-For each member, the top 3 moves that reach their **next tier** on any track, cheapest first:
+Per member, computed in `buildRoster` at the guild's assault zone, top 6 kept on `RosterRow.moves`:
+1. **Setup** (missing prerequisites, with a Fix link) always first.
+2. **Free / training**: level owned pets to L100 (pet hunt power), level/evolve an owned pet of the right quality (battle pet), train pet mastery / hunting mastery / slayer, "reach CL 100 to pick your scaling".
+3. **Buy** (only with market access; Banished/Cursed skip): cheapest bow reaching the next bow tier (CL/DEX checked), one egg species that fits the tier (each pet ≥ target / 20 encounters at L100, so Bronze = Refined … Dream = Legendary), cheapest egg of the next battle pet quality, next tiered potion preset (cost per assault), cheapest single gear swap bought at tier 1 that lifts the battle tier.
+Ranking: missing minimum (+100) first, then importance weight × cost factor (log scale) × progress. Prices = `market_cache` (weighted median of recent sales); the daily price cron now also tracks hunting bows, pet eggs and every gear item. Mythic eggs use the fixed ≈20M estimate.
 
-1. **Free moves first:** set gear or loadout, level an owned hunting pet past a threshold, equip a better bow they already listed, RSVP.
-2. **Bow:** the cheapest bow with required level ≤ theirs that reaches the next bow tier. Shown as price and +eff %.
-3. **Hunting squad:** the cheapest egg that replaces the weakest squad pet and lifts squad hunt power to the next tier. The estimate assumes the new pet at Lv 100 and is labelled so. Also shows "levelling your X to L gets there for free" when that applies.
-4. **Battle gear:** search single swaps from `gear_items` (CL ≤ theirs), then pairs, using the `/combat` formulas. Picks the cheapest set that drops hits-to-kill by one on the zone mob.
-5. Ranking = cheapest move that crosses a tier. Ties go to the track furthest behind.
-
-Each move shows the cost, what it unlocks ("→ Gold bow") and a link (market item or `/combat` sandbox prefilled).
+UI: red **Setup & eligibility** block (prerequisites + below-minimum elements, with Fix links) at the top of the roster for your own characters and in the drawer; "Next best moves" list in the drawer; Goals table shows each member's top move with cost.
 
 ## 7. Cohesion extras (v1)
 

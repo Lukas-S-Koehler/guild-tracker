@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { refreshAllZoneSnapshots } from '@/lib/assault-plan';
 import { createAdminClient } from '@/lib/supabase-server';
 import { IdleMMOApi } from '@/lib/idlemmo-api';
+import { HUNTING_MARKET_ITEMS } from '@/lib/combat/hunting-gear';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -50,9 +51,13 @@ export async function POST(req: NextRequest) {
     supabase.from('combat_potions').select('name, is_tradeable, hashed_item_id'),
     supabase.from('xp_potions').select('name, hashed_item_id'),
   ]);
+  // Assault Roster upgrade pricing: hunting bows, pet eggs, gear catalog (base tier).
+  const { data: gearNames } = await supabase.from('gear_items').select('name');
   const potionNames = [
     ...(combatPotions ?? []).filter((p) => p.is_tradeable && p.hashed_item_id).map((p) => p.name),
     ...(xpPotions ?? []).filter((p) => p.hashed_item_id).map((p) => p.name),
+    ...HUNTING_MARKET_ITEMS,
+    ...(gearNames ?? []).map((g) => g.name as string),
   ];
   await Promise.all(
     potionNames.map((name) =>

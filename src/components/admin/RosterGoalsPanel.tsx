@@ -46,7 +46,7 @@ export default function RosterGoalsPanel() {
       ths[i] = Number(v);
       return { ...g, tracks: { ...g.tracks, [track]: { thresholds: ths } } };
     });
-  const setDreamScale = (v: string) => setGoals((g) => (g ? { ...g, battle: { dreamScale: Number(v) } } : g));
+  const setScale = (k: 'crystalScale' | 'dreamScale', v: string) => setGoals((g) => (g ? { ...g, battle: { ...g.battle, [k]: Number(v) } } : g));
 
   const save = async (reset = false) => {
     if (!guildId || !goals) return;
@@ -108,7 +108,7 @@ export default function RosterGoalsPanel() {
                       </td>
                       {TIERS.map((t, i) => {
                         const editable = def.editable && !(def.id === 'slayer' && i === 0);
-                        const dream = def.id === 'battle' && i === 4;
+                        const scaleKey = def.id === 'battle' ? (i === 3 ? 'crystalScale' : i === 4 ? 'dreamScale' : null) : null;
                         return (
                           <td key={t} className="py-2 pr-2 text-[11px] text-muted-foreground">
                             {editable ? (
@@ -118,10 +118,10 @@ export default function RosterGoalsPanel() {
                                 value={goals.tracks[def.id].thresholds[i]}
                                 onChange={(e) => setThreshold(def.id, i, e.target.value)}
                               />
-                            ) : dream ? (
+                            ) : scaleKey ? (
                               <div className="space-y-1">
-                                <div>all 2 hits scaled to</div>
-                                <Input className="h-8 w-20 tabular-nums" inputMode="numeric" value={goals.battle.dreamScale} onChange={(e) => setDreamScale(e.target.value)} />
+                                <div>all 2 hits scaled to Lv</div>
+                                <Input className="h-8 w-20 tabular-nums" inputMode="numeric" value={goals.battle[scaleKey]} onChange={(e) => setScale(scaleKey, e.target.value)} />
                               </div>
                             ) : (
                               def.tierText(i, goals.tracks[def.id].thresholds, goals)

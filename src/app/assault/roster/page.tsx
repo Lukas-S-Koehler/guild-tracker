@@ -11,7 +11,8 @@ import {
 import type { Participation, Roster, RosterGuild, RosterPotion, RosterRow } from '@/lib/assault-roster';
 import { HUNTING_BOWS, bowBlocker } from '@/lib/combat/hunting-gear';
 import type { GoalSet } from '@/lib/roster-goals';
-import { GoalsSection, GoalsView } from '@/components/assault/RosterGoals';
+import { GoalsSection, GoalsView, SetupEligibility } from '@/components/assault/RosterGoals';
+import { evaluateGoals, meetsMinimum } from '@/lib/roster-goals';
 
 interface Payload {
   guilds: RosterGuild[];
@@ -550,6 +551,7 @@ export default function AssaultRosterPage() {
   }
 
   const n = active.length || 1;
+  const myAttention = active.filter((r) => data.mine.includes(r.member_id) && !meetsMinimum(r, evaluateGoals(r, data.goals)));
   const computed = active.filter((r) => r.battle.computed);
   const lastSync = rows.map((r) => r.last_sync).filter(Boolean).sort().at(-1) ?? null;
   const { roster } = data;
@@ -613,6 +615,14 @@ export default function AssaultRosterPage() {
         {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
       </div>
       {refreshing && <p className="text-sm text-muted-foreground">{refreshing}</p>}
+
+      {/* Your own characters that still need setup or are below the minimum: impossible to miss. */}
+      {roster.zone.isTracked &&
+        myAttention.map((r) => (
+          <div key={r.member_id} className="cursor-pointer" onClick={() => setOpen(r.member_id)}>
+            <SetupEligibility r={r} goals={data.goals} showName />
+          </div>
+        ))}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
         <Tile
