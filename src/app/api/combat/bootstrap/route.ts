@@ -57,6 +57,13 @@ export async function GET(req: NextRequest) {
   const err = [profiles, setups, gear, potions, enemies].find((r) => r.error)?.error;
   if (err) return NextResponse.json({ error: err.message }, { status: 500 });
 
+  // Hunting bow per character (members.hunting_bow, shared with /assault/roster).
+  const memberIds = (profiles.data ?? []).map((p) => (p as { member_id: string | null }).member_id).filter(Boolean) as string[];
+  const { data: bowRows } = memberIds.length
+    ? await supabase.from('members').select('id, hunting_bow').in('id', memberIds)
+    : { data: [] as { id: string; hunting_bow: string | null }[] };
+  const huntingBows = Object.fromEntries((bowRows ?? []).map((m) => [m.id, m.hunting_bow ?? null]));
+
   return NextResponse.json({
     profiles: profiles.data ?? [],
     setups: setups.data ?? [],
@@ -64,6 +71,7 @@ export async function GET(req: NextRequest) {
     potions: potions.data ?? [],
     enemies: enemies.data ?? [],
     customPets,
+    huntingBows,
     characters,
     canCalibrate,
     // Default first (web default beats Discord default, same as /me/assault), then most recent.

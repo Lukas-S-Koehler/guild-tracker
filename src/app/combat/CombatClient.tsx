@@ -38,6 +38,7 @@ import {
 } from '@/lib/combat/formulas';
 import { PET_STATS, getPetMasteryBonus } from '@/lib/combat/pet-data';
 import { registerCustomPets } from '@/lib/combat/custom-pets';
+import { HUNTING_BOWS, bowBlocker } from '@/lib/combat/hunting-gear';
 import { hasMarketAccess, CLASS_TALENTS } from '@/lib/combat/class-talents';
 import { FOODS, foodByName, type Food } from '@/lib/combat/foods';
 import { formatDuration, runAdvisor, type AdvisorOption, type AdvisorPotion } from '@/lib/combat/advisor';
@@ -162,6 +163,8 @@ interface Bootstrap {
   canCalibrate?: boolean;
   /** Potion loadouts (web + Discord), default first. */
   loadouts?: PotionLoadout[];
+  /** Hunting bow per member_id (members.hunting_bow, shared with /assault/roster). */
+  huntingBows?: Record<string, string | null>;
 }
 
 export default function CombatClient() {
@@ -693,6 +696,13 @@ function Workbench({
             setPatted={(v) => setSetting('petPatted', v)}
             char={char}
           />
+          <HuntingBowCard
+            key={profile.id}
+            profileId={profile.id}
+            initial={profile.member_id ? boot.huntingBows?.[profile.member_id] ?? null : null}
+            combatLevel={char.combatLevel}
+            dexterity={profile.stats?.dexterity?.level ?? 0}
+          />
           <SheetCard
             char={char}
             buffed={buffed}
@@ -912,6 +922,52 @@ function SheetCard({
           </label>
         </div>
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Optional hunting bow (separate from the combat bow). Same value as on /assault/roster. */
+function HuntingBowCard({
+  profileId, initial, combatLevel, dexterity,
+}: { profileId: string; initial: string | null; combatLevel: number; dexterity: number }) {
+  const api = useApiClient();
+  const [bow, setBow] = useState<string | null>(initial);
+  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const save = async (name: string | null) => {
+    setBow(name);
+    setState('saving');
+    const res = await api.patch('/api/combat/profile', { id: profileId, hunting_bow: name });
+    setState(res.ok ? 'saved' : 'error');
+  };
+  const current = HUNTING_BOWS.find((b) => b.name === bow);
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-base">Hunting bow <span className="text-xs font-normal text-muted-foreground">optional</span></CardTitle>
+          <span className="text-xs text-muted-foreground">
+            {state === 'saving' ? 'Saving…' : state === 'saved' ? 'Saved' : state === 'error' ? <span className="text-red-500">Not saved</span> : current ? `+${current.huntEff}% hunt efficiency` : ''}
+          </span>
+        </div>
+        <CardDescription>The bow you equip for hunting. Shown on the assault roster too; it doesn&apos;t change your combat stats here.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <select
+          className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+          value={bow ?? ''}
+          onChange={(e) => save(e.target.value || null)}
+        >
+          <option value="">No hunting bow</option>
+          {HUNTING_BOWS.map((b) => {
+            const blocker = bowBlocker(b, combatLevel, dexterity);
+            return (
+              <option key={b.name} value={b.name}>
+                {b.name} · +{b.huntEff}% · CL {b.combatLevel} / DEX {b.dexterity}{blocker ? ` (${blocker})` : ''}
+              </option>
+            );
+          })}
+        </select>
       </CardContent>
     </Card>
   );

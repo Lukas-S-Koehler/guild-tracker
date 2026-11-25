@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
-  AlertTriangle, Check, ChevronDown, ChevronRight, EyeOff, FlaskConical, Loader2, MapPin, PawPrint, RefreshCw, Swords, Target, Users, X,
+  AlertTriangle, ChevronDown, Sparkles, ChevronRight, EyeOff, FlaskConical, Loader2, MapPin, PawPrint, RefreshCw, Swords, Target, Users, X,
 } from 'lucide-react';
 import type { Participation, Roster, RosterGuild, RosterPotion, RosterRow } from '@/lib/assault-roster';
 import { HUNTING_BOWS, bowBlocker } from '@/lib/combat/hunting-gear';
@@ -82,6 +82,7 @@ function HitsStrip({ r, wide }: { r: RosterRow; wide?: boolean }) {
   const perfect = b.enemies.length > 0 && b.enemies.every((e) => e.hits != null && e.hits <= 2);
   const baseMax = Math.max(0, ...b.enemies.map((e) => e.level));
   const scaled = perfect && b.canScale && b.max2HitLevel != null && b.max2HitLevel > baseMax ? b.max2HitLevel : null;
+  const scaledText = scaled ? (b.scaleFixed ? `scaled Lv ${scaled}` : `2 hits to Lv ${scaled}`) : null;
   const sq = wide ? 'h-6 w-6 text-xs' : 'h-5 w-5 text-[11px]';
   return (
     <div className="flex items-center gap-2 whitespace-nowrap">
@@ -93,9 +94,11 @@ function HitsStrip({ r, wide }: { r: RosterRow; wide?: boolean }) {
         ))}
       </div>
       {perfect ? (
-        <span className="text-[11px] text-emerald-500 font-medium flex items-center gap-0.5">
-          <Check className="h-3 w-3" />
-          {scaled ? <>2 hits to <b>Lv {scaled}</b></> : 'all 2 hits'}
+        <span
+          className="text-[11px] font-semibold flex items-center gap-1 rounded-full border border-crystal/50 bg-crystal/10 px-1.5 py-0.5 text-crystal"
+          title={`Every mob here in 2 hits${scaledText ? `, ${scaledText}` : ''}`}
+        >
+          <Sparkles className="h-3 w-3" />Dream{scaledText ? <span className="font-normal">· {scaledText}</span> : null}
         </span>
       ) : (
         <span className="text-[11px] text-muted-foreground">{b.dist.map((d) => `${d.count}×${d.hits}`).join(' · ')}</span>
@@ -129,13 +132,14 @@ function LoadoutPill({ r }: { r: RosterRow }) {
   const b = r.battle;
   if (!b.loadout) return <span className="text-xs text-muted-foreground">not set</span>;
   return (
-    <span
-      className="inline-flex items-center gap-1.5 whitespace-nowrap"
-      title={b.loadoutPotions.map((p) => `${p.name} (${p.effect})`).join('\n') || 'No potions'}
-    >
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
       {b.loadoutPotions.length > 0 && (
         <span className="flex -space-x-1.5">
-          {b.loadoutPotions.map((p) => <PotionIcon key={p.id} p={p} className="h-6 w-6 ring-2 ring-background" />)}
+          {b.loadoutPotions.map((p) => (
+            <span key={p.id} title={`${p.name} · ${SLOT_LABEL[p.slot]} · ${p.effect}`} className="relative hover:z-10 transition-transform hover:scale-125">
+              <PotionIcon p={p} className="h-6 w-6 ring-2 ring-background" />
+            </span>
+          ))}
         </span>
       )}
       <PresetTag r={r} />
@@ -359,9 +363,12 @@ function Drawer({
           {b.computed && (
             <div className="space-y-2">
               <HitsStrip r={r} wide />
-              {!b.canScale && <p className="text-[11px] text-muted-foreground">Enemy scaling opens at CL 100.</p>}
-              {b.canScale && b.max2HitLevel == null && (
-                <p className="text-[11px] text-muted-foreground">Once every mob here is 2 hits, this shows how far you can scale (up to Lv {b.scaleMax}).</p>
+              {!b.canScale && <p className="text-[11px] text-muted-foreground">Enemy scaling opens at CL 80.</p>}
+              {b.canScale && b.scaleFixed && (
+                <p className="text-[11px] text-muted-foreground">Below CL 100, scaling puts every mob at your own CL (Lv {b.scaleMax}). At CL 100 you pick any level up to 150.</p>
+              )}
+              {b.canScale && !b.scaleFixed && b.max2HitLevel == null && (
+                <p className="text-[11px] text-muted-foreground">Once every mob here is 2 hits, this shows how far you can scale (up to Lv 150).</p>
               )}
               <table className="w-full text-xs">
                 <tbody>

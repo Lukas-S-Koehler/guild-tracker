@@ -111,9 +111,11 @@ export interface RosterRow {
     /** e.g. [{hits:2,count:2},{hits:3,count:4}] at the zone's own levels. */
     dist: { hits: number; count: number }[];
     worstHits: number | null;
-    /** Enemy scaling on the roster: CL 100+ only, up to Lv 150 (user rule). */
+    /** Enemy scaling: from CL 80 you scale to your own CL (fixed); at CL 100 you pick any level up to 150. */
     canScale: boolean;
     scaleMax: number;
+    /** CL 80–99: scaling only at exactly your own CL. */
+    scaleFixed: boolean;
     /** Highest scaled level where EVERY zone enemy still dies in 2 hits; null if not all 2 hits at base. */
     max2HitLevel: number | null;
   };
@@ -168,7 +170,7 @@ const lvl = (skills: Record<string, { level?: number }> | null | undefined, key:
 
 type Enemy = { id: number; name: string; level: number; health: number };
 
-const scaleRange = (cl: number) => (cl >= 100 ? { allowed: true, max: 150 } : { allowed: false, max: 0 });
+const scaleRange = (cl: number) => (cl >= 100 ? { allowed: true, max: 150, fixed: false } : cl >= 80 ? { allowed: true, max: cl, fixed: true } : { allowed: false, max: 0, fixed: false });
 
 /** Same rule as /combat: scaled mobs use the calibrated HP curve (citadel mobs have their own). */
 const resolveAt = (e: Enemy, scaled: number | null) => {
@@ -180,11 +182,15 @@ function hitsAt(f: FighterStats, enemies: Enemy[], slayer: Record<number, number
   return enemies.map((e) => matchup(f, resolveAt(e, scaled), slayer[e.id] ?? 0));
 }
 
-function max2HitLevel(f: FighterStats, enemies: Enemy[], slayer: Record<number, number>, scaleMax: number, canScale: boolean): number | null {
+function max2HitLevel(
+  f: FighterStats, enemies: Enemy[], slayer: Record<number, number>, scaleMax: number, canScale: boolean, fixed = false
+): number | null {
   const allTwo = (L: number | null) => hitsAt(f, enemies, slayer, L).every((m) => m.hits != null && m.hits <= 2);
   if (!enemies.length || !allTwo(null)) return null;
   const base = Math.max(...enemies.map((e) => e.level));
   if (!canScale || scaleMax <= base) return base;
+  // CL 80–99: scaling is all-or-nothing at your own CL.
+  if (fixed) return allTwo(scaleMax) ? scaleMax : base;
   let lo = base;
   let hi = scaleMax;
   while (lo < hi) {
@@ -214,7 +220,7 @@ export async function buildRoster(
   const zoneId = zoneOverride && zoneOverride >= 1 && zoneOverride <= MAX_LOCATION_ID ? zoneOverride : trackedZoneId;
 
   const [{ data: members }, { data: profiles }, { data: potions }, { data: enemies }, locks, { data: xpPotions }] = await Promise.all([
-    memberIds.length ? supabase.from('members').select('id, position').in('id', memberIds) : Promise.resolve({ data: [] }),
+    memberIds.length ? supabase.from('members').select('id, position, hunting_bow').in('id', memberIds) : Promise.resolve({ data: [] }),
     hashed.length
       ? supabase.from('combat_profiles').select('hashed_id, user_id, gear, settings, updated_at').in('hashed_id', hashed).order('updated_at', { ascending: false })
       : Promise.resolve({ data: [] }),
@@ -225,6 +231,7 @@ export async function buildRoster(
   ]);
 
   const positionOf = new Map((members ?? []).map((m) => [m.id as string, (m.position as string) ?? null]));
+  const bowOf = new Map((members ?? []).map((m) => [m.id as string, ((m as { hunting_bow?: string | null }).hunting_bow as string) ?? null]));
   const profileOf = new Map<string, { user_id: string; gear: GearSelection[]; settings: Record<string, unknown> }>();
   for (const p of profiles ?? []) if (!profileOf.has(p.hashed_id)) profileOf.set(p.hashed_id, p as never);
 
@@ -379,7 +386,7 @@ export async function buildRoster(
         })
         .sort((a, b) => a.hits - b.hits || b.dmg - a.dmg)
         .slice(0, 4)
-        .map((x) => ({ ...x, two: max2HitLevel(x.f, zoneEnemies, slayer, scale.max, scale.allowed) ?? 0 }))
+        .map((x) => ({ ...x, two: max2HitLevel(x.f, zoneEnemies, slayer, scale.max, scale.allowed, scale.fixed) ?? 0 }))
         .sort((a, b) => a.hits - b.hits || b.two - a.two || b.dmg - a.dmg);
       if (ranked[0]) {
         bestPet = { ...ranked[0].c, tier: petTier(ranked[0].c.species) };
@@ -433,10 +440,11 @@ export async function buildRoster(
         worstHits: worstHits === 99 ? null : worstHits,
         canScale: scale.allowed,
         scaleMax: scale.max,
-        max2HitLevel: computed ? max2HitLevel(fighter, zoneEnemies, slayer, scale.max, scale.allowed) : null,
+        scaleFixed: scale.fixed,
+        max2HitLevel: computed ? max2HitLevel(fighter, zoneEnemies, slayer, scale.max, scale.allowed, scale.fixed) : null,
       },
       hunting: {
-        bow: huntingBow(r.hunting_bow),
+        bow: huntingBow(bowOf.get(r.member_id)),
         squadSize: petSquadSize(pm),
         stableSize: HUNT_STABLE_SIZE,
         minPetLevel,

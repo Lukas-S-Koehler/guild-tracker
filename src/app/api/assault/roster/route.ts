@@ -68,7 +68,13 @@ export async function PATCH(req: NextRequest) {
   if (body.hunting_bow !== undefined) {
     if (!isOwner && !isStaff) return NextResponse.json({ error: 'Only the owner or guild staff can set the bow' }, { status: 403 });
     if (body.hunting_bow && !huntingBow(body.hunting_bow)) return NextResponse.json({ error: 'Unknown bow' }, { status: 400 });
-    update.hunting_bow = body.hunting_bow ? huntingBow(body.hunting_bow)!.name : null;
+    // Stored on the character, shared with /combat.
+    const { error: bowErr } = await supabase
+      .from('members')
+      .update({ hunting_bow: body.hunting_bow ? huntingBow(body.hunting_bow)!.name : null })
+      .eq('id', row.member_id);
+    if (bowErr) return NextResponse.json({ error: bowErr.message }, { status: 500 });
+    if (body.participation === undefined) return NextResponse.json({ ok: true });
   }
   if (body.participation !== undefined) {
     if (!PARTICIPATION.includes(body.participation)) return NextResponse.json({ error: 'Unknown participation' }, { status: 400 });

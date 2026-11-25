@@ -54,8 +54,16 @@ BEGIN
     ALTER TABLE assault_roster DROP COLUMN IF EXISTS non_assaulter_by;
   END IF;
 END $$;
--- Hunting bow (separate from the combat bow on /combat); name from src/lib/combat/hunting-gear.ts.
-ALTER TABLE assault_roster ADD COLUMN IF NOT EXISTS hunting_bow TEXT;
+-- Hunting bow lives on the character (members) so /combat and the roster share it.
+-- Name from src/lib/combat/hunting-gear.ts; separate from the combat bow slot on /combat.
+ALTER TABLE members ADD COLUMN IF NOT EXISTS hunting_bow TEXT;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'assault_roster' AND column_name = 'hunting_bow') THEN
+    UPDATE members m SET hunting_bow = r.hunting_bow FROM assault_roster r WHERE r.member_id = m.id AND r.hunting_bow IS NOT NULL;
+    ALTER TABLE assault_roster DROP COLUMN hunting_bow;
+  END IF;
+END $$;
 
 -- Pets added in Admin → System → Pets (pasted from the in-game stats panel).
 -- Code-defined pets in src/lib/combat/pet-data.ts win over rows here with the same name.

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { requireUser, isResponse } from '@/lib/user-auth';
 import { getAccountCharacters } from '@/lib/account-service';
+import { huntingBow } from '@/lib/combat/hunting-gear';
 import { fetchCharacterSnapshot, PROFILE_COLUMNS, canCalibrateStats } from '@/lib/combat/profile-service';
 
 export const dynamic = 'force-dynamic';
@@ -49,7 +50,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-/** PATCH /api/combat/profile { id, gear?, settings? } — save member-entered gear and settings. */
+/** PATCH /api/combat/profile { id, gear?, settings?, hunting_bow? } — save member-entered gear and settings. */
 export async function PATCH(req: NextRequest) {
   const user = await requireUser(req);
   if (isResponse(user)) return user;
@@ -76,6 +77,15 @@ export async function PATCH(req: NextRequest) {
       else settings.manual = stored;
     }
     patch.settings = settings;
+  }
+
+  // Hunting bow (optional) lives on the character, shared with /assault/roster.
+  if (body.hunting_bow !== undefined) {
+    const bow = body.hunting_bow ? huntingBow(body.hunting_bow) : null;
+    if (body.hunting_bow && !bow) return NextResponse.json({ error: 'Unknown bow' }, { status: 400 });
+    const { data: own } = await supabase.from('combat_profiles').select('member_id').eq('id', body.id).eq('user_id', auth.user.id).maybeSingle();
+    if (!own?.member_id) return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+    await supabase.from('members').update({ hunting_bow: bow?.name ?? null }).eq('id', own.member_id);
   }
 
   const { data, error } = await supabase
