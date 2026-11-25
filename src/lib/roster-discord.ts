@@ -12,9 +12,10 @@ import { editOriginalInteractionResponse } from '@/lib/discord-api';
 import { getLiveRow, publishLive, type LivePayload } from '@/lib/discord-live';
 import { GUIDE_SITE_URL } from '@/lib/game-guide';
 import { buildRoster, type Roster, type RosterRow } from '@/lib/assault-roster';
-import { TIERS, TRACKS, evaluateGoals, meetsMinimum, mergeGoals, prerequisites, type GoalSet } from '@/lib/roster-goals';
+import { TIERS, TRACKS, belowMinimum, evaluateGoals, meetsMinimum, mergeGoals, prerequisites, reminders, type GoalSet } from '@/lib/roster-goals';
 import { fmtGold } from '@/lib/roster-moves';
 import { rsvpComponents } from '@/lib/assault-rsvp';
+import { defaultButtons, discordRosterCharacters } from '@/lib/roster-default-discord';
 
 export const ROSTER_PREFIX = 'assault-roster:';
 export const rosterKey = (guildId: string) => `${ROSTER_PREFIX}${guildId}`;
@@ -45,6 +46,10 @@ function summaryEmbed(roster: Roster, goals: GoalSet) {
         `✅ **${c.in}** in · 🤔 ${c.maybe} maybe · ❌ ${c.out} out · ⏳ ${c.no_reply} no reply`,
         by('maybe').length ? `🤔 ${names(by('maybe'))}` : null,
         by('no_reply').length ? `⏳ Opt-in, no answer yet: ${names(by('no_reply'))}` : null,
+        (() => {
+          const oneOff = roster.rows.filter((r) => r.participation === 'none' && (r.rsvp.answer === 'in' || r.rsvp.answer === 'maybe'));
+          return oneOff.length ? `➕ Joining this wave only: ${names(oneOff)}` : null;
+        })(),
       ].filter(Boolean).join('\n').slice(0, 1024),
     });
   }
@@ -63,7 +68,14 @@ function summaryEmbed(roster: Roster, goals: GoalSet) {
   if (setup.length) {
     fields.push({
       name: `⚙️ Setup needed (${setup.length})`,
-      value: `${names(setup, 20)}\n-# Gear on /combat, a default potion loadout, visible pets. Takes two minutes on the site.`.slice(0, 1024),
+      value: `${names(setup, 20)}\n-# Gear on /combat and visible pets. Takes two minutes on the site.`.slice(0, 1024),
+    });
+  }
+  const noPotions = active.filter((r) => r.battle.loadoutSource !== 'own');
+  if (noPotions.length) {
+    fields.push({
+      name: `🧪 No own potion loadout yet (${noPotions.length})`,
+      value: `${names(noPotions, 20)}\n-# Counted with the Mid preset (or one a leader set) until you save your own default.`.slice(0, 1024),
     });
   }
 
@@ -122,21 +134,27 @@ function memberEmbed(r: RosterRow, roster: Roster, goals: GoalSet) {
   const hits = b.computed ? `${b.enemies.map((e) => HIT_EMOJI(e.hits)).join('')} ${b.dist.map((d) => `${d.count}×${d.hits}`).join(' · ')}` : 'set gear on /combat';
   const move = r.moves[0];
   const missing = prerequisites(r).filter((p) => !p.ok);
+  const soft = reminders(r);
+  const eligibleOutsider = r.participation === 'none' && !missing.length && meetsMinimum(r, results);
   return {
     title: `${r.ign} · CL ${r.combat_level ?? '?'} ${r.character_class ?? ''}`.trim(),
     url: `${SITE}/assault/roster`,
     thumbnail: r.image_url ? { url: r.image_url } : undefined,
     color: meetsMinimum(r, results) ? 0x22c55e : 0xef4444,
-    description: missing.length
+    description: [
+      missing.length
       ? `🔴 **Setup needed:** ${missing.map((p) => `${p.label} (${p.fix})`).join(' · ')}`
       : meetsMinimum(r, results)
         ? '🟢 Set up and eligible (meets the minimum)'
-        : '🟠 Below the minimum on: ' + results.filter((x) => x.tier === 0 && TRACKS.find((t) => t.id === x.id)!.importance !== 'bonus').map((x) => TRACKS.find((t) => t.id === x.id)!.label).join(', '),
+        : '🟠 Below the minimum on: ' + belowMinimum(r, results).map((x) => TRACKS.find((t) => t.id === x.id)!.label).join(', '),
+      ...soft.map((p) => `🧪 ${p.fix}`),
+      eligibleOutsider ? '✨ Meets the assault minimum: want to join? Set your default on the roster, or answer the wave buttons on the pinned board.' : null,
+    ].filter(Boolean).join('\n'),
     fields: [
       {
         name: `⚔️ Battle · ${roster.zone.name ?? ''}`,
         value: [
-          `Pet: ${b.bestPet ? `${b.bestPet.species} L${b.bestPet.level}` : '—'} · Potions: ${b.loadout ? (b.preset ? `${b.preset.label} preset` : 'custom') : 'not set'}`,
+          `Pet: ${b.bestPet ? `${b.bestPet.species} L${b.bestPet.level}` : '—'} · Potions: ${b.loadout ? (b.preset ? `${b.preset.label} preset` : 'custom') : 'not set'}${b.loadoutSource === 'own' ? '' : b.loadoutSource === 'provisional' ? ' (provisional)' : ' (default)'}`,
           `Hits: ${hits}${b.max2HitLevel && b.canScale && !b.scaleFixed ? ` · 2 hits to Lv ${b.max2HitLevel}` : ''}`,
         ].join('\n'),
       },
@@ -151,8 +169,8 @@ function memberEmbed(r: RosterRow, roster: Roster, goals: GoalSet) {
       ...(move
         ? [{ name: '➡️ Next best move', value: `${move.title}${move.cost != null ? ` · ${fmtGold(move.cost)}g${move.costNote ? ` (${move.costNote})` : ''}` : ''}${move.detail ? `\n-# ${move.detail}` : ''}`.slice(0, 1024) }]
         : []),
-      ...(roster.nextWave && r.participation !== 'none'
-        ? [{ name: '📅 Next wave', value: `<t:${roster.nextWave.unix}:R> · ${r.rsvp.effective === 'no_reply' ? 'no answer yet' : r.rsvp.effective}${!r.rsvp.answer && r.rsvp.effective === 'in' ? ' (auto)' : ''}` }]
+      ...(roster.nextWave
+        ? [{ name: '📅 Next wave', value: `<t:${roster.nextWave.unix}:R> · ${r.rsvp.effective === 'no_reply' ? 'no answer yet' : r.rsvp.effective === 'none' ? 'not in (default: not assaulting)' : r.rsvp.effective}${!r.rsvp.answer && r.rsvp.effective === 'in' ? ' (auto)' : ''}${r.participation === 'none' && r.rsvp.answer ? ' (this wave only)' : ''}` }]
         : []),
     ],
     footer: { text: `Tiers ${TIERS.map((t, i) => `${TIER_EMOJI[i + 1]} ${t}`).join(' ')}` },
@@ -200,7 +218,13 @@ export function handleRosterCommand(i: RosterInteraction) {
         if (target) {
           const row = roster.rows.find((r) => r.member_id === target!.member_id);
           if (!row) throw new Error('Not synced yet.');
-          payload = { embeds: [memberEmbed(row, roster, goals)], components: [link('Open the roster', '/assault/roster')] };
+          // Your own character: buttons to set your default right here.
+          const { chars } = await discordRosterCharacters(discordId, supabase);
+          const own = chars.some((c) => c.member_id === row.member_id);
+          payload = {
+            embeds: [memberEmbed(row, roster, goals)],
+            components: [...(own ? [defaultButtons(row.member_id, row.participation)] : []), link('Open the roster', '/assault/roster')],
+          };
         } else {
           payload = { embeds: [summaryEmbed(roster, goals)], components: [link('Open the roster', '/assault/roster')] };
         }

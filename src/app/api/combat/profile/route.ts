@@ -44,6 +44,21 @@ export async function POST(req: NextRequest) {
       .select(PROFILE_COLUMNS)
       .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    // Gear a leader entered on the roster before this character was claimed: seed it once.
+    if (!((data as { gear?: unknown[] }).gear ?? []).length) {
+      const { data: staff } = await supabase.from('assault_roster').select('staff_gear').eq('member_id', member.member_id).maybeSingle();
+      const staffGear = (staff?.staff_gear as unknown[] | null) ?? [];
+      if (staffGear.length) {
+        const { data: seeded } = await supabase
+          .from('combat_profiles')
+          .update({ gear: staffGear })
+          .eq('id', (data as { id: string }).id)
+          .select(PROFILE_COLUMNS)
+          .single();
+        await supabase.from('assault_roster').update({ staff_gear: null }).eq('member_id', member.member_id);
+        if (seeded) return NextResponse.json({ profile: seeded, pets_available, notice });
+      }
+    }
     return NextResponse.json({ profile: data, pets_available, notice });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Sync failed' }, { status: 502 });

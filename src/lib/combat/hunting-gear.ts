@@ -59,7 +59,7 @@ export function bowBlocker(bow: HuntingBow, combatLevel: number, dexterity: numb
  */
 export type EggPricing = { kind: 'market' } | { kind: 'fixed'; estimate: number } | { kind: 'none' };
 
-const MYTHIC_EGG_ESTIMATE = 20_000_000;
+export const MYTHIC_EGG_ESTIMATE = 20_000_000;
 
 export const PET_EGGS: Record<string, EggPricing> = {
   Aquastar: { kind: 'market' }, Fluffy: { kind: 'market' }, Leafy: { kind: 'market' },

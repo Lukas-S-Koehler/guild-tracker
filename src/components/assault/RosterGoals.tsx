@@ -1,12 +1,15 @@
 'use client';
 
+import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import Link from 'next/link';
-import { AlertTriangle, CircleDashed, Coins, Dumbbell, Gift, ShieldCheck, Sparkles, Wrench } from 'lucide-react';
-import { fmtGold, type Move } from '@/lib/roster-moves';
+import { AlertTriangle, ChevronDown, ChevronRight, CircleDashed, Coins, Dumbbell, FlaskConical, Gift, Scale, ShieldCheck, Sparkles, Star, Wrench } from 'lucide-react';
+import {
+  BATTLE_PET_LADDER, EGG_RARITIES, QUALITY_BY_RANK, fmtGold, huntPlans, ownedForBattleStep, recommendBattle, recommendHunt, type Move,
+} from '@/lib/roster-moves';
 import type { RosterRow } from '@/lib/assault-roster';
 import {
-  IMPORTANCE_LABEL, TIERS, TIER_MEANING, TRACKS, evaluateGoals, meetsMinimum, prerequisites,
+  IMPORTANCE_LABEL, TIERS, TIER_MEANING, TRACKS, belowMinimum, evaluateGoals, meetsMinimum, prerequisites, reminders,
   type GoalSet, type TrackDef, type TrackResult,
 } from '@/lib/roster-goals';
 
@@ -47,24 +50,42 @@ function ProgressBar({ res }: { res: TrackResult }) {
   );
 }
 
-/** Non-bonus elements still below Bronze (the minimum). */
-function missingMinimum(results: TrackResult[]) {
-  return results.filter((x) => x.measured && x.tier === 0 && defOf(x.id).importance !== 'bonus');
+
+/** Amber, non-blocking: e.g. no own potion loadout yet (measured on a provisional/Mid preset). */
+export function Reminders({ r, showName }: { r: RosterRow; showName?: boolean }) {
+  const list = reminders(r);
+  if (!list.length) return null;
+  return (
+    <div className="space-y-1">
+      {list.map((p) => (
+        <div key={p.id} className="flex items-center justify-between gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-2.5 py-1.5 text-xs">
+          <span className="flex items-center gap-1.5">
+            <FlaskConical className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+            {showName ? <b>{r.ign}:</b> : null} <span className="text-muted-foreground">{p.fix}</span>
+          </span>
+          <Link href="/assault/potions" className="shrink-0 rounded border border-amber-500/50 px-2 py-0.5 text-amber-400 hover:bg-amber-500/10">Pick</Link>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 /** One red block: setup (prerequisites) + eligibility (Bronze minimum). Green one-liner when all good. */
 export function SetupEligibility({ r, goals, showName }: { r: RosterRow; goals: GoalSet; showName?: boolean }) {
   const results = evaluateGoals(r, goals);
   const missing = prerequisites(r).filter((p) => !p.ok);
-  const below = missingMinimum(results);
+  const below = belowMinimum(r, results).filter((x) => x.measured);
   if (!missing.length && !below.length) {
     return (
-      <div className="flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-2.5 py-1.5 text-xs text-emerald-500">
-        <ShieldCheck className="h-3.5 w-3.5" />{showName ? <b>{r.ign}</b> : null} Set up and eligible: meets the minimum (Bronze)
+      <div className="space-y-1">
+        <div className="flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-2.5 py-1.5 text-xs text-emerald-500">
+          <ShieldCheck className="h-3.5 w-3.5" />{showName ? <b>{r.ign}</b> : null} Set up and eligible: meets the minimum (Bronze)
+        </div>
+        <Reminders r={r} />
       </div>
     );
   }
-  const href = (id: string) => (id === 'gear' ? '/combat' : id === 'potions' ? '/assault/potions' : '/setup');
+  const href = (id: string) => (id === 'gear' ? '/combat' : '/setup');
   return (
     <div className="rounded-md border border-red-500/50 bg-red-500/10 p-2.5 space-y-2">
       <div className="flex items-center gap-1.5 text-sm font-semibold text-red-400">
@@ -89,40 +110,207 @@ export function SetupEligibility({ r, goals, showName }: { r: RosterRow; goals: 
         </div>
       )}
       {missing.length > 0 && <p className="text-[11px] text-muted-foreground">Until the setup is done some goals can&apos;t be measured.</p>}
+      <Reminders r={r} />
     </div>
   );
 }
 
 const MOVE_ICON = { setup: Wrench, free: Gift, train: Dumbbell, buy: Coins };
 
-/** Next best moves list (drawer). */
-export function MovesList({ moves }: { moves: Move[] }) {
-  const list = moves.filter((m) => m.kind !== 'setup');
+/** In-game rarity colours (same as the roster). */
+const RARITY_TEXT: Record<string, string> = {
+  Standard: 'text-zinc-400', Refined: 'text-sky-500', Premium: 'text-green-500', Epic: 'text-red-500',
+  Legendary: 'text-yellow-500', Mythic: 'text-orange-500',
+};
+
+/** Tier tabs from the next tier up to Dream: pick a jump target. */
+function TargetTabs({ from, value, onChange }: { from: number; value: number; onChange: (t: number) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {TIERS.map((t, i) => i + 1).filter((t) => t > from).map((t) => (
+        <button
+          key={t}
+          type="button"
+          onClick={() => onChange(t)}
+          className={`rounded-md border px-2 py-0.5 text-[11px] ${value === t ? 'border-primary bg-primary/10' : 'text-muted-foreground hover:bg-muted'}`}
+        >
+          {tierName(t)}{t === from + 1 ? ' (next)' : ''}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Every egg against a pet hunt power target: strongest of the cheapest rarity that gets there is ★. */
+function HuntWeigh({ r, goals, current }: { r: RosterRow; goals: GoalSet; current: number }) {
+  const [target, setTarget] = useState(Math.min(5, current + 1));
+  const ths = goals.tracks.pet_hunt.thresholds;
+  const goal = ths[target - 1];
+  const levelled = r.hunting.stableL100.reduce((a, b) => a + b, 0);
+  const tierOf = (power: number) => ths.filter((t) => power >= t).length;
+  // Only eggs that reach the target AND pull their weight there (user: the rest are useless).
+  const plans = goal == null ? [] : huntPlans(r.hunting.stableL100, r.hunting.eggOptions, goal).filter((p) => p.reached && p.fits);
+  const rec = recommendHunt(plans);
+  const owned = r.hunting.stableL100.length;
+  return (
+    <div className="space-y-2 rounded-md border bg-muted/20 p-2">
+      <TargetTabs from={current} value={target} onChange={setTarget} />
+      <p className="text-[11px] text-muted-foreground">
+        Target <b className="text-foreground">{tierName(target)}</b> = {goal?.toLocaleString()} pet hunt power. Your own {owned} best pets at L100 ≈{' '}
+        <b className="text-foreground">{levelled.toLocaleString()}</b> <TierChip tier={tierOf(levelled)} small />
+        {levelled >= (goal ?? Infinity) ? ' : levelling alone gets there.' : `. ${HUNT_STABLE_SIZE_TEXT(owned)}`}
+      </p>
+      {levelled < (goal ?? Infinity) && !plans.length && (
+        <p className="text-[11px] text-amber-500">No egg gets you there on top of your own pets. Train pet mastery or aim one tier lower.</p>
+      )}
+      {levelled < (goal ?? Infinity) && plans.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="text-left text-muted-foreground border-b">
+                <th className="py-1 pr-2 font-medium">Egg</th>
+                <th className="py-1 pr-2 font-medium" title="Citadel est. encounters per hunt at L100 with your pet mastery">Enc / pet</th>
+                <th className="py-1 pr-2 font-medium">Eggs</th>
+                <th className="py-1 pr-2 font-medium">Gold</th>
+                <th className="py-1 pr-2 font-medium">Result</th>
+                <th className="py-1 font-medium" title="Egg price per encounter it hunts">Gold / enc</th>
+              </tr>
+            </thead>
+            <tbody>
+              {EGG_RARITIES.flatMap((q) => plans.filter((p) => p.quality === q)).map((p) => {
+                const star = rec?.key === p.key;
+                return (
+                  <tr key={p.key} className={`border-b last:border-0 ${star ? 'bg-crystal/10' : ''}`}>
+                    <td className="py-1 pr-2 whitespace-nowrap">
+                      {star && <Star className="inline h-3 w-3 mr-0.5 text-crystal" />}
+                      <span className={RARITY_TEXT[p.quality] ?? ''}>{p.label}</span>
+                    </td>
+                    <td className="py-1 pr-2 tabular-nums">{p.enc}</td>
+                    <td className="py-1 pr-2 tabular-nums">{p.n ?? '—'}</td>
+                    <td className="py-1 pr-2 tabular-nums whitespace-nowrap">
+                      {p.cost != null ? <span className="text-yellow-400">{fmtGold(p.cost)}g</span> : p.price ? '—' : <span className="text-muted-foreground">no price</span>}
+                      {p.note && p.cost != null && <span className="text-muted-foreground"> est.</span>}
+                    </td>
+                    <td className="py-1 pr-2 whitespace-nowrap">≈{p.power.toLocaleString()} <TierChip tier={tierOf(p.power)} small /></td>
+                    <td className="py-1 tabular-nums">{p.perEnc != null ? fmtGold(p.perEnc) : '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="text-[10px] text-muted-foreground">
+        ★ = strongest egg of the cheapest rarity whose pets fit the target (≥ {Math.ceil((goal ?? 0) / 20)} encounters each): pets hunt for months, so strength beats a little gold. Eggs are counted at L100 on top of your own pets levelled to L100. Citadel estimates.
+      </p>
+    </div>
+  );
+}
+const HUNT_STABLE_SIZE_TEXT = (owned: number) => (owned < 20 ? `${20 - owned} of the 20 counted slots are empty, so every egg adds its full value.` : 'New eggs replace your weakest counted pets.');
+
+/** Every battle species of the target tier's rarity, simulated here at L100. */
+function BattleWeigh({ r, current }: { r: RosterRow; current: number }) {
+  const [target, setTarget] = useState(Math.min(5, current + 1));
+  const step = BATTLE_PET_LADDER[target - 1];
+  const quality = QUALITY_BY_RANK[step[0]];
+  const owned = ownedForBattleStep(r, step);
+  const options = r.battle.speciesOptions.filter((o) => o.quality === quality);
+  const rec = recommendBattle(r, quality);
+  const now = r.battle.computed ? r.battle.enemies.reduce((t, e) => t + (e.hits ?? 99), 0) : null;
+  return (
+    <div className="space-y-2 rounded-md border bg-muted/20 p-2">
+      <TargetTabs from={current} value={target} onChange={setTarget} />
+      <p className="text-[11px] text-muted-foreground">
+        <b className="text-foreground">{tierName(target)}</b> needs a <span className={RARITY_TEXT[quality]}>{quality}</span> at L{step[1]}{step[2] ? ` evo ${step[2]}` : ''}.
+        {owned ? <> You own <b className="text-foreground">{owned.species}</b> (L{owned.level}{owned.evolution ? ` evo ${owned.evolution}` : ''}): levelling it is free.</> : null}
+        {now != null && r.battle.bestPet ? <> Now: {r.battle.bestPet.species} = {now} hits over {r.battle.enemies.length} mobs.</> : null}
+      </p>
+      {options.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="text-left text-muted-foreground border-b">
+                <th className="py-1 pr-2 font-medium">Pet (L100)</th>
+                <th className="py-1 pr-2 font-medium" title="Total hits over every mob here (worst mob)">Hits</th>
+                <th className="py-1 pr-2 font-medium" title="Damage taken per kill, summed (defence saves food)">Dmg taken</th>
+                <th className="py-1 pr-2 font-medium">Damage</th>
+                <th className="py-1 font-medium">Egg</th>
+              </tr>
+            </thead>
+            <tbody>
+              {options.map((o) => {
+                const star = rec?.label === o.label;
+                return (
+                  <tr key={o.label} className={`border-b last:border-0 ${star ? 'bg-crystal/10' : o.price ? '' : 'opacity-45'}`}>
+                    <td className="py-1 pr-2 whitespace-nowrap">
+                      {star && <Star className="inline h-3 w-3 mr-0.5 text-crystal" />}
+                      <span className={RARITY_TEXT[o.quality] ?? ''}>{o.label}</span>
+                    </td>
+                    <td className="py-1 pr-2 tabular-nums">{o.hits} <span className="text-muted-foreground">({o.worst} max)</span></td>
+                    <td className="py-1 pr-2 tabular-nums">{o.taken.toLocaleString()}</td>
+                    <td className="py-1 pr-2 tabular-nums">{o.dmg.toLocaleString()}</td>
+                    <td className="py-1 tabular-nums whitespace-nowrap">
+                      {o.price ? <span className="text-yellow-400">{fmtGold(o.price)}g</span> : <span className="text-muted-foreground">no price</span>}
+                      {o.note && o.price ? <span className="text-muted-foreground"> est.</span> : null}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="text-[11px] text-muted-foreground">Set gear on /combat to simulate pets here.</p>
+      )}
+      <p className="text-[10px] text-muted-foreground">
+        ★ = strongest for battling here: fewest hits, then least damage taken, then most damage. Simulated with your gear, loadout and pet mastery. The main suggestion goes at most one rarity above your best pet; pick a higher tab to plan a jump.
+      </p>
+    </div>
+  );
+}
+
+/** Next best moves list (drawer). Pet moves can open the weigh-options view. */
+export function MovesList({ r, goals }: { r: RosterRow; goals: GoalSet }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const list = r.moves.filter((m) => m.kind !== 'setup');
   if (!list.length) return null;
+  const results = evaluateGoals(r, goals);
+  const tierOfTrack = (id: string) => results.find((x) => x.id === id)?.tier ?? 0;
   return (
     <div className="space-y-1.5">
       <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Next best moves</div>
       {list.slice(0, 5).map((m, i) => {
         const Icon = MOVE_ICON[m.kind];
         const label = m.track === 'setup' ? 'Setup' : m.track === 'class' ? 'Class' : defOf(m.track).label;
+        const key = `${m.track}:${i}`;
         return (
-          <div key={i} className={`flex items-start gap-2 rounded-md border px-2.5 py-1.5 text-xs ${i === 0 ? 'border-crystal/40 bg-crystal/5' : ''}`}>
-            <Icon className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
-            <div className="min-w-0 flex-1">
-              <div>
-                <b>{m.title}</b>
-                {m.toTier > 0 && <> <span className="text-muted-foreground">→ {label}</span> <TierChip tier={m.toTier} small /></>}
+          <div key={i} className="space-y-1">
+            <div className={`flex items-start gap-2 rounded-md border px-2.5 py-1.5 text-xs ${i === 0 ? 'border-crystal/40 bg-crystal/5' : ''}`}>
+              <Icon className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <div>
+                  <b>{m.title}</b>
+                  {m.toTier > 0 && <> <span className="text-muted-foreground">→ {label}</span> <TierChip tier={m.toTier} small /></>}
+                </div>
+                {m.detail && <div className="text-[11px] text-muted-foreground">{m.detail}</div>}
+                {m.weigh && (
+                  <button type="button" className="mt-0.5 inline-flex items-center gap-0.5 text-[11px] text-crystal hover:underline" onClick={() => setOpen(open === key ? null : key)}>
+                    {open === key ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                    <Scale className="h-3 w-3" />Weigh options
+                  </button>
+                )}
               </div>
-              {m.detail && <div className="text-[11px] text-muted-foreground">{m.detail}</div>}
+              <div className="shrink-0 text-right">
+                {m.cost != null ? (
+                  <span className="font-semibold tabular-nums text-yellow-400">{fmtGold(m.cost)}g</span>
+                ) : (
+                  <span className="text-[11px] text-muted-foreground">{m.kind === 'train' ? 'training' : 'no gold'}</span>
+                )}
+                {m.costNote && <div className="text-[10px] text-muted-foreground">{m.costNote}</div>}
+              </div>
             </div>
-            <div className="shrink-0 text-right">
-              {m.cost != null ? (
-                <span className="font-semibold tabular-nums text-yellow-400">{fmtGold(m.cost)}g</span>
-              ) : (
-                <span className="text-[11px] text-muted-foreground">{m.kind === 'train' ? 'training' : 'no gold'}</span>
-              )}
-              {m.costNote && <div className="text-[10px] text-muted-foreground">{m.costNote}</div>}
-            </div>
+            {open === key && m.weigh === 'pet_hunt' && <HuntWeigh r={r} goals={goals} current={tierOfTrack('pet_hunt')} />}
+            {open === key && m.weigh === 'battle_pet' && <BattleWeigh r={r} current={tierOfTrack('battle_pet')} />}
           </div>
         );
       })}
@@ -134,11 +322,12 @@ export function MovesList({ moves }: { moves: Move[] }) {
 /** Goals card inside the member drawer. */
 export function GoalsSection({ r, goals }: { r: RosterRow; goals: GoalSet }) {
   const results = evaluateGoals(r, goals);
+  const [weigh, setWeigh] = useState<string | null>(null);
   return (
     <section className="rounded-lg border p-3 space-y-3">
       <h3 className="text-sm font-semibold flex items-center gap-1.5"><Sparkles className="h-4 w-4" />Goals</h3>
       <SetupEligibility r={r} goals={goals} />
-      <MovesList moves={r.moves} />
+      <MovesList r={r} goals={goals} />
       {results.map((res) => {
         const def = defOf(res.id);
         return (
@@ -154,9 +343,18 @@ export function GoalsSection({ r, goals }: { r: RosterRow; goals: GoalSet }) {
               </span>
             </div>
             <ProgressBar res={res} />
-            <div className="text-[11px] text-muted-foreground">
-              {!res.measured ? 'Set the prerequisites to get measured' : res.next ? <>Next <span className={TEXT_STYLE[res.tier + 1]}>{tierName(res.tier + 1)}</span>: {res.next}</> : <span className="text-crystal">Dream: perfect</span>}
+            <div className="text-[11px] text-muted-foreground flex items-center justify-between gap-2">
+              <span>
+                {!res.measured ? 'Set the prerequisites to get measured' : res.next ? <>Next <span className={TEXT_STYLE[res.tier + 1]}>{tierName(res.tier + 1)}</span>: {res.next}</> : <span className="text-crystal">Dream: perfect</span>}
+              </span>
+              {(res.id === 'pet_hunt' || res.id === 'battle_pet') && res.measured && res.tier < 5 && (
+                <button type="button" className="shrink-0 inline-flex items-center gap-0.5 text-crystal hover:underline" onClick={() => setWeigh(weigh === res.id ? null : res.id)}>
+                  <Scale className="h-3 w-3" />{weigh === res.id ? 'Hide options' : 'Weigh options'}
+                </button>
+              )}
             </div>
+            {weigh === 'pet_hunt' && res.id === 'pet_hunt' && <HuntWeigh r={r} goals={goals} current={res.tier} />}
+            {weigh === 'battle_pet' && res.id === 'battle_pet' && <BattleWeigh r={r} current={res.tier} />}
           </div>
         );
       })}
@@ -165,7 +363,7 @@ export function GoalsSection({ r, goals }: { r: RosterRow; goals: GoalSet }) {
 }
 
 /** Goals view of the roster: tier ladder, team progress per element, everyone's tiers + next step. */
-export function GoalsView({ rows, goals, onOpen }: { rows: RosterRow[]; goals: GoalSet; onOpen: (r: RosterRow) => void }) {
+export function GoalsView({ rows, goals, mine = [], onOpen }: { rows: RosterRow[]; goals: GoalSet; mine?: string[]; onOpen: (r: RosterRow) => void }) {
   const evaluated = rows.map((r) => {
     const results = evaluateGoals(r, goals);
     return { r, results, ok: meetsMinimum(r, results), move: r.moves[0] ?? null };
@@ -223,16 +421,17 @@ export function GoalsView({ rows, goals, onOpen }: { rows: RosterRow[]; goals: G
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-muted-foreground border-b">
-                  <th className="py-2 pr-3 font-medium">Character</th>
+                  <th className="py-2 pl-2 pr-3 font-medium">Character</th>
                   {TRACKS.map((t) => <th key={t.id} className="py-2 pr-2 font-medium whitespace-nowrap" title={t.hint}>{t.label}</th>)}
                   <th className="py-2 font-medium">Next step</th>
                 </tr>
               </thead>
               <tbody>
                 {evaluated.map(({ r, results, ok, move }) => (
-                  <tr key={r.member_id} className="border-b last:border-0 hover:bg-muted/40 cursor-pointer" onClick={() => onOpen(r)}>
-                    <td className="py-2 pr-3 whitespace-nowrap">
+                  <tr key={r.member_id} className={`border-b last:border-0 cursor-pointer ${mine.includes(r.member_id) ? 'bg-primary/10 shadow-[inset_3px_0_0_0] shadow-primary hover:bg-primary/15' : 'hover:bg-muted/40'}`} onClick={() => onOpen(r)}>
+                    <td className="py-2 pl-2 pr-3 whitespace-nowrap">
                       <span className="font-medium">{r.ign}</span>
+                      {mine.includes(r.member_id) && <span className="ml-1"><span className="rounded bg-primary/20 px-1 text-[10px] font-medium text-primary">you</span></span>}
                       <ShieldCheck className={`inline h-3.5 w-3.5 ml-1 ${ok ? 'text-emerald-500' : 'text-amber-500'}`} />
                       <div className="text-xs text-muted-foreground">CL {r.combat_level ?? '?'}</div>
                     </td>

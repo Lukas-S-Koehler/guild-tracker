@@ -6,7 +6,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createAdminClient } from '@/lib/supabase-server';
 import { getAccountCharacters, getAllClaimLocks } from '@/lib/account-service';
-import { RANK, rankInGuild } from '@/lib/role-hierarchy';
+import { RANK, outranks, outrankError, rankInGuild, rankOfUser } from '@/lib/role-hierarchy';
 import { SUPER_ADMIN_EMAIL } from '@/lib/auth-helpers';
 import { ensureCustomPets } from '@/lib/combat/custom-pets-server';
 import { resolveSpeciesName, petTier, PET_STATS } from '@/lib/combat/pet-data';
@@ -20,14 +20,36 @@ import { matchup, estimateHP, HP_TARGETS, type FighterStats } from '@/lib/combat
 import { MAX_LOCATION_ID } from '@/lib/assault-plan';
 import { RECOMMENDED_PRESET_ID } from '@/lib/potion-rules';
 import { battleTier, mergeGoals, type GoalSet } from '@/lib/roster-goals';
-import { computeMoves, type Move } from '@/lib/roster-moves';
+import { computeMoves, huntEggOptions, priceBattleOptions, stableAtL100, type BattleSpeciesOption, type EggOption, type Move } from '@/lib/roster-moves';
 import { hasMarketAccess } from '@/lib/combat/class-talents';
 import { effectiveRsvp, nextWaveUnix, rsvpsForWave, type EffectiveRsvp, type RsvpStatus } from '@/lib/assault-rsvp';
-import { HAND_SLOT_CONFLICTS } from '@/lib/combat/character-stats';
+import { GEAR_SLOTS, HAND_SLOT_CONFLICTS } from '@/lib/combat/character-stats';
 import { withPotions } from '@/app/combat/potion-slots';
 import type { PotionRow } from '@/app/combat/types';
 
+const GEAR_SLOT_ORDER: string[] = GEAR_SLOTS.map((s) => s.key);
+
 /* ─── access ─── */
+
+/**
+ * Leader edits on a roster character (gear, provisional potion preset): leaders (and super admin)
+ * of that assault guild, only for owners ranked below them (staff hierarchy rule), unclaimed
+ * characters, or their own.
+ */
+export async function canLeaderEditMember(
+  supabase: SupabaseClient,
+  user: { id: string; email?: string },
+  guildId: string,
+  ownerUserId: string | null
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const actor = await rankInGuild(supabase, user, guildId);
+  if (actor < RANK.LEADER) return { ok: false, error: 'Only guild leaders can change this' };
+  if (!ownerUserId || ownerUserId === user.id) return { ok: true };
+  const target = await rankOfUser(supabase, ownerUserId, guildId);
+  if (!outranks(actor, target)) return { ok: false, error: outrankError(actor, target, 'change setups for') };
+  return { ok: true };
+}
+
 
 export interface RosterGuild {
   id: string;
@@ -104,6 +126,10 @@ export interface RosterRow {
   battle: {
     gearSet: boolean;
     loadout: string | null;
+    /** own = their saved default · provisional = preset a leader picked · default = the Mid preset (nothing set yet). */
+    loadoutSource: LoadoutSource;
+    /** Preset id a leader set as provisional (only used while they have no own loadout). */
+    provisionalPreset: string | null;
     loadoutPotions: RosterPotion[];
     /** The /assault/potions preset this loadout matches exactly, or null = custom. */
     preset: { id: string; label: string; recommended: boolean } | null;
@@ -128,6 +154,9 @@ export interface RosterRow {
     /** Best battle species per buyable quality (Epic, Legendary) at L100 for this character, best first:
      *  fewest hits, then least damage taken (defence saves food), then most damage. */
     bestSpecies: Record<'Epic' | 'Legendary', string[]>;
+    /** Every buyable Epic / Legendary species (and one generic Mythic row) simulated at L100 here,
+     *  strongest first per quality. Prices filled in with the moves. Feeds the "weigh options" view. */
+    speciesOptions: BattleSpeciesOption[];
     /** Cheapest single gear swap (base tier, market price) that reaches the next battle tier. */
     upgrade: { item: string; slot: string; price: number; toTier: number } | null;
   };
@@ -145,6 +174,10 @@ export interface RosterRow {
     petCount: number;
     byQuality: Record<string, number>;
     unknownPets: string[];
+    /** Encounters of the best 20 own pets if levelled to L100 (for egg planning). */
+    stableL100: number[];
+    /** Buyable eggs with encounters at L100 for this member's pet mastery and price (filled with the moves). */
+    eggOptions: EggOption[];
   };
   pets: RosterPet[];
   /** Slayer at the selected location (bonus goal). */
@@ -169,6 +202,23 @@ export interface RosterRow {
   last_error: string | null;
   owner_user_id: string | null;
   has_combat_profile: boolean;
+  /** Discord account known for this character (members.discord_id or the owner's linked Discord). */
+  discord_linked: boolean;
+  /** Gear saved on /combat (same data the hits use), in slot order. */
+  gear: RosterGear[];
+  /** Gear came from a leader edit stored on the roster (no /combat profile yet). */
+  gear_from_staff: boolean;
+}
+
+export type LoadoutSource = 'own' | 'provisional' | 'default';
+
+export interface RosterGear {
+  slot: string;
+  gear_item_id: number;
+  tier: number;
+  name: string;
+  quality: string;
+  image_url: string | null;
 }
 
 export interface Roster {
@@ -261,7 +311,7 @@ export async function buildRoster(
   const zoneId = zoneOverride && zoneOverride >= 1 && zoneOverride <= MAX_LOCATION_ID ? zoneOverride : trackedZoneId;
 
   const [{ data: members }, { data: profiles }, { data: potions }, { data: enemies }, locks, { data: xpPotions }] = await Promise.all([
-    memberIds.length ? supabase.from('members').select('id, position, hunting_bow').in('id', memberIds) : Promise.resolve({ data: [] }),
+    memberIds.length ? supabase.from('members').select('id, position, hunting_bow, discord_id').in('id', memberIds) : Promise.resolve({ data: [] }),
     hashed.length
       ? supabase.from('combat_profiles').select('hashed_id, user_id, gear, settings, updated_at').in('hashed_id', hashed).order('updated_at', { ascending: false })
       : Promise.resolve({ data: [] }),
@@ -272,6 +322,7 @@ export async function buildRoster(
   ]);
 
   const positionOf = new Map((members ?? []).map((m) => [m.id as string, (m.position as string) ?? null]));
+  const memberDiscord = new Set((members ?? []).filter((m) => (m as { discord_id?: string | null }).discord_id).map((m) => m.id as string));
   const bowOf = new Map((members ?? []).map((m) => [m.id as string, ((m as { hunting_bow?: string | null }).hunting_bow as string) ?? null]));
   const profileOf = new Map<string, { user_id: string; gear: GearSelection[]; settings: Record<string, unknown> }>();
   for (const p of profiles ?? []) if (!profileOf.has(p.hashed_id)) profileOf.set(p.hashed_id, p as never);
@@ -328,6 +379,7 @@ export async function buildRoster(
   };
   const owners = Array.from(new Set(memberIds.map(ownerOf).filter(Boolean))) as string[];
   const loadoutOf = new Map<string, { name: string; ids: number[]; xpIds: number[] }>();
+  const discordOwners = new Set<string>();
   const { data: presetRows } = await supabase.from('assault_potion_presets').select('*').order('sort_order');
   const key = (ids: number[]) => [...ids].sort((a, b) => a - b).join(',');
   const presetOf = (l: { ids: number[]; xpIds: number[] }) => {
@@ -337,6 +389,7 @@ export async function buildRoster(
   if (owners.length) {
     const { data: links } = await supabase.from('user_discord_links').select('user_id, discord_id').in('user_id', owners);
     const discordToUser = new Map((links ?? []).map((l) => [l.discord_id as string, l.user_id as string]));
+    for (const l of links ?? []) discordOwners.add(l.user_id as string);
     const { data: loadouts } = await supabase
       .from('assault_potion_loadouts')
       .select('name, combat_potion_ids, xp_potion_ids, user_id, discord_user_id')
@@ -398,8 +451,19 @@ export async function buildRoster(
     // Battle: best pet among everything owned, evaluated on the selected zone.
     const profile = profileOf.get(r.hashed_id);
     const owner = ownerOf(r.member_id);
-    const loadout = owner ? loadoutOf.get(owner) ?? null : null;
-    const gearSet = !!profile && (profile.gear ?? []).length > 0;
+    // Loadout: their own default, else a leader's provisional preset, else the Mid preset (user rule).
+    const ownLoadout = owner ? loadoutOf.get(owner) ?? null : null;
+    const provisionalId = (r.provisional_preset as string | null) ?? null;
+    const fallbackPreset = (presetRows ?? []).find((p) => p.id === provisionalId) ?? (presetRows ?? []).find((p) => p.id === RECOMMENDED_PRESET_ID);
+    const loadoutSource: LoadoutSource = ownLoadout ? 'own' : fallbackPreset && fallbackPreset.id === provisionalId ? 'provisional' : 'default';
+    const loadout = ownLoadout ?? (fallbackPreset
+      ? { name: fallbackPreset.label as string, ids: (fallbackPreset.combat_potion_ids ?? []) as number[], xpIds: (fallbackPreset.xp_potion_ids ?? []) as number[] }
+      : null);
+    // Gear: /combat profile, else what a leader saved on the roster for an unclaimed character.
+    const profileGear: GearSelection[] = profile?.gear ?? [];
+    const staffGear: GearSelection[] = Array.isArray(r.staff_gear) ? (r.staff_gear as GearSelection[]) : [];
+    const gear: GearSelection[] = profileGear.length ? profileGear : staffGear;
+    const gearSet = gear.length > 0;
     const cl = lvl(skills, 'combat') ?? 0;
     const scale = scaleRange(cl);
     const slayer = slayerByEnemy(r.effects as ApiEffect[]);
@@ -411,7 +475,7 @@ export async function buildRoster(
         skills: skills as Record<string, { level: number }> | null,
         characterClass: r.character_class,
         pet: pet ? { species: pet.species, level: pet.level, mastery: pm, patted, evolution: pet.evolution } : null,
-        gear: gearOverride ?? (gearSet ? profile!.gear : []),
+        gear: gearOverride ?? gear,
         gearCatalog,
         manual: ZERO_STATS,
       });
@@ -457,24 +521,36 @@ export async function buildRoster(
       bestFighter = top.f;
     }
 
-    // Best species to buy per quality, judged for battling (hits, then damage taken, then damage).
+    // Species to buy, judged for battling here at L100: fewest hits, then least damage taken
+    // (defence saves food), then most damage. Mythic eggs hatch a random Mythic: one generic row, worst case.
     const bestSpecies: Record<'Epic' | 'Legendary', string[]> = { Epic: [], Legendary: [] };
+    const speciesOptions: BattleSpeciesOption[] = [];
     if (zoneEnemies.length) {
+      const simulate = (name: string) => {
+        const ms = hitsAt(fighterWith({ species: name, level: 100, evolution: 0 }), zoneEnemies, slayer, null);
+        return {
+          hits: ms.reduce((t, m) => t + (m.hits ?? 99), 0),
+          worst: Math.max(...ms.map((m) => m.hits ?? 99)),
+          taken: Math.round(ms.reduce((t, m) => t + m.damageTakenPerKill, 0)),
+          dmg: Math.round(ms.reduce((t, m) => t + m.damage, 0)),
+        };
+      };
+      const order = (a: { hits: number; taken: number; dmg: number }, b: { hits: number; taken: number; dmg: number }) =>
+        a.hits - b.hits || a.taken - b.taken || b.dmg - a.dmg;
       for (const q of ['Epic', 'Legendary'] as const) {
-        bestSpecies[q] = Object.values(PET_STATS)
+        const list = Object.values(PET_STATS)
           .filter((p) => p.quality === q && petTier(p.name) === q && PET_EGGS[p.name] && PET_EGGS[p.name].kind !== 'none')
-          .map((p) => {
-            const ms = hitsAt(fighterWith({ species: p.name, level: 100, evolution: 0 }), zoneEnemies, slayer, null);
-            return {
-              name: p.name,
-              hits: ms.reduce((t, m) => t + (m.hits ?? 99), 0),
-              taken: ms.reduce((t, m) => t + m.damageTakenPerKill, 0),
-              dmg: ms.reduce((t, m) => t + m.damage, 0),
-            };
-          })
-          .sort((a, b) => a.hits - b.hits || a.taken - b.taken || b.dmg - a.dmg)
-          .map((x) => x.name);
+          .map((p) => ({ species: p.name, label: p.name, quality: q, ...simulate(p.name), price: null, note: undefined }))
+          .sort(order);
+        bestSpecies[q] = list.map((x) => x.species);
+        speciesOptions.push(...list);
       }
+      const mythics = Object.values(PET_STATS)
+        .filter((p) => p.quality === 'Mythic' && PET_EGGS[p.name]?.kind === 'fixed')
+        .map((p) => simulate(p.name))
+        .sort(order);
+      const worstMythic = mythics[mythics.length - 1];
+      if (worstMythic) speciesOptions.push({ species: null, label: 'Mythic egg (random species)', quality: 'Mythic', ...worstMythic, price: null, note: undefined });
     }
 
     const computed = gearSet && zoneEnemies.length > 0 && !!bestFighter;
@@ -497,14 +573,14 @@ export async function buildRoster(
       const curTier = battleTier(enemyHits.map((e) => e.hits ?? 99), canPick, curMax2, goals);
       if (curTier < 5 && !(curTier >= 3 && !canPick)) {
         const pet = bestPet ? { species: bestPet.species, level: bestPet.level, evolution: bestPet.evolution } : null;
-        const owned = new Set(profile!.gear.map((g) => g.gear_item_id));
+        const owned = new Set(gear.map((g) => g.gear_item_id));
         for (const item of Array.from(gearCatalog.values())) {
           if (item.combat_level > cl || owned.has(item.id)) continue;
           const price = priceOf(item.name);
           if (!price || (upgrade && price >= upgrade.price)) continue;
           const clears = new Set([item.slot, ...(HAND_SLOT_CONFLICTS[item.slot] ?? [])]);
-          const gear = [...profile!.gear.filter((g) => !clears.has(g.slot)), { slot: item.slot, gear_item_id: item.id, tier: 1 }];
-          const f = fighterWith(pet, gear);
+          const swapped = [...gear.filter((g) => !clears.has(g.slot)), { slot: item.slot, gear_item_id: item.id, tier: 1 }];
+          const f = fighterWith(pet, swapped);
           const hs = hitsAt(f, zoneEnemies, slayer, null).map((m) => m.hits ?? 99);
           const m2 = Math.max(...hs) <= 2 ? max2HitLevel(f, zoneEnemies, slayer, scale.max, scale.allowed, scale.fixed) : null;
           const t = battleTier(hs, canPick, m2, goals);
@@ -528,6 +604,8 @@ export async function buildRoster(
       battle: {
         gearSet,
         loadout: loadout?.name ?? null,
+        loadoutSource,
+        provisionalPreset: provisionalId,
         loadoutPotions: loadout ? potionsOf(loadout) : [],
         preset: loadout ? presetOf(loadout) : null,
         potionTier: loadout ? potionTierOf(loadout) : 0,
@@ -544,6 +622,7 @@ export async function buildRoster(
         scaleFixed: scale.fixed,
         max2HitLevel: curMax2,
         bestSpecies,
+        speciesOptions,
         upgrade,
       },
       hunting: {
@@ -557,6 +636,8 @@ export async function buildRoster(
         petCount: pets.length,
         byQuality,
         unknownPets: Array.from(new Set(resolved.filter((p) => !p.species).map((p) => p.name))),
+        stableL100: [],
+        eggOptions: [],
       },
       pets: petRows,
       slayer: (() => {
@@ -583,6 +664,15 @@ export async function buildRoster(
       last_error: r.last_error ?? null,
       owner_user_id: owner,
       has_combat_profile: !!profile,
+      discord_linked: memberDiscord.has(r.member_id) || (!!owner && discordOwners.has(owner)),
+      gear_from_staff: !profileGear.length && staffGear.length > 0,
+      gear: gear
+        .map((g) => {
+          const item = gearCatalog.get(g.gear_item_id);
+          return item ? { slot: g.slot, gear_item_id: g.gear_item_id, tier: g.tier, name: item.name, quality: item.quality, image_url: item.image_url } : null;
+        })
+        .filter((g): g is RosterGear => !!g)
+        .sort((a, b) => GEAR_SLOT_ORDER.indexOf(a.slot) - GEAR_SLOT_ORDER.indexOf(b.slot)),
     };
   });
 
@@ -606,6 +696,10 @@ export async function buildRoster(
     .filter((p) => Number((p as { assault_tier?: number }).assault_tier ?? 0) > 0)
     .map((p) => ({ id: p.id as string, label: p.label as string, tier: Number((p as { assault_tier?: number }).assault_tier), cost: presetCost(p) }));
   for (const row of out) {
+    const ctx = { price: priceOf };
+    row.hunting.stableL100 = stableAtL100(row);
+    row.hunting.eggOptions = huntEggOptions(row.pet_mastery ?? 0, ctx);
+    priceBattleOptions(row.battle.speciesOptions, ctx);
     row.moves = computeMoves(row, { goals, price: priceOf, presets: tieredPresets, marketAccess: hasMarketAccess(row.character_class) }).slice(0, 6);
   }
 

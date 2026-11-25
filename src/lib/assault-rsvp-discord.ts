@@ -2,7 +2,8 @@
  * RSVP buttons on pre-launch assault notices (docs/assault-roster.md §7).
  * custom_id: rsvp:<guildId>:<waveUnix>:<in|maybe|out>
  * The clicker's characters in that guild are found via members.discord_id and the site
- * account link (user_discord_links → claimed account bundle); not-assaulting ones are skipped.
+ * account link (user_discord_links → claimed account bundle). Every default answers: a
+ * not-assaulting character saying "in" is counted for that wave only.
  */
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
@@ -50,11 +51,15 @@ export async function handleRsvpComponent(interaction: {
     .from('assault_roster')
     .select('member_id, ign, participation')
     .in('member_id', Array.from(ids));
-  const eligible = (roster ?? []).filter((r) => r.participation !== 'none');
-  if (!eligible.length) return ephemeral('Your characters here are marked as not assaulting. Ask staff if that changed.');
+  const eligible = roster ?? [];
+  if (!eligible.length) return ephemeral("Your characters here aren't on the assault roster yet. It syncs daily; ask staff to refresh it.");
 
   await setRsvp({ guildId, waveUnix, memberIds: eligible.map((r) => r.member_id as string), status: status as RsvpStatus, source: 'discord', discordId }, supabase);
   refreshRosterBoardSoon(guildId);
   const names = eligible.map((r) => r.ign).join(', ');
-  return ephemeral(`${status === 'in' ? '✅' : status === 'maybe' ? '🤔' : '❌'} **${LABEL[status as RsvpStatus]}** for the wave <t:${waveUnix}:R> · ${names}. Change it any time with the buttons or on the assault roster.`);
+  const oneOff = status !== 'out' ? eligible.filter((r) => r.participation === 'none').map((r) => r.ign) : [];
+  return ephemeral(
+    `${status === 'in' ? '✅' : status === 'maybe' ? '🤔' : '❌'} **${LABEL[status as RsvpStatus]}** for the wave <t:${waveUnix}:R> · ${names}. Change it any time with the buttons or on the assault roster.` +
+      (oneOff.length ? `\n-# ${oneOff.join(', ')} ${oneOff.length > 1 ? 'are' : 'is'} set to not assaulting by default, so this counts for this wave only. Change the default on the roster.` : '')
+  );
 }

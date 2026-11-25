@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase-server';
 import { requireUser, isResponse } from '@/lib/user-auth';
-import { buildRoster, viewableRosterGuilds, PARTICIPATION, type Participation } from '@/lib/assault-roster';
+import { buildRoster, canLeaderEditMember, viewableRosterGuilds, PARTICIPATION, type Participation } from '@/lib/assault-roster';
 import { getAllClaimLocks } from '@/lib/account-service';
 import { huntingBow } from '@/lib/combat/hunting-gear';
 import { mergeGoals } from '@/lib/roster-goals';
 import { RSVP_STATUSES, nextWaveUnix, setRsvp, type RsvpStatus } from '@/lib/assault-rsvp';
 import { refreshRosterBoardSoon } from '@/lib/roster-discord';
-import { RANK, rankInGuild } from '@/lib/role-hierarchy';
+import { RANK, outranks, rankInGuild, ranksOf } from '@/lib/role-hierarchy';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,24 +38,39 @@ export async function GET(req: NextRequest) {
     })
     .map((r) => r.member_id);
 
-  const [{ data: goalRow }, rank] = await Promise.all([
+  const [{ data: goalRow }, rank, { data: presets }] = await Promise.all([
     supabase.from('assault_roster_goals').select('goals').eq('guild_id', guild.id).maybeSingle(),
     rankInGuild(supabase, user, guild.id),
+    supabase.from('assault_potion_presets').select('id, label, assault_tier').order('sort_order'),
   ]);
 
-  return NextResponse.json({ guilds, guild, roster, mine, goals: mergeGoals(goalRow?.goals), canEditGoals: rank >= RANK.LEADER });
+  // Rows a leader may edit (gear, provisional potions): owners ranked below them (hierarchy rule), unclaimed, or their own.
+  let leaderEditable: string[] = [];
+  if (rank >= RANK.LEADER) {
+    const owners = Array.from(new Set(roster.rows.map((r) => r.owner_user_id).filter((id): id is string => !!id && id !== user.id)));
+    const ownerRank = await ranksOf(supabase, owners, guild.id);
+    leaderEditable = roster.rows
+      .filter((r) => !r.owner_user_id || r.owner_user_id === user.id || outranks(rank, ownerRank.get(r.owner_user_id) ?? RANK.MEMBER))
+      .map((r) => r.member_id);
+  }
+
+  return NextResponse.json({ guilds, guild, roster, mine, goals: mergeGoals(goalRow?.goals), canEditGoals: rank >= RANK.LEADER, leaderEditable, presets: presets ?? [] });
 }
 
 /**
- * PATCH /api/assault/roster { member_id, hunting_bow?, participation? }
+ * PATCH /api/assault/roster { member_id, hunting_bow?, participation?, rsvp?, provisional_preset? }
  * hunting_bow: owner or guild staff.
- * participation: owner may switch auto ↔ opt_in; only staff set or clear 'none' (user rule).
- * rsvp: answer for the next wave ('in' | 'maybe' | 'out', null = clear). Owner or guild staff.
+ * participation: the owner picks their own default (auto / opt_in / none); guild staff too (user rule 2026-11-25).
+ * rsvp: answer for the next wave ('in' | 'maybe' | 'out', null = clear). Owner or guild staff. Works for
+ *   every default: a 'none' character answering 'in' is counted for that wave only.
+ * provisional_preset: potion preset used until the owner saves their own loadout (null = Mid). Leaders only.
  */
 export async function PATCH(req: NextRequest) {
   const user = await requireUser(req);
   if (isResponse(user)) return user;
-  const body = (await req.json().catch(() => ({}))) as { member_id?: string; hunting_bow?: string | null; participation?: Participation; rsvp?: RsvpStatus | null };
+  const body = (await req.json().catch(() => ({}))) as {
+    member_id?: string; hunting_bow?: string | null; participation?: Participation; rsvp?: RsvpStatus | null; provisional_preset?: string | null;
+  };
   if (!body.member_id) return NextResponse.json({ error: 'member_id required' }, { status: 400 });
 
   const supabase = createAdminClient();
@@ -70,10 +85,25 @@ export async function PATCH(req: NextRequest) {
   if (body.rsvp !== undefined) {
     if (!isOwner && !isStaff) return NextResponse.json({ error: 'Only the owner or guild staff can answer for this character' }, { status: 403 });
     if (body.rsvp !== null && !RSVP_STATUSES.includes(body.rsvp)) return NextResponse.json({ error: 'Unknown answer' }, { status: 400 });
-    if (row.participation === 'none') return NextResponse.json({ error: 'Marked as not assaulting' }, { status: 400 });
     const wave = await nextWaveUnix(row.guild_id);
     if (!wave) return NextResponse.json({ error: 'No upcoming wave scheduled' }, { status: 400 });
     await setRsvp({ guildId: row.guild_id, waveUnix: wave, memberIds: [row.member_id], status: body.rsvp, source: 'web', userId: user.id }, supabase);
+    refreshRosterBoardSoon(row.guild_id);
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.provisional_preset !== undefined) {
+    const auth = await canLeaderEditMember(supabase, user, row.guild_id, lock?.status === 'approved' ? lock.user_id : null);
+    if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: 403 });
+    if (body.provisional_preset) {
+      const { data: preset } = await supabase.from('assault_potion_presets').select('id').eq('id', body.provisional_preset).maybeSingle();
+      if (!preset) return NextResponse.json({ error: 'Unknown preset' }, { status: 400 });
+    }
+    const { error } = await supabase
+      .from('assault_roster')
+      .update({ provisional_preset: body.provisional_preset || null, provisional_by: user.id })
+      .eq('member_id', row.member_id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     refreshRosterBoardSoon(row.guild_id);
     return NextResponse.json({ ok: true });
   }
@@ -92,13 +122,7 @@ export async function PATCH(req: NextRequest) {
   }
   if (body.participation !== undefined) {
     if (!PARTICIPATION.includes(body.participation)) return NextResponse.json({ error: 'Unknown participation' }, { status: 400 });
-    const touchesNone = body.participation === 'none' || row.participation === 'none';
-    if (touchesNone ? !isStaff : !isOwner && !isStaff) {
-      return NextResponse.json(
-        { error: touchesNone ? 'Only guild staff mark someone as not assaulting' : 'Only the owner or guild staff can change this' },
-        { status: 403 }
-      );
-    }
+    if (!isOwner && !isStaff) return NextResponse.json({ error: 'Only the owner or guild staff can change this' }, { status: 403 });
     update.participation = body.participation;
     update.participation_by = user.id;
   }
@@ -106,5 +130,6 @@ export async function PATCH(req: NextRequest) {
 
   const { error } = await supabase.from('assault_roster').update(update).eq('member_id', row.member_id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (update.participation) refreshRosterBoardSoon(row.guild_id);
   return NextResponse.json({ ok: true });
 }

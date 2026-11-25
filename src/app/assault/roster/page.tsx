@@ -6,13 +6,14 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
-  AlertTriangle, Check, ChevronDown, ChevronRight, EyeOff, FlaskConical, Loader2, MapPin, PawPrint, RefreshCw, Swords, Target, Users, X,
+  AlertTriangle, Check, ChevronDown, ChevronRight, EyeOff, FlaskConical, Link2Off, Loader2, MapPin, PawPrint, RefreshCw, ShieldCheck, Sparkles, Swords, Target, Users, X,
 } from 'lucide-react';
 import type { Participation, Roster, RosterGuild, RosterPotion, RosterRow } from '@/lib/assault-roster';
 import { HUNTING_BOWS, bowBlocker } from '@/lib/combat/hunting-gear';
 import type { GoalSet } from '@/lib/roster-goals';
-import { GoalsSection, GoalsView, SetupEligibility } from '@/components/assault/RosterGoals';
-import { evaluateGoals, meetsMinimum } from '@/lib/roster-goals';
+import { GoalsSection, GoalsView, Reminders, SetupEligibility, TierChip } from '@/components/assault/RosterGoals';
+import { TRACKS, belowMinimum, evaluateGoals, meetsMinimum, prerequisites } from '@/lib/roster-goals';
+import { GearSection } from '@/components/assault/RosterGear';
 
 interface Payload {
   guilds: RosterGuild[];
@@ -21,7 +22,17 @@ interface Payload {
   mine: string[];
   goals: GoalSet;
   canEditGoals: boolean;
+  /** Rows this viewer (a leader) may edit: gear and provisional potion preset. */
+  leaderEditable?: string[];
+  presets?: { id: string; label: string; assault_tier: number | null }[];
 }
+
+type PatchFn = (memberId: string, body: Record<string, unknown>) => Promise<string | null>;
+const patchRoster: PatchFn = async (memberId, body) => {
+  const res = await fetch('/api/assault/roster', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ member_id: memberId, ...body }) });
+  const data = await res.json().catch(() => ({}));
+  return res.ok ? null : data.error ?? 'Failed';
+};
 
 /** In-game rarity colours (Legendary/Mythic match the gear colours on /combat). */
 const TIER_CLASS: Record<string, string> = {
@@ -55,12 +66,15 @@ function Tile({ icon: Icon, label, value, sub }: { icon: React.ComponentType<{ c
   );
 }
 
-function PetLabel({ species, level, tier, evolution }: { species: string | null; level: number; tier?: string | null; evolution?: number }) {
+function PetLabel({ species, level, tier, evolution, compact }: { species: string | null; level: number; tier?: string | null; evolution?: number; compact?: boolean }) {
   if (!species) return <span className="text-muted-foreground">—</span>;
   return (
     <span>
       <span className={TIER_CLASS[tier ?? ''] ?? ''}>{species}</span>
-      <span className="text-muted-foreground"> L{level}{evolution ? ` · evo ${evolution}` : ''}</span>
+      <span className="text-muted-foreground"> L{level}{evolution && !compact ? ` · evo ${evolution}` : ''}</span>
+      {compact && evolution ? (
+        <span className="ml-1 rounded bg-muted px-1 text-[10px] font-semibold text-foreground/80" title={`Evolution ${evolution}`}>E{evolution}</span>
+      ) : null}
     </span>
   );
 }
@@ -133,7 +147,7 @@ function LoadoutPill({ r }: { r: RosterRow }) {
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
       {b.loadoutPotions.length > 0 && (
-        <span className="flex -space-x-1.5">
+        <span className={`flex -space-x-1.5 ${b.loadoutSource === 'own' ? '' : 'opacity-50 grayscale'}`}>
           {b.loadoutPotions.map((p) => (
             <span key={p.id} title={`${p.name} · ${SLOT_LABEL[p.slot]} · ${p.effect}`} className="relative hover:z-10 transition-transform hover:scale-125">
               <PotionIcon p={p} className="h-6 w-6 ring-2 ring-background" />
@@ -141,7 +155,22 @@ function LoadoutPill({ r }: { r: RosterRow }) {
           ))}
         </span>
       )}
-      <PresetTag r={r} />
+      <span className={b.loadoutSource === 'own' ? '' : 'opacity-50 grayscale'}><PresetTag r={r} /></span>
+      <SourceTag r={r} />
+    </span>
+  );
+}
+
+/** Not their own loadout: measured on a leader's provisional preset or the Mid default. */
+function SourceTag({ r }: { r: RosterRow }) {
+  const src = r.battle.loadoutSource;
+  if (src === 'own') return null;
+  return (
+    <span
+      className="text-[10px] text-amber-500"
+      title={src === 'provisional' ? 'Provisional preset a leader set, used until they save their own' : 'Mid preset by default, until they save their own loadout'}
+    >
+      {src === 'provisional' ? 'provisional' : 'default'}
     </span>
   );
 }
@@ -171,18 +200,18 @@ function RsvpPill({ r }: { r: RosterRow }) {
 
 const PARTICIPATION_LABEL: Record<Participation, string> = { auto: 'Auto', opt_in: 'Opt-in', none: 'Not assaulting' };
 const PARTICIPATION_HINT: Record<Participation, string> = {
-  auto: 'Always in: counted for every assault',
-  opt_in: 'Chooses per assault',
-  none: 'In the guild for boosts or pools only',
+  auto: 'Always in, unless you say out for a wave',
+  opt_in: 'In when you say so: answer each wave',
+  none: 'Not in for now: say in for a single wave if you can make it',
 };
 
-function RosterTable({ rows, onOpen, compact }: { rows: RosterRow[]; onOpen: (r: RosterRow) => void; compact?: boolean }) {
+function RosterTable({ rows, mine, onOpen, compact }: { rows: RosterRow[]; mine: string[]; onOpen: (r: RosterRow) => void; compact?: boolean }) {
   return (
     <div className="overflow-x-auto -mx-4 px-4">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-muted-foreground border-b">
-            <th className="py-2 pr-3 font-medium">Character</th>
+            <th className="py-2 pl-2 pr-3 font-medium">Character</th>
             {!compact && <th className="py-2 pr-3 font-medium" title="Answer for the next wave">Next wave</th>}
             {!compact && <th className="py-2 pr-3 font-medium" title="Strongest battle pet they own for this location (not the one equipped right now)">Battle pet</th>}
             {!compact && <th className="py-2 pr-3 font-medium" title="Hits per mob at this location with gear from /combat, default potion loadout and the best battle pet. Scaling shown at CL 100+.">Hits</th>}
@@ -194,8 +223,8 @@ function RosterTable({ rows, onOpen, compact }: { rows: RosterRow[]; onOpen: (r:
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.member_id} className="border-b last:border-0 hover:bg-muted/40 cursor-pointer" onClick={() => onOpen(r)}>
-              <td className="py-2 pr-3 whitespace-nowrap">
+            <tr key={r.member_id} className={`border-b last:border-0 cursor-pointer ${mine.includes(r.member_id) ? 'bg-primary/10 shadow-[inset_3px_0_0_0] shadow-primary hover:bg-primary/15' : 'hover:bg-muted/40'}`} onClick={() => onOpen(r)}>
+              <td className="py-2 pl-2 pr-3 whitespace-nowrap">
                 <div className="flex items-center gap-2">
                   {r.image_url && (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -204,6 +233,8 @@ function RosterTable({ rows, onOpen, compact }: { rows: RosterRow[]; onOpen: (r:
                   <div>
                     <div className="font-medium flex items-center gap-1">
                       {r.ign}
+                      {mine.includes(r.member_id) && <span className="rounded bg-primary/20 px-1 text-[10px] font-medium text-primary">you</span>}
+                      {!r.discord_linked && <span title="No Discord linked: misses Discord RSVP and pings"><Link2Off className="h-3.5 w-3.5 text-muted-foreground" /></span>}
                       {r.pets_hidden && <span title="Pets hidden in game settings: showing the last known list"><EyeOff className="h-3.5 w-3.5 text-amber-500" /></span>}
                       {r.last_error && <span title={`Last sync failed: ${r.last_error}`}><AlertTriangle className="h-3.5 w-3.5 text-red-500" /></span>}
                     </div>
@@ -219,7 +250,7 @@ function RosterTable({ rows, onOpen, compact }: { rows: RosterRow[]; onOpen: (r:
               {!compact && <td className="py-2 pr-3"><RsvpPill r={r} /></td>}
               {!compact && (
                 <td className="py-2 pr-3 whitespace-nowrap text-xs">
-                  {r.battle.bestPet ? <PetLabel species={r.battle.bestPet.species} level={r.battle.bestPet.level} tier={r.battle.bestPet.tier} /> : <span className="text-muted-foreground">—</span>}
+                  {r.battle.bestPet ? <PetLabel species={r.battle.bestPet.species} level={r.battle.bestPet.level} tier={r.battle.bestPet.tier} evolution={r.battle.bestPet.evolution} compact /> : <span className="text-muted-foreground">—</span>}
                 </td>
               )}
               {!compact && <td className="py-2 pr-3"><HitsStrip r={r} /></td>}
@@ -256,8 +287,11 @@ function Stat({ label, value }: { label: string; value: string | number }) {
 }
 
 function Drawer({
-  r, zoneName, isOwner, isStaff, goals, nextWave, onClose, onChanged,
-}: { r: RosterRow; zoneName: string | null; isOwner: boolean; isStaff: boolean; goals: GoalSet | null; nextWave: number | null; onClose: () => void; onChanged: () => void }) {
+  r, zoneName, isOwner, isStaff, canLeaderEdit, presets, goals, nextWave, onClose, onChanged,
+}: {
+  r: RosterRow; zoneName: string | null; isOwner: boolean; isStaff: boolean; canLeaderEdit: boolean;
+  presets: NonNullable<Payload['presets']>; goals: GoalSet | null; nextWave: number | null; onClose: () => void; onChanged: () => void;
+}) {
   const canEditBow = isOwner || isStaff;
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -364,7 +398,7 @@ function Drawer({
               <FlaskConical className="h-3 w-3" />Potions{b.loadout ? <span className="normal-case tracking-normal ml-1"><PresetTag r={r} /></span> : null}
             </div>
             {b.loadoutPotions.length ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+              <div className={`grid grid-cols-1 sm:grid-cols-2 gap-1.5 ${b.loadoutSource === 'own' ? '' : 'opacity-50 grayscale'}`}>
                 {b.loadoutPotions.map((p) => (
                   <div key={p.id} className="flex items-center gap-2 rounded-md border px-2 py-1">
                     <PotionIcon p={p} className="h-7 w-7" />
@@ -376,7 +410,38 @@ function Drawer({
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-amber-500">No default potion loadout yet: pick one on /assault/potions.</p>
+              <p className="text-xs text-amber-500">No potion presets found.</p>
+            )}
+            {b.loadoutSource !== 'own' && (
+              <>
+                {isOwner ? <Reminders r={r} /> : (
+                  <p className="text-[11px] text-amber-500">
+                    No own loadout yet: measured with the {b.loadoutSource === 'provisional' ? `${b.loadout} preset a leader set` : 'Mid preset (default)'}.
+                  </p>
+                )}
+                {canLeaderEdit && (
+                  <label className="flex items-center gap-2 text-xs">
+                    <span className="text-muted-foreground shrink-0">Provisional preset</span>
+                    <select
+                      className="h-8 flex-1 rounded-md border bg-background px-2 text-xs"
+                      value={b.provisionalPreset ?? ''}
+                      disabled={!!busy}
+                      onChange={(e) => {
+                        const next = e.target.value || null;
+                        const label = next ? presets.find((p) => p.id === next)?.label ?? next : 'Mid (default)';
+                        if (window.confirm(`Use ${label} as ${r.ign}'s provisional potion loadout? It only applies until they save their own.`)) {
+                          patch({ provisional_preset: next }, 'provisional');
+                        }
+                      }}
+                    >
+                      <option value="">Mid (default)</option>
+                      {presets.filter((p) => p.id !== 'mid').map((p) => (
+                        <option key={p.id} value={p.id}>{p.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </>
             )}
           </div>
 
@@ -472,7 +537,9 @@ function Drawer({
           </div>
         </section>
 
-        {nextWave && r.participation !== 'none' && (
+        <GearSection r={r} canEdit={canLeaderEdit} onSaved={onChanged} />
+
+        {nextWave && (
           <section className="rounded-lg border p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-sm font-semibold">Next wave</h3>
@@ -497,7 +564,12 @@ function Drawer({
               <RsvpPill r={r} />
             )}
             <p className="text-[11px] text-muted-foreground">
-              {r.participation === 'auto' ? 'Auto: counted in unless you say otherwise.' : 'Opt-in: only counted once you say you\'re in.'} Also on the Discord notice before each wave.
+              {r.participation === 'auto'
+                ? 'Auto: counted in unless you say otherwise.'
+                : r.participation === 'opt_in'
+                  ? "Opt-in: only counted once you say you're in."
+                  : "Not assaulting by default: saying you're in counts for this wave only."}{' '}
+              Also with the buttons on the pinned roster board in Discord.
             </p>
           </section>
         )}
@@ -505,8 +577,8 @@ function Drawer({
         <section className="rounded-lg border p-3 space-y-2">
           <h3 className="text-sm font-semibold">Assault participation</h3>
           {(() => {
-            const options: Participation[] = isStaff ? ['auto', 'opt_in', 'none'] : ['auto', 'opt_in'];
-            const locked = !isStaff && (!isOwner || r.participation === 'none');
+            const options: Participation[] = ['auto', 'opt_in', 'none'];
+            const locked = !isStaff && !isOwner;
             return locked ? (
               <p className="text-sm">
                 {PARTICIPATION_LABEL[r.participation]} <span className="text-xs text-muted-foreground">· {PARTICIPATION_HINT[r.participation]}</span>
@@ -531,10 +603,161 @@ function Drawer({
             );
           })()}
           <p className="text-[11px] text-muted-foreground">
-            Auto = always in. Opt-in = you choose per assault. {isStaff ? 'Only staff can mark someone as not assaulting.' : ''}
+            Your default for every wave. Auto = in unless you say out. Opt-in = in when you say so. Not assaulting = out unless you say in for a wave.
           </p>
         </section>
       </div>
+    </div>
+  );
+}
+
+
+/** Assault-minimum status for someone who isn't assaulting (measured at the guild's zone). */
+function MinimumCell({ r, goals }: { r: RosterRow; goals: GoalSet | null }) {
+  if (!goals) return <span className="text-[11px] text-muted-foreground">at the guild zone</span>;
+  const setup = prerequisites(r).filter((p) => !p.ok);
+  if (setup.length) return <span className="text-[11px] text-amber-500">set up: {setup.map((p) => p.label).join(', ')}</span>;
+  const below = belowMinimum(r, evaluateGoals(r, goals)).filter((x) => x.measured);
+  if (!below.length) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[11px] text-emerald-500 whitespace-nowrap">
+        <ShieldCheck className="h-3 w-3" />Meets the minimum
+      </span>
+    );
+  }
+  return (
+    <span className="text-[11px] text-muted-foreground whitespace-nowrap" title={below.map((x) => `${TRACKS.find((t) => t.id === x.id)!.label}: ${x.next}`).join('\n')}>
+      {below.length} below Bronze: {below.map((x) => TRACKS.find((t) => t.id === x.id)!.label).join(', ')}
+    </span>
+  );
+}
+
+/**
+ * "Not assaulting" table: lineup + goals squeezed into one view, aimed at "could they join?".
+ * Owners can pick a default or say in for the next wave right here.
+ */
+function OutsidersTable({
+  rows, goals, mine, nextWave, onOpen, onPatch,
+}: { rows: RosterRow[]; goals: GoalSet | null; mine: string[]; nextWave: number | null; onOpen: (r: RosterRow) => void; onPatch: PatchFn }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const act = async (r: RosterRow, body: Record<string, unknown>) => {
+    setBusy(r.member_id);
+    setMsg(null);
+    const err = await onPatch(r.member_id, body);
+    setBusy(null);
+    if (err) setMsg(`${r.ign}: ${err}`);
+  };
+  return (
+    <div className="space-y-2">
+      {msg && <p className="text-xs text-red-500">{msg}</p>}
+      <div className="overflow-x-auto -mx-4 px-4">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-muted-foreground border-b">
+              <th className="py-2 pl-2 pr-3 font-medium">Character</th>
+              <th className="py-2 pr-3 font-medium" title="Measured against the guild's roster goals at its assault zone">Assault minimum</th>
+              <th className="py-2 pr-3 font-medium" title="Core goal elements">Battle · Pet hunt · Battle pet</th>
+              <th className="py-2 pr-3 font-medium" title="Not assaulting = out unless they say in for a wave">Next wave</th>
+              <th className="py-2 font-medium" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const own = mine.includes(r.member_id);
+              const results = goals ? evaluateGoals(r, goals) : [];
+              const tierOf = (id: string) => results.find((x) => x.id === id);
+              return (
+                <tr key={r.member_id} className={`border-b last:border-0 cursor-pointer ${own ? 'bg-primary/10 shadow-[inset_3px_0_0_0] shadow-primary hover:bg-primary/15' : 'hover:bg-muted/40'}`} onClick={() => onOpen(r)}>
+                  <td className="py-2 pl-2 pr-3 whitespace-nowrap">
+                    <div className="font-medium flex items-center gap-1">
+                      {r.ign}
+                      {own && <span className="rounded bg-primary/20 px-1 text-[10px] font-medium text-primary">you</span>}
+                      {!r.discord_linked && <span title="No Discord linked: misses Discord RSVP and pings"><Link2Off className="h-3.5 w-3.5 text-muted-foreground" /></span>}
+                    </div>
+                    <div className="text-xs text-muted-foreground">CL {r.combat_level ?? '?'} · {r.character_class ?? '?'}</div>
+                  </td>
+                  <td className="py-2 pr-3"><MinimumCell r={r} goals={goals} /></td>
+                  <td className="py-2 pr-3 whitespace-nowrap">
+                    {goals ? (
+                      <span className="inline-flex gap-1">
+                        {(['battle', 'pet_hunt', 'battle_pet'] as const).map((id) => {
+                          const x = tierOf(id);
+                          return x?.measured ? <span key={id} title={`${TRACKS.find((t) => t.id === id)!.label}: ${x.current}`}><TierChip tier={x.tier} small /></span> : <span key={id} className="text-[10px] text-amber-500">set up</span>;
+                        })}
+                      </span>
+                    ) : (
+                      <span className="text-xs tabular-nums">{r.hunting.squadPower.toLocaleString()} hunt power</span>
+                    )}
+                  </td>
+                  <td className="py-2 pr-3">{nextWave ? <RsvpPill r={r} /> : <span className="text-xs text-muted-foreground">none scheduled</span>}</td>
+                  <td className="py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                    {own && (
+                      <span className="inline-flex gap-1">
+                        {nextWave && r.rsvp.answer !== 'in' && (
+                          <button disabled={busy === r.member_id} className="rounded border px-2 py-0.5 text-[11px] hover:bg-muted" onClick={() => act(r, { rsvp: 'in' })}>
+                            In for next wave
+                          </button>
+                        )}
+                        <button disabled={busy === r.member_id} className="rounded border border-crystal/50 px-2 py-0.5 text-[11px] text-crystal hover:bg-crystal/10" onClick={() => act(r, { participation: 'opt_in' })}>
+                          Join (opt-in)
+                        </button>
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/** Own not-assaulting character that already meets the minimum: ask if they want to join. */
+function JoinPrompt({ r, nextWave, onPatch }: { r: RosterRow; nextWave: number | null; onPatch: PatchFn }) {
+  const dismissKey = `roster-join-dismissed:${r.member_id}`;
+  const [hidden, setHidden] = useState(() => {
+    try { return typeof window !== 'undefined' && window.localStorage.getItem(dismissKey) === '1'; } catch { return false; }
+  });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  if (hidden) return null;
+  const act = async (body: Record<string, unknown>) => {
+    setBusy(true);
+    setMsg(null);
+    const err = await onPatch(r.member_id, body);
+    setBusy(false);
+    if (err) setMsg(err);
+  };
+  return (
+    <div className="rounded-md border border-crystal/50 bg-crystal/5 p-2.5 space-y-2">
+      <div className="flex items-center gap-1.5 text-sm font-semibold text-crystal">
+        <Sparkles className="h-4 w-4" /><b>{r.ign}</b> meets the assault minimum. Want to join?
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Pick how you join. You can change it any time here or answer single waves with the buttons on the pinned roster board in Discord.
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        <Button size="sm" className="h-7 text-xs" disabled={busy} onClick={() => act({ participation: 'opt_in' })} title={PARTICIPATION_HINT.opt_in}>Join as opt-in</Button>
+        <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busy} onClick={() => act({ participation: 'auto' })} title={PARTICIPATION_HINT.auto}>Join as auto</Button>
+        {nextWave && r.rsvp.answer !== 'in' && (
+          <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busy} onClick={() => act({ rsvp: 'in' })}>Just the next wave</Button>
+        )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 text-xs"
+          onClick={() => {
+            try { window.localStorage.setItem(dismissKey, '1'); } catch { /* private mode */ }
+            setHidden(true);
+          }}
+        >
+          Not now
+        </Button>
+      </div>
+      {msg && <p className="text-xs text-red-500">{msg}</p>}
     </div>
   );
 }
@@ -571,7 +794,7 @@ export default function AssaultRosterPage() {
   const shown = active.filter((r) => filter === 'all' || (filter === 'no_reply' ? r.rsvp.effective === 'no_reply' : r.participation === filter));
   const potionUse = useMemo(() => {
     const m = new Map<number, { p: RosterPotion; n: number }>();
-    for (const r of rows) if (r.participation !== 'none') for (const p of r.battle.loadoutPotions) m.set(p.id, { p, n: (m.get(p.id)?.n ?? 0) + 1 });
+    for (const r of rows) if (r.participation !== 'none' && r.battle.loadoutSource === 'own') for (const p of r.battle.loadoutPotions) m.set(p.id, { p, n: (m.get(p.id)?.n ?? 0) + 1 });
     return Array.from(m.values()).sort((a, b) => b.n - a.n);
   }, [rows]);
   const current = rows.find((r) => r.member_id === open) ?? null;
@@ -603,6 +826,14 @@ export default function AssaultRosterPage() {
 
   const n = active.length || 1;
   const myAttention = active.filter((r) => data.mine.includes(r.member_id) && !meetsMinimum(r, evaluateGoals(r, data.goals)));
+  // Own characters measured on a provisional/default loadout that are otherwise fine (the red block already shows it).
+  const myPotionReminders = active.filter((r) => data.mine.includes(r.member_id) && r.battle.loadoutSource !== 'own' && !myAttention.includes(r));
+  const myJoinable = others.filter((r) => data.mine.includes(r.member_id) && meetsMinimum(r, evaluateGoals(r, data.goals)));
+  const onPatch: PatchFn = async (memberId, body) => {
+    const err = await patchRoster(memberId, body);
+    if (!err) load(data.guild.id, zoneId);
+    return err;
+  };
   const computed = active.filter((r) => r.battle.computed);
   const lastSync = rows.map((r) => r.last_sync).filter(Boolean).sort().at(-1) ?? null;
   const { roster } = data;
@@ -674,6 +905,8 @@ export default function AssaultRosterPage() {
             <SetupEligibility r={r} goals={data.goals} showName />
           </div>
         ))}
+      {myPotionReminders.map((r) => <Reminders key={r.member_id} r={r} showName />)}
+      {roster.zone.isTracked && myJoinable.map((r) => <JoinPrompt key={r.member_id} r={r} nextWave={roster.nextWave?.unix ?? null} onPatch={onPatch} />)}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
         <Tile
@@ -704,7 +937,7 @@ export default function AssaultRosterPage() {
 
       {view === 'goals' ? (
         roster.zone.isTracked || !roster.trackedZoneId ? (
-          <GoalsView rows={active} goals={data.goals} onOpen={(r) => setOpen(r.member_id)} />
+          <GoalsView rows={active} goals={data.goals} mine={data.mine} onOpen={(r) => setOpen(r.member_id)} />
         ) : (
           <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin" /></div>
         )
@@ -733,7 +966,7 @@ export default function AssaultRosterPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {shown.length ? <RosterTable rows={shown} onOpen={(r) => setOpen(r.member_id)} /> : <p className="text-sm text-muted-foreground">Nobody here yet.</p>}
+          {shown.length ? <RosterTable rows={shown} mine={data.mine} onOpen={(r) => setOpen(r.member_id)} /> : <p className="text-sm text-muted-foreground">Nobody here yet.</p>}
         </CardContent>
       </Card>
 
@@ -741,7 +974,7 @@ export default function AssaultRosterPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center gap-1.5"><FlaskConical className="h-4 w-4" />Potions in use</CardTitle>
-            <CardDescription>From everyone&apos;s default assault loadout ({active.filter((r) => r.battle.loadout).length} of {active.length} have one).</CardDescription>
+            <CardDescription>From everyone&apos;s default assault loadout ({active.filter((r) => r.battle.loadoutSource === 'own').length} of {active.length} have their own; the rest count as Mid or a provisional preset, not listed here).</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-1.5">
             {potionUse.map(({ p, n: count }) => (
@@ -765,11 +998,20 @@ export default function AssaultRosterPage() {
               {showOthers ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
               Not assaulting ({others.length})
             </CardTitle>
-            <CardDescription>In the guild for boosts or pools. Not counted in the numbers above.</CardDescription>
+            <CardDescription>
+              Out by default (boosts, pools, or just not now). Not counted above, unless they say in for a wave. Measured against the same goals, so anyone who meets the minimum can join.
+            </CardDescription>
           </CardHeader>
           {showOthers && (
             <CardContent>
-              <RosterTable rows={others} compact onOpen={(r) => setOpen(r.member_id)} />
+              <OutsidersTable
+                rows={others}
+                goals={roster.zone.isTracked ? data.goals : null}
+                mine={data.mine}
+                nextWave={roster.nextWave?.unix ?? null}
+                onOpen={(r) => setOpen(r.member_id)}
+                onPatch={onPatch}
+              />
             </CardContent>
           )}
         </Card>
@@ -785,6 +1027,8 @@ export default function AssaultRosterPage() {
           zoneName={roster.zone.name}
           isOwner={data.mine.includes(current.member_id)}
           isStaff={data.guild.isStaff}
+          canLeaderEdit={!!data.leaderEditable?.includes(current.member_id)}
+          presets={data.presets ?? []}
           goals={roster.zone.isTracked ? data.goals : null}
           nextWave={roster.nextWave?.unix ?? null}
           onClose={() => setOpen(null)}

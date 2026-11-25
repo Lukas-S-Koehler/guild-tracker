@@ -7,7 +7,8 @@
  *   Gold    = very good, upper half
  *   Crystal = the top
  *   Dream   = absolutely perfect in that element
- * Prerequisites (gear set, potions set, pets visible) are not goals: without them a member can't be measured.
+ * Prerequisites (gear set, pets visible) are not goals: without them a member can't be measured.
+ * Potions fall back to a provisional/Mid preset, so a missing own loadout is only a reminder.
  * Elements carry an importance that weights "next best moves" (step 5).
  */
 import type { RosterRow } from './assault-roster';
@@ -156,9 +157,18 @@ export interface Prereq { id: string; label: string; ok: boolean; fix: string }
 export function prerequisites(r: RosterRow): Prereq[] {
   return [
     { id: 'gear', label: 'Gear on /combat', ok: r.battle.gearSet, fix: 'Pick your gear once on /combat' },
-    { id: 'potions', label: 'Potion loadout', ok: !!r.battle.loadout, fix: 'Pick a default loadout on /assault/potions' },
     { id: 'pets', label: 'Pets visible', ok: !r.pets_hidden, fix: 'Unhide pets in game settings or add your API key in /setup' },
   ];
+}
+
+/**
+ * Soft reminders: don't block eligibility. Without their own loadout a member is measured on a
+ * leader's provisional preset or the Mid preset (user rule), but is still asked to pick their own.
+ */
+export function reminders(r: RosterRow): Prereq[] {
+  if (r.battle.loadoutSource === 'own') return [];
+  const using = r.battle.loadoutSource === 'provisional' ? `the ${r.battle.loadout} preset a leader set` : `the ${r.battle.loadout ?? 'Mid'} preset (default)`;
+  return [{ id: 'potions', label: 'Potion loadout', ok: false, fix: `Measured with ${using}. Pick and save your own on /assault/potions` }];
 }
 
 /* ─── evaluation ─── */
@@ -233,7 +243,8 @@ export function evaluateTrack(r: RosterRow, def: TrackDef, g: GoalSet): TrackRes
       return out(tier, `${p.species} L${p.level}${p.evolution ? ` evo ${p.evolution}` : ''}`, tier >= 5 ? 1 : Math.min(1, p.level / 100));
     }
     case 'potions': {
-      if (!r.battle.loadout) return out(0, 'no loadout', 0, false);
+      // No tier until they save their own (user rule): the Mid/provisional fallback only feeds the hits.
+      if (r.battle.loadoutSource !== 'own' || !r.battle.loadout) return out(0, 'none set yet', 0);
       const t = r.battle.potionTier;
       return out(t, r.battle.preset ? `${r.battle.preset.label} preset` : 'custom loadout', t >= 5 ? 1 : 0);
     }
@@ -280,8 +291,21 @@ export function trackWeight(id: TrackId, results: TrackResult[]): number {
 }
 
 /** Bronze is the minimum: every non-bonus element at Bronze or better (and all prerequisites set). */
+/**
+ * Elements below Bronze that block the minimum. Bonus elements never block, and potions don't
+ * block while they have no own loadout yet (soft reminder instead, user rule).
+ */
+export function belowMinimum(r: RosterRow, results: TrackResult[]): TrackResult[] {
+  return results.filter(
+    (x) =>
+      x.tier === 0 &&
+      TRACKS.find((t) => t.id === x.id)!.importance !== 'bonus' &&
+      !(x.id === 'potions' && r.battle.loadoutSource !== 'own')
+  );
+}
+
 export function meetsMinimum(r: RosterRow, results: TrackResult[]): boolean {
-  return prerequisites(r).every((p) => p.ok) && results.every((x) => TRACKS.find((t) => t.id === x.id)!.importance === 'bonus' || x.tier >= 1);
+  return prerequisites(r).every((p) => p.ok) && belowMinimum(r, results).length === 0;
 }
 
 /**

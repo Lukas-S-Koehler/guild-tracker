@@ -6,7 +6,7 @@ import type { RosterRow } from './assault-roster';
 import {
   TRACKS, evaluateGoals, prerequisites, trackWeight, type GoalSet, type TrackId, type TrackResult,
 } from './roster-goals';
-import { HUNTING_BOWS, PET_EGGS, bowBlocker, eggItemName } from './combat/hunting-gear';
+import { HUNTING_BOWS, MYTHIC_EGG_ESTIMATE, PET_EGGS, bowBlocker, eggItemName } from './combat/hunting-gear';
 import { PET_STATS, petTier } from './combat/pet-data';
 import { petHuntEstimate, HUNT_STABLE_SIZE } from './combat/pet-hunting';
 
@@ -24,6 +24,8 @@ export interface Move {
   /** e.g. "per assault" for potions, "est., no market" for mythic eggs. */
   costNote?: string;
   href?: string;
+  /** Opens the "weigh options" view (all eggs / species per target tier, including jumps). */
+  weigh?: 'pet_hunt' | 'battle_pet';
 }
 
 export interface MoveContext {
@@ -39,14 +41,113 @@ const fmtGold = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1
 export { fmtGold };
 
 const QUALITY_RANK: Record<string, number> = { Standard: 0, Refined: 1, Premium: 2, Event: 2.5, Epic: 3, Legendary: 4, Mythic: 5 };
+/** Egg rarities in buying order (cheapest first). */
+export const EGG_RARITIES = ['Standard', 'Refined', 'Premium', 'Epic', 'Legendary', 'Mythic'] as const;
 
-/** Egg price: market, fixed estimate (mythic), or null when it can't be bought. */
-function eggPrice(species: string, ctx: MoveContext): { price: number; note?: string } | null {
-  const e = PET_EGGS[species];
-  if (!e || e.kind === 'none') return null;
-  if (e.kind === 'fixed') return { price: e.estimate, note: 'est., no market' };
-  const p = ctx.price(eggItemName(species));
-  return p ? { price: p } : null;
+/* ─── pet hunt planning (shared by the moves and the "weigh options" view) ─── */
+
+/** A buyable egg for pet hunting. Mythic eggs hatch a random Mythic, so they are one generic row (worst case). */
+export interface EggOption {
+  key: string;
+  label: string;
+  species: string | null;
+  quality: string;
+  /** Citadel est. encounters per hunt at L100 with this member's pet mastery. */
+  enc: number;
+  price: number | null;
+  note?: string;
+}
+
+export interface HuntPlan extends EggOption {
+  /** Eggs needed to reach the target (null = this egg can't reach it). */
+  n: number | null;
+  cost: number | null;
+  /** Pet hunt power after buying n eggs (or the most this egg can reach). */
+  power: number;
+  reached: boolean;
+  /** Pulls its weight at this target: ≥ target / 20 encounters per pet (a full stable of it gets there). */
+  fits: boolean;
+  /** Gold per encounter one egg adds to a hunt. */
+  perEnc: number | null;
+}
+
+/** Encounters of the best 20 own pets if all were levelled to L100. */
+export function stableAtL100(r: RosterRow): number[] {
+  const pm = r.pet_mastery ?? 0;
+  return r.pets
+    .map((p) => petHuntEstimate(p.species, 100, pm, p.evolution)?.citadelEncounters ?? 0)
+    .sort((a, b) => b - a)
+    .slice(0, HUNT_STABLE_SIZE);
+}
+
+/** Buyable eggs with their L100 encounters for this pet mastery and market price. */
+export function huntEggOptions(petMastery: number, ctx: Pick<MoveContext, 'price'>): EggOption[] {
+  const out: EggOption[] = [];
+  let worstMythic: number | null = null;
+  for (const [species, pricing] of Object.entries(PET_EGGS)) {
+    if (pricing.kind === 'none') continue;
+    const enc = petHuntEstimate(species, 100, petMastery, 0)?.citadelEncounters ?? 0;
+    if (!enc) continue;
+    if (pricing.kind === 'fixed') {
+      worstMythic = worstMythic == null ? enc : Math.min(worstMythic, enc);
+      continue;
+    }
+    const quality = petTier(species) ?? PET_STATS[species]?.quality ?? 'Standard';
+    out.push({ key: species, label: species, species, quality, enc, price: ctx.price(eggItemName(species)) || null });
+  }
+  if (worstMythic != null) {
+    out.push({ key: 'mythic', label: 'Mythic egg (random species)', species: null, quality: 'Mythic', enc: worstMythic, price: MYTHIC_EGG_ESTIMATE, note: 'est., no market' });
+  }
+  return out;
+}
+
+/** Add n eggs of one kind (replacing the weakest of the counted 20) until the target is reached. */
+function fillStable(stable: number[], enc: number, target: number): { n: number; power: number; reached: boolean } {
+  const st = [...stable];
+  let power = st.reduce((a, b) => a + b, 0);
+  let n = 0;
+  while (power < target && n < HUNT_STABLE_SIZE) {
+    const weakest = st.length < HUNT_STABLE_SIZE ? 0 : st[st.length - 1];
+    if (enc <= weakest) break;
+    if (st.length >= HUNT_STABLE_SIZE) st.pop();
+    st.push(enc);
+    st.sort((a, b) => b - a);
+    power += enc - weakest;
+    n++;
+  }
+  return { n, power, reached: power >= target };
+}
+
+/** Every egg option planned against one pet hunt power target. */
+export function huntPlans(stable: number[], options: EggOption[], target: number): HuntPlan[] {
+  return options
+    .map((o) => {
+      const f = fillStable(stable, o.enc, target);
+      const reached = f.reached && f.n > 0;
+      return {
+        ...o,
+        n: reached ? f.n : null,
+        cost: reached && o.price ? f.n * o.price : null,
+        power: f.power,
+        reached,
+        fits: o.enc >= target / HUNT_STABLE_SIZE,
+        perEnc: o.price ? Math.round(o.price / o.enc) : null,
+      };
+    })
+    .sort((a, b) => EGG_RARITIES.indexOf(a.quality as never) - EGG_RARITIES.indexOf(b.quality as never) || b.enc - a.enc);
+}
+
+/**
+ * The egg to suggest for a target (user rule): the lowest rarity whose pets fit the tier
+ * (≥ target / 20 each, so they stay useful) and reach it, and within that rarity the STRONGEST
+ * species: pets hunt for months, a little gold doesn't outweigh that.
+ */
+export function recommendHunt(plans: HuntPlan[]): HuntPlan | null {
+  for (const q of EGG_RARITIES) {
+    const pick = plans.filter((p) => p.quality === q && p.reached && p.fits && p.price).sort((a, b) => b.enc - a.enc || a.price! - b.price!)[0];
+    if (pick) return pick;
+  }
+  return null;
 }
 
 function petHuntMoves(r: RosterRow, res: TrackResult, ctx: MoveContext): Move[] {
@@ -54,17 +155,12 @@ function petHuntMoves(r: RosterRow, res: TrackResult, ctx: MoveContext): Move[] 
   const ths = ctx.goals.tracks.pet_hunt.thresholds;
   const target = ths[res.tier];
   if (target == null) return out;
-  const pm = r.pet_mastery ?? 0;
   const minLv = r.hunting.minPetLevel;
-
   const tierOf = (power: number) => ths.filter((t) => power >= t).length;
 
   // Free: level the pets you own to L100 (pets below the zone level start counting).
-  const levelled = r.pets
-    .map((p) => petHuntEstimate(p.species, 100, pm, p.evolution)?.citadelEncounters ?? 0)
-    .sort((a, b) => b - a)
-    .slice(0, HUNT_STABLE_SIZE)
-    .reduce((a, b) => a + b, 0);
+  const stable = r.hunting.stableL100.length ? r.hunting.stableL100 : stableAtL100(r);
+  const levelled = stable.reduce((a, b) => a + b, 0);
   const under = r.pets.filter((p) => p.level < 100).length;
   if (under && levelled >= target) {
     out.push({
@@ -72,46 +168,21 @@ function petHuntMoves(r: RosterRow, res: TrackResult, ctx: MoveContext): Move[] 
       title: 'Level your pets to L100',
       detail: `${under} pets under L100${r.pets.some((p) => !p.eligible) ? `, ${r.pets.filter((p) => !p.eligible).length} below L${minLv} don't hunt here yet` : ''} → ≈${levelled.toLocaleString()} encounters`,
       cost: null,
+      weigh: 'pet_hunt',
     });
   }
 
-  // Buy: one egg species that fits the tier (each pet ≥ target / 20 at L100), cheapest total.
-  if (!ctx.marketAccess) return out;
-  // Only buy when your own pets, even levelled to L100, can't get there (levelling is free).
-  if (levelled >= target) return out;
-  const perPet = target / HUNT_STABLE_SIZE;
-  const stable = r.pets
-    .map((p) => petHuntEstimate(p.species, 100, pm, p.evolution)?.citadelEncounters ?? 0)
-    .sort((a, b) => b - a)
-    .slice(0, HUNT_STABLE_SIZE);
-  let best: { s: string; n: number; cost: number; power: number; note?: string } | null = null;
-  for (const s of Object.keys(PET_EGGS)) {
-    const p = eggPrice(s, ctx);
-    const enc = petHuntEstimate(s, 100, pm, 0)?.citadelEncounters ?? 0;
-    if (!p || enc < perPet) continue;
-    const st = [...stable];
-    let power = st.reduce((a, b) => a + b, 0);
-    let n = 0;
-    while (power < target && n < HUNT_STABLE_SIZE) {
-      const weakest = st.length < HUNT_STABLE_SIZE ? 0 : st[st.length - 1];
-      if (enc <= weakest) break;
-      if (st.length >= HUNT_STABLE_SIZE) st.pop();
-      st.push(enc);
-      st.sort((a, b) => b - a);
-      power += enc - weakest;
-      n++;
-    }
-    if (power < target || !n) continue;
-    const cost = n * p.price;
-    if (!best || cost < best.cost) best = { s, n, cost, power, note: p.note };
-  }
+  // Buy only when your own pets, even levelled to L100, can't get there (levelling is free).
+  if (!ctx.marketAccess || levelled >= target) return out;
+  const best = recommendHunt(huntPlans(stable, r.hunting.eggOptions, target));
   if (best) {
     out.push({
       track: 'pet_hunt', toTier: tierOf(best.power), kind: 'buy',
-      title: `Buy ${best.n}× ${best.s} ${best.n > 1 ? 'eggs' : 'egg'}`,
-      detail: `on top of your own pets levelled to L100 → ≈${best.power.toLocaleString()} encounters`,
+      title: best.species ? `Buy ${best.n}× ${best.species} ${best.n! > 1 ? 'eggs' : 'egg'}` : `Buy ${best.n}× Mythic ${best.n! > 1 ? 'eggs' : 'egg'}`,
+      detail: `strongest ${best.quality} for hunting, on top of your own pets levelled to L100 → ≈${best.power.toLocaleString()} encounters`,
       cost: best.cost,
       costNote: best.note,
+      weigh: 'pet_hunt',
     });
   }
   return out;
@@ -133,52 +204,82 @@ function bowMoves(r: RosterRow, res: TrackResult, ctx: MoveContext): Move[] {
   }];
 }
 
+/* ─── battle pet planning ─── */
+
+/** Battle pet tiers: [quality rank, level, evolution] for Bronze..Dream (matches the battle_pet goal). */
+export const BATTLE_PET_LADDER: [number, number, number][] = [[3, 80, 0], [3, 100, 0], [4, 100, 0], [5, 80, 0], [5, 100, 5]];
+export const QUALITY_BY_RANK: Record<number, string> = { 3: 'Epic', 4: 'Legendary', 5: 'Mythic' };
+
+/** A species simulated as this member's battle pet at L100 at the location. */
+export interface BattleSpeciesOption {
+  /** null = generic Mythic egg (random species, worst case shown). */
+  species: string | null;
+  label: string;
+  quality: string;
+  /** Total hits over every mob here (fewer = better), and the worst single mob. */
+  hits: number;
+  worst: number;
+  /** Damage taken per kill, summed over the mobs (defence saves food). */
+  taken: number;
+  dmg: number;
+  price: number | null;
+  note?: string;
+}
+
+export function priceBattleOptions(options: BattleSpeciesOption[], ctx: Pick<MoveContext, 'price'>) {
+  for (const o of options) {
+    if (!o.species) { o.price = MYTHIC_EGG_ESTIMATE; o.note = 'est., no market'; continue; }
+    const egg = PET_EGGS[o.species];
+    if (egg?.kind === 'fixed') { o.price = egg.estimate; o.note = 'est., no market'; }
+    else o.price = ctx.price(eggItemName(o.species)) || null;
+  }
+}
+
+/** Owned pet that only needs levels / evolutions to reach a battle pet tier step. */
+export function ownedForBattleStep(r: RosterRow, step: [number, number, number]) {
+  return r.pets
+    .filter((p) => (QUALITY_RANK[p.tier] ?? 0) >= step[0] && PET_STATS[p.species])
+    .sort((a, b) => (QUALITY_RANK[b.tier] ?? 0) - (QUALITY_RANK[a.tier] ?? 0) || b.level - a.level)[0] ?? null;
+}
+
+/** Strongest species of a quality for battling here that can be bought (has a price). */
+export function recommendBattle(r: RosterRow, quality: string): BattleSpeciesOption | null {
+  return r.battle.speciesOptions.find((o) => o.quality === quality && o.price) ?? null;
+}
+
 function battlePetMoves(r: RosterRow, res: TrackResult, ctx: MoveContext): Move[] {
-  // Ladder: [quality, level, evo] per tier.
-  const ladder: [number, number, number][] = [[3, 80, 0], [3, 100, 0], [4, 100, 0], [5, 80, 0], [5, 100, 5]];
-  const step = ladder[res.tier];
+  const step = BATTLE_PET_LADDER[res.tier];
   if (!step) return [];
   const [q, lv, evo] = step;
   // Free: an owned pet of that quality just needs levels / evolutions.
-  const owned = r.pets
-    .filter((p) => (QUALITY_RANK[p.tier] ?? 0) >= q && PET_STATS[p.species])
-    .sort((a, b) => b.level - a.level)[0];
+  const owned = ownedForBattleStep(r, step);
   if (owned) {
     return [{
       track: 'battle_pet', toTier: res.tier + 1, kind: 'train',
       title: `Level ${owned.species} to L${lv}${evo ? ` and evolve to ${evo}` : ''}`,
       detail: `now L${owned.level}${owned.evolution ? ` evo ${owned.evolution}` : ''}`,
       cost: null,
+      weigh: 'battle_pet',
     }];
   }
   if (!ctx.marketAccess) return [];
-  // No huge jumps: at most one rarity above the best pet you own (never below Epic).
+  // No huge jumps in the main suggestion: at most one rarity above the best pet you own (never below Epic).
+  // Bigger jumps are in the weigh-options view.
   const ownedBest = Math.max(0, ...r.pets.filter((p) => PET_STATS[p.species]).map((p) => QUALITY_RANK[p.tier] ?? 0));
   const buyQ = Math.max(3, Math.min(q, Math.floor(ownedBest) + 1));
-  const reaches = (quality: number) => ladder.filter(([lq, llv, le]) => quality >= lq && 100 >= llv && le === 0).length;
-  if (buyQ >= 5) {
-    // Mythics are all equal for this: no species, just "a Mythic egg".
-    return [{
-      track: 'battle_pet', toTier: reaches(5), kind: 'buy',
-      title: 'Buy a Mythic egg',
-      detail: 'any Mythic works the same here; level it to L100',
-      cost: 20_000_000,
-      costNote: 'est., no market',
-    }];
-  }
-  const quality = buyQ === 4 ? 'Legendary' : 'Epic';
-  for (const species of r.battle.bestSpecies[quality]) {
-    const p = eggPrice(species, ctx);
-    if (!p) continue;
-    return [{
-      track: 'battle_pet', toTier: reaches(buyQ), kind: 'buy',
-      title: `Buy ${/^[AEIOU]/.test(species) ? 'an' : 'a'} ${species} egg`,
-      detail: `best ${quality} for battling here (hits, then damage taken); level to L100`,
-      cost: p.price,
-      costNote: p.note,
-    }];
-  }
-  return [];
+  const reaches = (quality: number) => BATTLE_PET_LADDER.filter(([lq, llv, le]) => quality >= lq && 100 >= llv && le === 0).length;
+  const pick = recommendBattle(r, QUALITY_BY_RANK[buyQ]);
+  if (!pick) return [];
+  return [{
+    track: 'battle_pet', toTier: reaches(buyQ), kind: 'buy',
+    title: pick.species ? `Buy ${/^[AEIOU]/.test(pick.species) ? 'an' : 'a'} ${pick.species} egg` : 'Buy a Mythic egg',
+    detail: pick.species
+      ? `strongest ${pick.quality} for battling here (hits, then damage taken); level to L100`
+      : 'any Mythic works about the same here; level it to L100',
+    cost: pick.price,
+    costNote: pick.note,
+    weigh: 'battle_pet',
+  }];
 }
 
 function potionMoves(r: RosterRow, res: TrackResult, ctx: MoveContext): Move[] {
@@ -186,8 +287,10 @@ function potionMoves(r: RosterRow, res: TrackResult, ctx: MoveContext): Move[] {
   if (!next) return [];
   return [{
     track: 'potions', toTier: next.tier, kind: 'buy',
-    title: `Run the ${next.label} preset`,
-    detail: 'load it on /assault/potions and save as your default',
+    title: r.battle.loadoutSource === 'own' ? `Run the ${next.label} preset` : `Save your own loadout (${next.label} preset or better)`,
+    detail: r.battle.loadoutSource === 'own'
+      ? 'load it on /assault/potions and save as your default'
+      : 'no potion tier until you save one on /assault/potions; hits use the Mid preset meanwhile',
     cost: next.cost,
     costNote: 'per assault',
     href: '/assault/potions',

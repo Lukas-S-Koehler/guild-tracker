@@ -2,7 +2,8 @@
  * Assault RSVP per wave (docs/assault-roster.md §7).
  * auto    = counted "in" unless they answered maybe/out
  * opt_in  = counted only once they answer "in" (no answer = "no reply")
- * none    = not assaulting, never counted
+ * none    = not in by default: counted only for a wave they answer "in" (one-off)
+ * Owners pick their own default (user rule 2026-11-25); the per-wave answer always wins.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createAdminClient } from '@/lib/supabase-server';
@@ -13,8 +14,8 @@ export type EffectiveRsvp = RsvpStatus | 'no_reply' | 'none';
 export const RSVP_STATUSES: RsvpStatus[] = ['in', 'maybe', 'out'];
 
 export function effectiveRsvp(participation: 'auto' | 'opt_in' | 'none', answer: RsvpStatus | null): EffectiveRsvp {
-  if (participation === 'none') return 'none';
   if (answer) return answer;
+  if (participation === 'none') return 'none';
   return participation === 'auto' ? 'in' : 'no_reply';
 }
 
