@@ -117,7 +117,8 @@ const TABS: HubTab[] = [
     id: 'assault', label: 'Assault', icon: Swords, access: 'DEPUTY',
     subs: [
       { id: 'schedule', label: 'Schedule & pings', access: 'DEPUTY', render: () => <AssaultAdminPanel /> },
-      { id: 'recruit', label: 'Recruiting', access: 'DEPUTY', render: () => <RecruitPanel /> },
+      { id: 'recruit', label: 'Recruiting', access: 'DEPUTY', render: () => <RecruitPanel view="overview" /> },
+      { id: 'recruit-nearby', label: 'Nearby check', access: 'DEPUTY', render: () => <RecruitPanel view="nearby" /> },
       { id: 'potions', label: 'Potions', access: 'LEADER', render: () => <RefreshPotionMetaCard /> },
       { id: 'roster-goals', label: 'Roster goals', access: 'LEADER', render: () => <RosterGoalsPanel /> },
     ],

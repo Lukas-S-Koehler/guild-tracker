@@ -99,7 +99,8 @@ async function allProspects(supabase: SupabaseClient): Promise<Prospect[]> {
 
 /** Marks prospects that now show up in a Dream guild as joined. Returns how many changed. */
 export async function detectJoins(supabase: SupabaseClient): Promise<number> {
-  const open = (await allProspects(supabase)).filter((p) => p.status !== 'joined');
+  // Also "joined" ones still joining: staff may set Joined by hand before the in-game move lands.
+  const open = (await allProspects(supabase)).filter((p) => p.status !== 'joined' || !!p.joining_member_id);
   if (!open.length) return 0;
   const inDream = await dreamMembers(supabase, open.map((p) => p.ign));
   const now = new Date().toISOString();
@@ -114,7 +115,7 @@ export async function detectJoins(supabase: SupabaseClient): Promise<number> {
     await supabase
       .from('recruit_prospects')
       .update({
-        status: 'joined', joined_at: now, joined_guild_id: guild, recheck_after: null, updated_at: now,
+        status: 'joined', joined_at: p.joined_at ?? now, joined_guild_id: guild, recheck_after: null, updated_at: now,
         // The move landed: the real membership takes over from the joining state.
         joining_member_id: null, joining_guild_id: null, joining_until: null,
       })

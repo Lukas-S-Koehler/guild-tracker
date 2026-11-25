@@ -74,7 +74,12 @@ function prospectLine(p: Prospect) {
   return bits.join(' · ');
 }
 
-export default function RecruitPanel() {
+/**
+ * Two sub-tabs share this panel:
+ *  - 'nearby':   message template, Nearby triage, inbox import (the messaging workflow)
+ *  - 'overview': funnel, joining, quick check, scouting, players list
+ */
+export default function RecruitPanel({ view = 'overview' }: { view?: 'nearby' | 'overview' }) {
   const api = useApiClient();
   const [location, setLocation] = useState('');
   const [lang, setLang] = useState<RecruitLanguage>('en');
@@ -120,6 +125,41 @@ export default function RecruitPanel() {
     return p;
   };
 
+  const errLine = err && <p className="text-sm text-destructive flex items-center gap-1"><AlertCircle className="h-4 w-4" />{err}</p>;
+
+  if (view === 'nearby') {
+    return (
+      <div className="space-y-4">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Nearby check</CardTitle>
+            <CardDescription>
+              Paste the in-game Nearby list, see who still needs checking, copy the message and log it. Shared by all deputies and leaders.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Location" className="w-48" />
+              <div className="flex rounded-md border">
+                {(['en', 'de'] as const).map((l) => (
+                  <button key={l} onClick={() => setLang(l)}
+                    className={`px-3 py-1.5 text-xs uppercase ${lang === l ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+              <CopyButton text={message} label="Copy message" />
+            </div>
+            <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 p-2">{message}</p>
+            {errLine}
+          </CardContent>
+        </Card>
+        <NearbyCard api={api} message={message} location={location} lang={lang} setStatus={setStatus} />
+        <ImportCard api={api} onDone={load} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <Card>
@@ -130,19 +170,6 @@ export default function RecruitPanel() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Location" className="w-48" />
-            <div className="flex rounded-md border">
-              {(['en', 'de'] as const).map((l) => (
-                <button key={l} onClick={() => setLang(l)}
-                  className={`px-3 py-1.5 text-xs uppercase ${lang === l ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}>
-                  {l}
-                </button>
-              ))}
-            </div>
-            <CopyButton text={message} label="Copy message" />
-          </div>
-          <p className="text-xs text-muted-foreground rounded-md border bg-muted/30 p-2">{message}</p>
           {funnel && (
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
               {funnel.interested > 0 && <span className="text-fuchsia-300"><b>{funnel.interested}</b> interested</span>}
@@ -158,18 +185,16 @@ export default function RecruitPanel() {
               )}
             </div>
           )}
-          {err && <p className="text-sm text-destructive flex items-center gap-1"><AlertCircle className="h-4 w-4" />{err}</p>}
+          {errLine}
         </CardContent>
       </Card>
 
       <JoiningCard api={api} prospects={prospects} guilds={guilds} reload={load} />
-      <RecruitCheckCard api={api} />
-      <ScoutCard api={api} />
-      <NearbyCard api={api} message={message} location={location} lang={lang} setStatus={setStatus} />
-      <ImportCard api={api} onDone={load} />
       {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : (
-        <ProspectsCard api={api} prospects={prospects} setStatus={setStatus} reload={load} />
+        <ProspectsCard api={api} prospects={prospects} guilds={guilds} setStatus={setStatus} reload={load} />
       )}
+      <ScoutCard api={api} />
+      <RecruitCheckCard api={api} />
     </div>
   );
 }
@@ -531,18 +556,25 @@ function ImportCard({ api, onDone }: { api: Api; onDone: () => void }) {
   );
 }
 
+const isJoining = (p: Prospect) => !!p.joining_member_id && !!p.joining_until && Date.parse(p.joining_until) > Date.now();
+
 const FILTERS: { id: string; label: string; match: (p: Prospect) => boolean }[] = [
-  { id: 'interested', label: 'Interested', match: (p) => p.status === 'interested' },
-  { id: 'open', label: 'Waiting', match: (p) => p.status === 'messaged' || p.status === 'replied' },
+  { id: 'interested', label: 'Interested', match: (p) => p.status === 'interested' && !isJoining(p) },
+  { id: 'open', label: 'Waiting', match: (p) => (p.status === 'messaged' || p.status === 'replied') && !isJoining(p) },
+  { id: 'joining', label: 'Joining', match: isJoining },
   { id: 'joined', label: 'Joined', match: (p) => p.status === 'joined' },
   { id: 'declined', label: 'Declined', match: (p) => p.status === 'declined' },
   { id: 'skipped', label: 'Ruled out', match: (p) => p.status === 'skip_guild' || p.status === 'skip_weak' },
   { id: 'all', label: 'All', match: () => true },
 ];
 
-function ProspectsCard({ api, prospects, setStatus, reload }: {
-  api: Api; prospects: Prospect[]; setStatus: SetStatus; reload: () => void;
+function ProspectsCard({ api, prospects, guilds, setStatus, reload }: {
+  api: Api; prospects: Prospect[]; guilds: JoinGuild[]; setStatus: SetStatus; reload: () => void;
 }) {
+  const gName = (id: string | null) => {
+    const g = guilds.find((x) => x.id === id);
+    return g ? g.nickname ?? g.name : 'a guild';
+  };
   const [filter, setFilter] = useState('open');
   const [q, setQ] = useState('');
   const [addIgn, setAddIgn] = useState('');
@@ -584,6 +616,11 @@ function ProspectsCard({ api, prospects, setStatus, reload }: {
             <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 p-2">
               <div className="min-w-0 space-y-0.5">
                 <div className="flex items-center gap-2"><Name ign={p.ign} /><StatusBadge s={p.status} />
+                  {isJoining(p) && (
+                    <span className="rounded border border-sky-500/40 bg-sky-500/15 px-1.5 py-0.5 text-xs text-sky-300">
+                      Joining {gName(p.joining_guild_id)} · {timeLeft(p.joining_until!)}
+                    </span>
+                  )}
                   {p.location && <span className="text-xs text-muted-foreground">{p.location}</span>}
                 </div>
                 <p className="text-xs text-muted-foreground">{prospectLine(p)}</p>
