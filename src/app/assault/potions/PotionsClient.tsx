@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ArrowLeft, FlaskConical, Loader2, Save, Star } from 'lucide-react';
 import type { CombatPotion, Loadout, XpPotion } from '@/lib/potion-rules';
-import { canAddCombatPotion, canAddXpPotion, getSlotState } from '@/lib/potion-rules';
+import { canAddCombatPotion, canAddXpPotion, getSlotState, RECOMMENDED_PRESET_ID } from '@/lib/potion-rules';
 import type { Preset } from '@/lib/potions-service';
 import { PotionCard } from '@/components/assault/PotionCard';
 import { LoadoutSummary } from '@/components/assault/LoadoutSummary';
@@ -31,8 +31,14 @@ const EMPTY: Loadout = { combat_potion_ids: [], xp_potion_ids: [] };
 
 export function PotionsClient({ combat, xp, presets }: Props) {
   const { user } = useAuth();
-  const [loadout, setLoadout] = useState<Loadout>(EMPTY);
-  const [name, setName] = useState('My loadout');
+  // Sandbox starts on the recommended preset (Mid) so new members see a sane default.
+  const recommendedPreset = presets.find((p) => p.id === RECOMMENDED_PRESET_ID);
+  const [loadout, setLoadout] = useState<Loadout>(() =>
+    recommendedPreset
+      ? { combat_potion_ids: [...recommendedPreset.combat_potion_ids], xp_potion_ids: [...recommendedPreset.xp_potion_ids] }
+      : EMPTY,
+  );
+  const [name, setName] = useState(recommendedPreset ? `${recommendedPreset.label} loadout` : 'My loadout');
   const [isDefault, setIsDefault] = useState(true);
   const [saved, setSaved] = useState<SavedLoadout[]>([]);
   const [saving, setSaving] = useState(false);
@@ -157,7 +163,12 @@ export function PotionsClient({ combat, xp, presets }: Props) {
       </Card>
 
       <div>
-        <h2 className="text-sm font-semibold mb-2">Preset tiers</h2>
+        <h2 className="text-sm font-semibold mb-1">Preset tiers</h2>
+        {recommendedPreset && (
+          <p className="text-xs text-muted-foreground mb-2">
+            ⭐ <strong>{recommendedPreset.label}</strong> is recommended for most members, it&apos;s loaded below by default.
+          </p>
+        )}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {presets.map((p) => (
             <PresetTierCard key={p.id} preset={p} combat={combat} xp={xp} onLoad={() => loadPreset(p)} />

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase-server';
+import { sharedXpEffect } from '@/lib/potion-rules';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +37,22 @@ export async function POST(req: NextRequest) {
   const body = (await req.json()) as SaveBody;
   if (!body?.name || !Array.isArray(body.combat_potion_ids) || !Array.isArray(body.xp_potion_ids)) {
     return NextResponse.json({ error: 'Invalid body' }, { status: 400 });
+  }
+  // Same-effect XP potions (hunting efficiency) can't be combined even across slots.
+  if (body.xp_potion_ids.length > 1) {
+    const { data: xpRows } = await supabase
+      .from('xp_potions')
+      .select('id, name, efficiency_value')
+      .in('id', body.xp_potion_ids);
+    const rows = xpRows ?? [];
+    for (let i = 0; i < rows.length; i++) {
+      for (let j = i + 1; j < rows.length; j++) {
+        const effect = sharedXpEffect(rows[i], rows[j]);
+        if (effect) {
+          return NextResponse.json({ error: `${rows[i].name} and ${rows[j].name} both give ${effect} — pick one.` }, { status: 400 });
+        }
+      }
+    }
   }
 
   if (body.is_default) {

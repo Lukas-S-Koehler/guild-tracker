@@ -3,7 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import type { CombatPotion, XpPotion } from '@/lib/potion-rules';
-import { loadoutCost } from '@/lib/potion-rules';
+import { loadoutCost, RECOMMENDED_PRESET_ID } from '@/lib/potion-rules';
 import type { Preset } from '@/lib/potions-service';
 
 interface Props {
@@ -28,15 +28,23 @@ export function PresetTierCard({ preset, combat, xp, onLoad }: Props) {
   );
   const combatById = new Map(combat.map((p) => [p.id, p]));
   const xpById = new Map(xp.map((p) => [p.id, p]));
+  const recommended = preset.id === RECOMMENDED_PRESET_ID;
   const names = [
     ...preset.combat_potion_ids.map((id) => combatById.get(id)?.name).filter(Boolean),
     ...preset.xp_potion_ids.map((id) => xpById.get(id)?.name).filter(Boolean),
   ];
 
   return (
-    <Card className={`border ${TIER_ACCENTS[preset.id] ?? 'border-border'}`}>
+    <Card className={`border ${TIER_ACCENTS[preset.id] ?? 'border-border'}${recommended ? ' ring-2 ring-amber-500/60' : ''}`}>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">{preset.label}</CardTitle>
+        <CardTitle className="text-base flex items-center gap-2">
+          {preset.label}
+          {recommended && (
+            <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-500">
+              ⭐ Recommended
+            </span>
+          )}
+        </CardTitle>
         {preset.description && <CardDescription className="text-xs">{preset.description}</CardDescription>}
       </CardHeader>
       <CardContent className="space-y-2">
@@ -51,7 +59,7 @@ export function PresetTierCard({ preset, combat, xp, onLoad }: Props) {
             Got a Potion of the Gods? Drop it in the Battle XP slot.
           </div>
         )}
-        <Button size="sm" variant="outline" className="w-full" onClick={onLoad}>Load into sandbox</Button>
+        <Button size="sm" variant={recommended ? 'default' : 'outline'} className="w-full" onClick={onLoad}>Load into sandbox</Button>
       </CardContent>
     </Card>
   );

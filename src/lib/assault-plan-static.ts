@@ -20,7 +20,7 @@ export const FIVE_PS: PrepStep[] = [
   { when: '-120m', text: 'Pool live, hunt final mobs (4k–10k+)' },
   { when: '-30m', text: 'Wrap hunting, clear inventory, pack food, check stance' },
   { when: '-10m', text: 'Combat gear, battle pet patted, perks active, shrine active, XP pots staged. Do NOT drink POTG yet.' },
-  { when: '-5m', text: 'Wraithbane / Strike Essence + combat stat pot (Thunderfury / Bladeburst). POTG in hand.' },
+  { when: '-5m', text: 'Wraithbane OR Strike Essence (not both, same effect) + combat stat pot (Thunderfury / Bladeburst). POTG in hand.' },
   { when: '0m', text: 'Chug POTG, select up to 6 mobs (lowest hits-to-kill), click Battle.' },
   { when: '+30m', text: 'Restack stat pots if not already active.' },
   { when: '+50m', text: "Final 8h restack while POTG + Pool still up. Don't lose the snapshot." },

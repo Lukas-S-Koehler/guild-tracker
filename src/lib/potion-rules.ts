@@ -1,3 +1,6 @@
+/** Preset tier we recommend to members; also the default loaded on web + Discord. */
+export const RECOMMENDED_PRESET_ID = 'mid';
+
 export type SlotKey = 'battle_xp' | 'combat_xp' | 'attack' | 'protection';
 
 export interface CombatPotion {
@@ -37,6 +40,18 @@ export interface XpPotion {
   is_free_common: boolean;
   description: string | null;
   last_price_sync: string | null;
+}
+
+/** XP potions sharing an effect can't be active together even across slots — the game
+ *  won't stack them. Currently: hunting efficiency (Wraithbane, Strike Essence, Dungeon Potion,
+ *  Dungeon Master's Tonic, …). Returns the shared effect's label, or null. */
+export function sharedXpEffect(
+  a: Pick<XpPotion, 'id' | 'efficiency_value'>,
+  b: Pick<XpPotion, 'id' | 'efficiency_value'>,
+): string | null {
+  if (a.id === b.id) return null;
+  if ((a.efficiency_value ?? 0) > 0 && (b.efficiency_value ?? 0) > 0) return 'hunting efficiency';
+  return null;
 }
 
 export interface Loadout {
@@ -126,6 +141,16 @@ export function canAddXpPotion(
       reason: `${slot === 'battle_xp' ? 'Battle XP' : 'Combat XP'} slot filled by ${occupant.name}.`,
     };
   }
+  for (const other of [state.battle_xp, state.combat_xp]) {
+    const effect = other ? sharedXpEffect(potion, other) : null;
+    if (other && effect) {
+      return {
+        ok: false,
+        conflictingSlot: slotForXpPotion(other),
+        reason: `Both give ${effect} — remove ${other.name} first.`,
+      };
+    }
+  }
   return { ok: true };
 }
 
@@ -153,6 +178,15 @@ export function violations(
     const p = cById.get(id);
     if (!p) continue;
     for (const slot of slotsForCombatPotion(p)) slotCount[slot]++;
+  }
+  const xpPicked = loadout.xp_potion_ids.map((id) => xById.get(id)).filter((p): p is XpPotion => !!p);
+  for (let i = 0; i < xpPicked.length; i++) {
+    for (let j = i + 1; j < xpPicked.length; j++) {
+      const effect = sharedXpEffect(xpPicked[i], xpPicked[j]);
+      if (effect) {
+        vs.push({ slot: slotForXpPotion(xpPicked[i]), message: `${xpPicked[i].name} and ${xpPicked[j].name} both give ${effect}; only one applies.` });
+      }
+    }
   }
   for (const slot of Object.keys(slotCount) as SlotKey[]) {
     if (slotCount[slot] > 1) {

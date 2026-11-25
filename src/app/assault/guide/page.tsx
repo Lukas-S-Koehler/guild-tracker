@@ -267,6 +267,7 @@ export default function AssaultGuidePage() {
           </div>
           <p className="text-xs text-muted-foreground">
             Can&apos;t stack two potions of the same type — Strike Essence + POTG both give Battle XP so only one applies.
+            Hunting-efficiency potions (Wraithbane, Strike Essence, Dungeon Potion, Dungeon Master&apos;s Tonic) don&apos;t stack either, even across slots — pick one.
           </p>
           <Link href="/assault/potions" className="inline-flex items-center gap-1 text-primary hover:underline text-sm">
             Open Potion Planner <ExternalLink className="h-3 w-3" />

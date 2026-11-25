@@ -24,7 +24,7 @@ import {
   type Preset,
   type SavedLoadout,
 } from '@/lib/potions-service';
-import { getSlotState, loadoutCost, type CombatPotion, type XpPotion } from '@/lib/potion-rules';
+import { sharedXpEffect, getSlotState, loadoutCost, RECOMMENDED_PRESET_ID, type CombatPotion, type XpPotion } from '@/lib/potion-rules';
 import { buildTemplateVars, renderTemplate, todayLaunchUnix, utcDateString } from '@/lib/assault-template';
 import { postToChannelReturnId, editOriginalInteractionResponse } from '@/lib/discord-api';
 import { handleAssaultStatsCommand } from '@/lib/assault-stats-discord';
@@ -101,8 +101,9 @@ export async function handleAssaultAutocomplete(interaction: Interaction) {
     const q = String(focused.value ?? '').toLowerCase();
     const filtered = presets
       .filter((p) => p.id.toLowerCase().includes(q) || p.label.toLowerCase().includes(q))
+      .sort((a, b) => Number(b.id === RECOMMENDED_PRESET_ID) - Number(a.id === RECOMMENDED_PRESET_ID))
       .slice(0, 25)
-      .map((p) => ({ name: p.label, value: p.id }));
+      .map((p) => ({ name: p.id === RECOMMENDED_PRESET_ID ? `${p.label} ⭐ Recommended` : p.label, value: p.id }));
     return NextResponse.json({ type: 8, data: { choices: filtered } });
   }
 
@@ -746,7 +747,7 @@ function renderPresetField(preset: Preset, combat: CombatPotion[], xp: XpPotion[
   );
   lines.push(`— ≈ **${cost.tradeable.toLocaleString()}g**${cost.hasUnpriced ? ' + free/unpriced' : ''}`);
   const value = lines.join('\n').slice(0, 1024) || '(empty)';
-  return { name: `${preset.label}`, value };
+  return { name: preset.id === RECOMMENDED_PRESET_ID ? `${preset.label} ⭐ Recommended` : preset.label, value };
 }
 
 // --------------------------------------------------------------------------
@@ -885,11 +886,13 @@ function renderPicker(opts: {
 
   const cost = loadoutCost(workingToIds(working), combat, xp);
   lines.push(`**Cost:** ≈ **${cost.tradeable.toLocaleString()}g**${cost.hasUnpriced ? ' + free/unpriced' : ''}`);
+  const rec = presets.find((p) => p.id === RECOMMENDED_PRESET_ID);
+  if (rec) lines.push(`⭐ Recommended: **${rec.label}** preset (loaded by default)`);
   lines.push(`\`state=${encodeState(working)}\``);
 
   // Presets + saved loadouts select
   const presetOptions = [
-    ...presets.map((p) => ({ label: `Preset: ${p.label}`.slice(0, 100), value: `preset:${p.id}`, description: (p.description ?? '').slice(0, 100) || undefined })),
+    ...presets.map((p) => ({ label: `Preset: ${p.label}${p.id === RECOMMENDED_PRESET_ID ? ' ⭐ Recommended' : ''}`.slice(0, 100), value: `preset:${p.id}`, description: (p.description ?? '').slice(0, 100) || undefined })),
     ...savedLoadouts.slice(0, 15).map((l) => ({ label: `Mine: ${l.name}${l.is_default ? ' ★' : ''}`.slice(0, 100), value: `saved:${l.id}` })),
   ].slice(0, 25);
 
@@ -982,9 +985,9 @@ function renderPicker(opts: {
 
 async function handlePotions(_sub: Option) {
   // Can't get member.user here — handled at top level; use anonymous initial state.
-  // Caller will supply user via interaction router; we build initial picker with default preset = free.
+  // Caller will supply user via interaction router; we build initial picker with the recommended preset (mid).
   const { combat, xp, presets } = await listPotions();
-  const base = presets.find((p) => p.id === 'free') ?? presets[0];
+  const base = presets.find((p) => p.id === RECOMMENDED_PRESET_ID) ?? presets[0];
   const working = base ? presetToWorking(base, combat, xp) : emptyWorking();
   const { content, components } = renderPicker({
     working, combat, xp, presets, savedLoadouts: [], title: 'Assault Potions — pick & save',
@@ -1022,6 +1025,11 @@ export async function handleAssaultPotionsComponent(interaction: {
     if (ids.combat_potion_ids.length === 0 && ids.xp_potion_ids.length === 0) {
       return ephemeral('Nothing to save — pick at least one potion.');
     }
+    const { xp: xpAll } = await listPotions();
+    const picked = ids.xp_potion_ids.map((id) => xpAll.find((p) => p.id === id)).filter((p): p is XpPotion => !!p);
+    if (picked.length === 2 && sharedXpEffect(picked[0], picked[1])) {
+      return ephemeral(`${picked[0].name} and ${picked[1].name} both give hunting efficiency — keep only one.`);
+    }
     const saved = await saveDiscordLoadout(user.id, { name, ...ids });
     return NextResponse.json({ type: 4, data: { content: `💾 Saved loadout **${saved.name}**. Run \`/assault potions\` again or \`/assault loadout name:${saved.name}\` to view.`, flags: 64 } });
   }
@@ -1029,6 +1037,8 @@ export async function handleAssaultPotionsComponent(interaction: {
   const { combat, xp, presets } = await listPotions();
   const savedLoadouts = await listLoadoutsForDiscordUser(user.id);
   let working = extractStateFromContent(interaction.message?.content);
+  const xById = new Map(xp.map((p) => [p.id, p]));
+  let notice: string | null = null;
 
   if (customId === 'pots_preset') {
     const v = interaction.data.values?.[0] ?? '';
@@ -1048,9 +1058,24 @@ export async function handleAssaultPotionsComponent(interaction: {
   } else if (customId === 'pots_combat_xp') {
     const v = interaction.data.values?.[0];
     working.combatXpId = v ? parseInt(v, 10) : null;
+    // Same-effect potion in the other slot (e.g. Wraithbane ↔ Strike Essence): newest pick wins.
+    const picked = working.combatXpId != null ? xById.get(working.combatXpId) : undefined;
+    const other = working.battleXpId != null ? xById.get(working.battleXpId) : undefined;
+    const effect = picked && other ? sharedXpEffect(picked, other) : null;
+    if (picked && other && effect) {
+      notice = `⚠️ Removed **${other.name}** — it and ${picked.name} both give ${effect}, only one applies.`;
+      working.battleXpId = null;
+    }
   } else if (customId === 'pots_battle_xp') {
     const v = interaction.data.values?.[0];
     working.battleXpId = v ? parseInt(v, 10) : null;
+    const picked = working.battleXpId != null ? xById.get(working.battleXpId) : undefined;
+    const other = working.combatXpId != null ? xById.get(working.combatXpId) : undefined;
+    const effect = picked && other ? sharedXpEffect(picked, other) : null;
+    if (picked && other && effect) {
+      notice = `⚠️ Removed **${other.name}** — it and ${picked.name} both give ${effect}, only one applies.`;
+      working.combatXpId = null;
+    }
   } else if (customId === 'pots_clear') {
     working = emptyWorking();
   } else if (customId === 'pots_default') {
@@ -1094,7 +1119,7 @@ export async function handleAssaultPotionsComponent(interaction: {
   const { content, components } = renderPicker({
     working, combat, xp, presets, savedLoadouts, title: 'Assault Potions — pick & save',
   });
-  return NextResponse.json({ type: 7, data: { content, components, flags: 64 } });
+  return NextResponse.json({ type: 7, data: { content: notice ? `${notice}\n${content}` : content, components, flags: 64 } });
 }
 
 function renderLoadoutEmbed(opts: {
