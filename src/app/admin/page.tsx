@@ -23,6 +23,7 @@ import LiveMessagesPanel from '@/components/admin/LiveMessagesPanel';
 import DataManagementPanel from '@/components/admin/DataManagementPanel';
 import PriceCachePanel from '@/components/admin/PriceCachePanel';
 import PetsPanel from '@/components/admin/PetsPanel';
+import RosterGoalsPanel from '@/components/admin/RosterGoalsPanel';
 import { AltSyncTools, DiscordSwitches } from '@/components/admin/SuperAdminTools';
 import { RoleSyncPanel } from '@/components/admin/RoleSyncPanel';
 
@@ -118,6 +119,7 @@ const TABS: HubTab[] = [
       { id: 'schedule', label: 'Schedule & pings', access: 'DEPUTY', render: () => <AssaultAdminPanel /> },
       { id: 'recruit', label: 'Recruiting', access: 'DEPUTY', render: () => <RecruitPanel /> },
       { id: 'potions', label: 'Potions', access: 'LEADER', render: () => <RefreshPotionMetaCard /> },
+      { id: 'roster-goals', label: 'Roster goals', access: 'LEADER', render: () => <RosterGoalsPanel /> },
     ],
   },
   {

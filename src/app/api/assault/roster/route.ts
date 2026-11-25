@@ -4,6 +4,8 @@ import { requireUser, isResponse } from '@/lib/user-auth';
 import { buildRoster, viewableRosterGuilds, PARTICIPATION, type Participation } from '@/lib/assault-roster';
 import { getAllClaimLocks } from '@/lib/account-service';
 import { huntingBow } from '@/lib/combat/hunting-gear';
+import { mergeGoals } from '@/lib/roster-goals';
+import { RANK, rankInGuild } from '@/lib/role-hierarchy';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +36,12 @@ export async function GET(req: NextRequest) {
     })
     .map((r) => r.member_id);
 
-  return NextResponse.json({ guilds, guild, roster, mine });
+  const [{ data: goalRow }, rank] = await Promise.all([
+    supabase.from('assault_roster_goals').select('goals').eq('guild_id', guild.id).maybeSingle(),
+    rankInGuild(supabase, user, guild.id),
+  ]);
+
+  return NextResponse.json({ guilds, guild, roster, mine, goals: mergeGoals(goalRow?.goals), canEditGoals: rank >= RANK.LEADER });
 }
 
 /**

@@ -10,12 +10,16 @@ import {
 } from 'lucide-react';
 import type { Participation, Roster, RosterGuild, RosterPotion, RosterRow } from '@/lib/assault-roster';
 import { HUNTING_BOWS, bowBlocker } from '@/lib/combat/hunting-gear';
+import type { GoalSet } from '@/lib/roster-goals';
+import { GoalsSection, GoalsView } from '@/components/assault/RosterGoals';
 
 interface Payload {
   guilds: RosterGuild[];
   guild: RosterGuild;
   roster: Roster;
   mine: string[];
+  goals: GoalSet;
+  canEditGoals: boolean;
 }
 
 /** In-game rarity colours (Legendary/Mythic match the gear colours on /combat). */
@@ -228,8 +232,8 @@ function Stat({ label, value }: { label: string; value: string | number }) {
 }
 
 function Drawer({
-  r, zoneName, isOwner, isStaff, onClose, onChanged,
-}: { r: RosterRow; zoneName: string | null; isOwner: boolean; isStaff: boolean; onClose: () => void; onChanged: () => void }) {
+  r, zoneName, isOwner, isStaff, goals, onClose, onChanged,
+}: { r: RosterRow; zoneName: string | null; isOwner: boolean; isStaff: boolean; goals: GoalSet | null; onClose: () => void; onChanged: () => void }) {
   const canEditBow = isOwner || isStaff;
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -292,6 +296,8 @@ function Drawer({
             Pets are hidden in game settings, so this shows the last known list. Unhide them, or add your own API key in /setup.
           </p>
         )}
+
+        {goals && <GoalsSection r={r} goals={goals} />}
 
         {/* ── Battle ── */}
         <section className="rounded-lg border p-3 space-y-3">
@@ -485,6 +491,7 @@ export default function AssaultRosterPage() {
   const [open, setOpen] = useState<string | null>(null);
   const [showOthers, setShowOthers] = useState(false);
   const [filter, setFilter] = useState<'all' | 'auto' | 'opt_in'>('all');
+  const [view, setView] = useState<'lineup' | 'goals'>('lineup');
   const [refreshing, setRefreshing] = useState<string | null>(null);
 
   const load = useCallback(async (gid: string | null, zid: number | null) => {
@@ -565,10 +572,28 @@ export default function AssaultRosterPage() {
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex rounded-md border p-0.5 mr-1">
+          {(['lineup', 'goals'] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => {
+                setView(v);
+                // Goals are always measured at the guild's assault zone.
+                if (v === 'goals' && !roster.zone.isTracked) setZoneId(null);
+              }}
+              className={`rounded px-3 py-1 text-xs font-medium ${view === v ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              {v === 'lineup' ? 'Lineup' : 'Goals'}
+            </button>
+          ))}
+        </div>
         <MapPin className="h-4 w-4 text-muted-foreground" />
         <select
-          className="h-9 rounded-md border bg-background px-2 text-sm max-w-full"
+          className="h-9 rounded-md border bg-background px-2 text-sm max-w-full disabled:opacity-60"
           value={roster.zone.id ?? ''}
+          disabled={view === 'goals'}
+          title={view === 'goals' ? "Goals are measured at the guild's assault zone" : undefined}
           onChange={(e) => setZoneId(Number(e.target.value) || null)}
         >
           {roster.zones.map((z) => (
@@ -611,6 +636,14 @@ export default function AssaultRosterPage() {
         />
       </div>
 
+      {view === 'goals' ? (
+        roster.zone.isTracked || !roster.trackedZoneId ? (
+          <GoalsView rows={active} goals={data.goals} onOpen={(r) => setOpen(r.member_id)} />
+        ) : (
+          <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin" /></div>
+        )
+      ) : (
+      <>
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -656,6 +689,9 @@ export default function AssaultRosterPage() {
         </Card>
       )}
 
+      </>
+      )}
+
       {others.length > 0 && (
         <Card>
           <CardHeader className="pb-2 cursor-pointer" onClick={() => setShowOthers((v) => !v)}>
@@ -683,6 +719,7 @@ export default function AssaultRosterPage() {
           zoneName={roster.zone.name}
           isOwner={data.mine.includes(current.member_id)}
           isStaff={data.guild.isStaff}
+          goals={roster.zone.isTracked ? data.goals : null}
           onClose={() => setOpen(null)}
           onChanged={() => load(data.guild.id, zoneId)}
         />

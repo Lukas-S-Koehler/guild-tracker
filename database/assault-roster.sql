@@ -71,3 +71,16 @@ ALTER TABLE custom_pets DROP CONSTRAINT IF EXISTS custom_pets_quality_check;
 ALTER TABLE custom_pets ADD CONSTRAINT custom_pets_quality_check
   CHECK (quality IN ('Standard', 'Refined', 'Premium', 'Epic', 'Event', 'Legendary', 'Mythic'));
 ALTER TABLE custom_pets ENABLE ROW LEVEL SECURITY;
+
+-- ============================================================================
+-- Step 4: goal tiers per assault guild (Admin → Assault → Roster goals). Safe to re-run.
+-- goals = { tracks: { <track>: { thresholds: [bronze, silver, gold, crystal|null], required: 0-4 } } }
+-- Missing tracks fall back to the defaults in src/lib/roster-goals.ts.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS assault_roster_goals (
+  guild_id TEXT PRIMARY KEY,
+  goals JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE assault_roster_goals ENABLE ROW LEVEL SECURITY;
