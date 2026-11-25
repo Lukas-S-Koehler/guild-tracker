@@ -213,7 +213,8 @@ interface RosterInteraction {
 /** /roster [ign] [guild] — deferred (building the roster takes a few seconds). */
 /**
  * /roster [ign] [guild]: deferred (building the roster takes a few seconds).
- * No options = your own setup card(s) (user rule); guild: = that guild's summary; ign: = that member.
+ * No options = your own setup card: your highest-CL roster character (user rule); guild: = that
+ * guild's summary; ign: = that member (also your other characters).
  * Falls back to your guild's summary when none of your characters is on a roster.
  */
 export function handleRosterCommand(i: RosterInteraction) {
@@ -230,14 +231,19 @@ export function handleRosterCommand(i: RosterInteraction) {
         const { chars: mine } = await discordRosterCharacters(discordId, supabase);
         const ownIds = new Set(mine.map((c) => c.member_id));
 
-        // Which characters get a setup card: the named one, or (no options) all of yours.
+        // Which character gets a setup card: the named one, or (no options) your highest-CL one.
         let targets: { member_id: string; guild_id: string }[] = [];
+        let others: string[] = [];
         if (ign) {
           const { data } = await supabase.from('assault_roster').select('member_id, guild_id, ign').ilike('ign', ign).maybeSingle();
           if (!data) throw new Error(`${ign} isn't on an assault roster (DE / DI).`);
           targets = [{ member_id: data.member_id as string, guild_id: String(data.guild_id) }];
         } else if (!wantGuild && mine.length) {
-          targets = mine.slice(0, 4).map((c) => ({ member_id: c.member_id, guild_id: c.guild_id }));
+          const { data: lv } = await supabase.from('members').select('id, combat_level').in('id', mine.map((c) => c.member_id));
+          const cl = new Map((lv ?? []).map((m) => [m.id as string, (m.combat_level as number | null) ?? 0]));
+          const main = [...mine].sort((a, b) => (cl.get(b.member_id) ?? 0) - (cl.get(a.member_id) ?? 0))[0];
+          targets = [{ member_id: main.member_id, guild_id: main.guild_id }];
+          others = mine.filter((c) => c.member_id !== main.member_id).map((c) => c.ign);
         }
 
         if (targets.length) {
@@ -257,7 +263,7 @@ export function handleRosterCommand(i: RosterInteraction) {
           }
           if (!embeds.length) throw new Error('Not synced yet.');
           payload = {
-            content: !ign && mine.length > 4 ? `-# Showing 4 of your ${mine.length} characters. Use \`/roster ign:\` for the others.` : undefined,
+            content: others.length ? `-# Also yours: ${others.join(', ')}. Use \`/roster ign:\` to see them.` : undefined,
             embeds,
             components: [...rows, link('Open the roster', '/assault/roster')].slice(0, 5),
           };
