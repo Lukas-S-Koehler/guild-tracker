@@ -106,8 +106,8 @@ export async function POST(req: NextRequest) {
             results.push({ guild_id: config.guild_id, step_key: step.step_key, launch_date: launchDate, ok: true, skipped: 'claimed by another run' });
             continue;
           }
-          // Pre-launch notices carry RSVP buttons for this wave (Assault Roster step 6).
-          const res = step.offset_minutes < 0
+          // Only day-ahead notices (24h+) carry RSVP buttons; the hours-before pings are prep calls, RSVP is closed by then.
+          const res = step.offset_minutes <= -1440
             ? await postToChannelRich(config.announcement_channel_id, { content, components: rsvpComponents(config.guild_id, launchUnix) })
             : await postToChannelReturnId(config.announcement_channel_id, content);
           if (!res.ok) {
