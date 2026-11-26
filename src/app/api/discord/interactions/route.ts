@@ -10,7 +10,7 @@ import { verifyDiscordSignature, sendDirectMessage, registerWarnCommand, registe
 import { handleAssaultCommand, handleAssaultAutocomplete, handleAssaultChecklistComponent, handleAssaultPotionsComponent } from '@/lib/assault-discord';
 import { handleRaidCommand } from '@/lib/raid-discord';
 import { handleGuideCommand } from '@/lib/guide-discord';
-import { handleNetworkBoard, handlePass, handlePassAutocomplete, handlePassHow, handleLevel, handleHubShare, HOW_ID, handleAway, handleKudos, handleKudosAutocomplete, handleClaim, handleGuild, handleGuildAutocomplete, handleHelp, handleMe, handleProfile, handleProfileAutocomplete, registerHubCommands, type HubInteraction } from '@/lib/hub-discord';
+import { handleNetworkBoard, handleAchievements, handleAchievementsSelect, handlePass, handlePassAutocomplete, handlePassHow, handleLevel, handleHubShare, HOW_ID, handleAway, handleKudos, handleKudosAutocomplete, handleClaim, handleGuild, handleGuildAutocomplete, handleHelp, handleMe, handleProfile, handleProfileAutocomplete, registerHubCommands, type HubInteraction } from '@/lib/hub-discord';
 import { routePartyInteraction, type PartyInteraction } from '@/lib/party-discord';
 import { getDiscordProfile, formatCharacterLine } from '@/lib/lookup-service';
 import { switchAccountMain } from '@/lib/alt-switch';
@@ -176,10 +176,11 @@ export async function POST(req: NextRequest) {
     const name = interaction.data?.name;
     if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && name === 'guild') return handleGuildAutocomplete(hub);
     if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && name === 'pass' && hub.data.options?.find((o) => o.focused)?.name === 'month') return handlePassAutocomplete(hub);
-    if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && (name === 'profile' || name === 'pass' || name === 'level')) return handleProfileAutocomplete(hub);
+    if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && (name === 'profile' || name === 'pass' || name === 'level' || name === 'achievements')) return handleProfileAutocomplete(hub);
     if (interaction.type === INTERACTION_TYPE_COMPONENT && typeof interaction.data?.custom_id === 'string') {
       if (interaction.data.custom_id.startsWith('hubshare:')) return handleHubShare(hub);
       if (interaction.data.custom_id === HOW_ID) return handlePassHow(hub);
+      if (interaction.data.custom_id.startsWith('hubach:')) return handleAchievementsSelect(hub);
     }
     if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && name === 'kudos') return handleKudosAutocomplete(hub);
     if (interaction.type === INTERACTION_TYPE_AUTOCOMPLETE && name === 'roster') return handleRosterAutocomplete(interaction as Parameters<typeof handleRosterAutocomplete>[0]);
@@ -192,6 +193,7 @@ export async function POST(req: NextRequest) {
       if (name === 'profile') return handleProfile(hub);
       if (name === 'pass') return handlePass(hub);
       if (name === 'level') return handleLevel(hub);
+      if (name === 'achievements') return handleAchievements(hub);
       if (name === 'away') return handleAway(hub);
       if (name === 'kudos') return handleKudos(hub);
       if (name === 'roster') return handleRosterCommand(interaction as Parameters<typeof handleRosterCommand>[0]);

@@ -31,6 +31,7 @@ import { getAccountMemberIds } from '@/lib/alt-graph';
 import { accountDiscordLevel, accountPass } from '@/lib/dream-pass-account';
 import { chatChannels, memberChannels } from '@/lib/discord-chat';
 import { PARTY_COMMAND_DEFS } from '@/lib/party-discord';
+import { ACH_SELECT_PREFIX, CATEGORY_CHOICES, achievementsPayload } from '@/lib/achievements-discord-cmd';
 import { PARTY_STAFF_ROLE_ID } from '@/lib/party';
 import { FIRST_SEASON, CHAT_COOLDOWN_S, CHAT_DAY_MIN, CHAT_MIN_CHARS, MAX_LEVEL, PASS_SOURCES, PASS_XP, SOURCE_ORDER, currentSeason, seasonEnd, seasonLabel, xpForLevel } from '@/lib/dream-pass';
 
@@ -84,7 +85,9 @@ function withShare(payload: Payload, card: string, arg = ''): Payload {
   if (!payload.embeds) return payload; // errors / hints stay private, nothing to share
   const button = { type: 2, style: 2, label: 'Share', emoji: { name: '📢' }, custom_id: `${SHARE_PREFIX}${card}:${arg}`.slice(0, 100) };
   const rows = ((payload.components as Array<{ type: number; components: unknown[] }> | undefined) ?? []).map((r) => ({ ...r, components: [...r.components] }));
-  if (rows[0] && rows[0].components.length < 5) rows[0].components.push(button);
+  // A select menu fills its whole row, so only add to a row of buttons.
+  const open = rows.find((r) => r.components.length < 5 && !r.components.some((c) => (c as { type?: number }).type === 3));
+  if (open) open.components.push(button);
   else rows.push(row(button));
   return { ...payload, components: rows };
 }
@@ -112,6 +115,7 @@ export function handleHubShare(i: HubInteraction) {
       : card === 'profile' ? await profilePayload(supabase, arg)
       : card === 'pass' ? await passPayload(supabase, arg.split('|')[0]!, arg.split('|')[1] || undefined)
       : card === 'level' ? await levelPayload(supabase, arg)
+      : card === 'achievements' ? await achievementsPayload(supabase, arg.split('|')[0]!, arg.split('|')[1] || undefined)
       : { payload: { content: 'This card can no longer be shared.' } };
     // Public copy: drop the private-only buttons (Share, How it works); keep the links.
     const rows = ((payload.components as Array<{ type: number; components: Array<{ custom_id?: string }> }> | undefined) ?? [])
@@ -540,6 +544,40 @@ async function passPayload(supabase: SupabaseClient, ign: string, season?: strin
   };
 }
 
+// ─── /achievements (F9) ──────────────────────────────────────────────────────
+
+export function handleAchievements(i: HubInteraction) {
+  const u = caller(i);
+  if (!u) return ephemeral('Could not identify you.');
+  const opt = (n: string) => i.data.options?.find((o) => o.name === n)?.value;
+  const ignOpt = String(opt('ign') ?? '').trim();
+  const target = (opt('user') as string | undefined) ?? (ignOpt ? null : u.id);
+  const category = String(opt('category') ?? '') || undefined;
+  return privateCard(i, 'achievements', async () => {
+    const supabase = createAdminClient();
+    const acc = await resolveAccount(supabase, u, ignOpt, target);
+    if ('error' in acc) return { payload: { content: acc.error } };
+    return { ...(await achievementsPayload(supabase, acc.ign, category)), arg: `${acc.ign}|${category ?? ''}` };
+  });
+}
+
+/** Category select on an /achievements card: re-render the same (private) message in place. */
+export function handleAchievementsSelect(i: HubInteraction & { data: { values?: string[] } }) {
+  const ign = String(i.data.custom_id ?? '').slice(ACH_SELECT_PREFIX.length);
+  const category = i.data.values?.[0];
+  waitUntil(
+    (async () => {
+      try {
+        const { payload } = await achievementsPayload(createAdminClient(), ign, category);
+        await editOriginalInteractionResponse(i.application_id, i.token, { allowed_mentions: { parse: [] }, ...withShare(payload, 'achievements', `${ign}|${category ?? ''}`) });
+      } catch (err) {
+        console.error('[hub-discord] achievements select', err);
+      }
+    })()
+  );
+  return NextResponse.json({ type: 6 }); // deferred update of the message the menu sits on
+}
+
 // ─── /level (step 15b, Discord level) ────────────────────────────────────────
 
 export function handleLevel(i: HubInteraction) {
@@ -772,6 +810,7 @@ const MEMBER_HELP: [string, string[]][] = [
     '`/profile` someone\'s profile (`ign:` or `user:`, empty = yours): rank, achievements, stats',
     '`/pass` your Dream Pass: season level and XP per source (`month:` for past months, ℹ️ button: how to earn + which channels count)',
     '`/level` your Discord level from chatting and bumping',
+    '`/achievements` your achievements by category, closest to unlock (`ign:`/`user:` for someone else)',
     '-# Personal cards reply privately; press 📢 **Share** to post them in the channel.',
     '`/away set days:` holiday up to 14 days, the daily check skips you · `/away end` · `/away list`',
     '`/kudos give user:`/`ign:` `reason:` thank someone (3 per week, weekly shoutout) · `/kudos me` yours',
@@ -880,6 +919,15 @@ export async function registerHubCommands() {
         { name: 'ign', type: 3, description: 'Character name (any character of the account)', required: false, autocomplete: true },
         { name: 'user', type: 6, description: 'Discord member', required: false },
         { name: 'month', type: 3, description: 'A past month (default: this month)', required: false, autocomplete: true },
+      ],
+    },
+    {
+      name: 'achievements',
+      description: 'Achievements: progress per category, closest to unlock, latest (yours if empty)',
+      options: [
+        { name: 'ign', type: 3, description: 'Character name (any character of the account)', required: false, autocomplete: true },
+        { name: 'user', type: 6, description: 'Discord member', required: false },
+        { name: 'category', type: 3, description: 'Show one category in full', required: false, choices: CATEGORY_CHOICES },
       ],
     },
     {
