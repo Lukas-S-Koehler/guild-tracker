@@ -15,7 +15,9 @@ import {
   applyBuffs,
   buildCharacterStats,
   GEAR_SLOTS,
-  HAND_SLOT_CONFLICTS,
+  equipGear,
+  itemSlotOf,
+  slotVisible,
   MAX_TIER,
   NO_BUFFS,
   slayerByEnemy,
@@ -1145,15 +1147,7 @@ function GearCard({
   critDamage: number;
 }) {
   const bySlot = new Map(gear.map((g) => [g.slot, g]));
-  const equip = (slot: string, itemId: number | null) => {
-    let next = gear.filter((g) => g.slot !== slot);
-    if (itemId) {
-      const conflicts = HAND_SLOT_CONFLICTS[slot] ?? [];
-      next = next.filter((g) => !conflicts.includes(g.slot));
-      next.push({ slot, gear_item_id: itemId, tier: 1 });
-    }
-    setGear(next);
-  };
+  const equip = (slot: string, itemId: number | null) => setGear(equipGear(gear, slot, itemId));
   const setTier = (slot: string, tier: number) => setGear(gear.map((g) => (g.slot === slot ? { ...g, tier } : g)));
 
   return (
@@ -1172,7 +1166,7 @@ function GearCard({
           for anything else use Calibrate on the sheet.
         </p>
         <div className="grid gap-1.5">
-          {GEAR_SLOTS.map(({ key, label }) => {
+          {GEAR_SLOTS.filter(({ key }) => slotVisible(key, gear)).map(({ key, label }) => {
             const sel = bySlot.get(key);
             const item = sel ? catalog.find((c) => c.id === sel.gear_item_id) : undefined;
             const maxTier = item?.max_tier ?? MAX_TIER[item?.quality ?? 'legendary'] ?? 16;
@@ -1188,7 +1182,7 @@ function GearCard({
                 <div className="flex-1 min-w-0 space-y-0.5">
                   <Select value={sel?.gear_item_id ?? ''} onChange={(v) => equip(key, v ? Number(v) : null)} className="h-7 text-xs">
                     <option value="">{label}: empty</option>
-                    {catalog.filter((c) => c.slot === key).map((c) => (
+                    {catalog.filter((c) => c.slot === itemSlotOf(key)).map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name} · CL{c.combat_level}{c.combat_level > combatLevel ? ' 🔒' : ''}
                       </option>

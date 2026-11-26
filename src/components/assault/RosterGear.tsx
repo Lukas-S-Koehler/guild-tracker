@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Loader2, Pencil, Shield } from 'lucide-react';
 import type { RosterGear, RosterRow } from '@/lib/assault-roster';
-import { GEAR_SLOTS, HAND_SLOT_CONFLICTS, MAX_TIER, type GearSelection } from '@/lib/combat/character-stats';
+import { GEAR_SLOTS, MAX_TIER, equipGear, itemSlotOf, slotVisible, type GearSelection } from '@/lib/combat/character-stats';
 
 interface CatalogItem {
   id: number;
@@ -88,15 +88,8 @@ export function GearSection({
   // Empty can be saved on purpose ("nothing equipped") while gear doesn't count as set yet.
   const saveEmpty = !draft.length && !r.battle.gearSet;
 
-  const equip = (slot: string, itemId: number | null) => {
-    let next = draft.filter((g) => g.slot !== slot);
-    if (itemId) {
-      const conflicts = HAND_SLOT_CONFLICTS[slot] ?? [];
-      next = next.filter((g) => !conflicts.includes(g.slot));
-      next.push({ slot, gear_item_id: itemId, tier: savedBySlot.get(slot)?.gear_item_id === itemId ? savedBySlot.get(slot)!.tier : 1 });
-    }
-    setDraft(next);
-  };
+  const equip = (slot: string, itemId: number | null) =>
+    setDraft(equipGear(draft, slot, itemId, itemId && savedBySlot.get(slot)?.gear_item_id === itemId ? savedBySlot.get(slot)!.tier : 1));
   const setTier = (slot: string, tier: number) => setDraft(draft.map((g) => (g.slot === slot ? { ...g, tier } : g)));
 
   const save = async () => {
@@ -168,7 +161,7 @@ export function GearSection({
       ) : (
         <div className="space-y-2">
           <div className="grid gap-1.5">
-            {GEAR_SLOTS.map(({ key, label: slotLabel }) => {
+            {GEAR_SLOTS.filter(({ key }) => slotVisible(key, draft)).map(({ key, label: slotLabel }) => {
               const sel = draftBySlot.get(key);
               const item = sel ? byId.get(sel.gear_item_id) : undefined;
               const maxTier = item?.max_tier ?? MAX_TIER[item?.quality ?? 'legendary'] ?? 16;
@@ -181,7 +174,7 @@ export function GearSection({
                     onChange={(e) => equip(key, e.target.value ? Number(e.target.value) : null)}
                   >
                     <option value="">{slotLabel}: empty</option>
-                    {catalog.filter((c) => c.slot === key).map((c) => (
+                    {catalog.filter((c) => c.slot === itemSlotOf(key)).map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name} · CL{c.combat_level}{c.combat_level > (r.combat_level ?? 0) ? ' 🔒' : ''}
                       </option>

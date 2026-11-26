@@ -7,6 +7,7 @@ import {
   TRACKS, evaluateGoals, prerequisites, trackWeight, type GoalSet, type TrackId, type TrackResult,
 } from './roster-goals';
 import { HUNTING_BOWS, MYTHIC_EGG_ESTIMATE, PET_EGGS, bowBlocker, eggItemName } from './combat/hunting-gear';
+import { slotLabelOf } from './combat/character-stats';
 import { PET_STATS, petTier } from './combat/pet-data';
 import { petHuntEstimate, HUNT_STABLE_SIZE } from './combat/pet-hunting';
 
@@ -374,7 +375,7 @@ export function computeMoves(r: RosterRow, ctx: MoveContext): Move[] {
           ? [{
               track: 'battle', toTier: r.battle.upgrade.toTier, kind: 'buy',
               title: `Buy ${r.battle.upgrade.item}`,
-              detail: `${r.battle.upgrade.slot} slot, tier 1 → ${res.next}`,
+              detail: `${slotLabelOf(r.battle.upgrade.slot)} slot, tier 1 → ${res.next}`,
               cost: r.battle.upgrade.price,
             }]
           : res.tier >= 3 && (r.combat_level ?? 0) < 100

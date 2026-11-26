@@ -23,7 +23,7 @@ import { battleTier, mergeGoals, type GoalSet } from '@/lib/roster-goals';
 import { bowOptions, computeMoves, huntEggOptions, priceBattleOptions, stableAtL100, type BowOption, type BattleSpeciesOption, type EggOption, type Move } from '@/lib/roster-moves';
 import { hasMarketAccess } from '@/lib/combat/class-talents';
 import { effectiveRsvp, nextWaveUnix, rsvpsForWave, type EffectiveRsvp, type RsvpStatus } from '@/lib/assault-rsvp';
-import { GEAR_SLOTS, HAND_SLOT_CONFLICTS } from '@/lib/combat/character-stats';
+import { GEAR_SLOTS, equipGear, selectionSlotsFor } from '@/lib/combat/character-stats';
 import { withPotions } from '@/app/combat/potion-slots';
 import type { PotionRow } from '@/app/combat/types';
 
@@ -695,18 +695,23 @@ export function buildRosterRow(r: RosterSnapshot, ctx: RosterRowContext): Roster
     const curTier = battleTier(enemyHits.map((e) => e.hits ?? 99), canPick, curMax2, goals);
     if (curTier < 5 && !(curTier >= 3 && !canPick)) {
       const pet = bestPet ? { species: bestPet.species, level: bestPet.level, evolution: bestPet.evolution } : null;
-      const owned = new Set(gear.map((g) => g.gear_item_id));
+      const owned = new Set(gear.map((g) => `${g.slot}:${g.gear_item_id}`));
       for (const item of Array.from(gearCatalog.values())) {
-        if (item.combat_level > cl || owned.has(item.id)) continue;
+        if (item.combat_level > cl) continue;
         const price = priceOf(item.name);
         if (!price || (upgrade && price >= upgrade.price)) continue;
-        const clears = new Set([item.slot, ...(HAND_SLOT_CONFLICTS[item.slot] ?? [])]);
-        const swapped = [...gear.filter((g) => !clears.has(g.slot)), { slot: item.slot, gear_item_id: item.id, tier: 1 }];
-        const f = fighterWith(pet, swapped);
-        const hs = hitsAt(f, zoneEnemies, slayer, null).map((m) => m.hits ?? 99);
-        const m2 = Math.max(...hs) <= 2 ? max2HitLevel(f, zoneEnemies, slayer, scale.max, scale.allowed, scale.fixed) : null;
-        const t = battleTier(hs, canPick, m2, goals);
-        if (t > curTier) upgrade = { item: item.name, slot: item.slot, price, toTier: t };
+        // A dagger can go in either hand; the off hand only next to a main-hand dagger.
+        for (const slot of selectionSlotsFor(item.slot)) {
+          if (owned.has(`${slot}:${item.id}`)) continue;
+          if (slot === 'offhand_dagger' && !gear.some((g) => g.slot === 'dagger')) continue;
+          if (upgrade && price >= upgrade.price) break;
+          const swapped = equipGear(gear, slot, item.id);
+          const f = fighterWith(pet, swapped);
+          const hs = hitsAt(f, zoneEnemies, slayer, null).map((m) => m.hits ?? 99);
+          const m2 = Math.max(...hs) <= 2 ? max2HitLevel(f, zoneEnemies, slayer, scale.max, scale.allowed, scale.fixed) : null;
+          const t = battleTier(hs, canPick, m2, goals);
+          if (t > curTier) upgrade = { item: item.name, slot, price, toTier: t };
+        }
       }
     }
   }
@@ -722,23 +727,23 @@ export function buildRosterRow(r: RosterSnapshot, ctx: RosterRowContext): Roster
       .map((i) => ({ item: i, price: priceOf(i.name) || null }));
     const hitsOf = (set: GearSelection[]) => hitsAt(fighterWith(pet, set), zoneEnemies, slayer, null).map((m) => m.hits ?? 99);
     const over = (hs: number[]) => hs.reduce((t, h) => t + Math.max(0, h - 4), 0);
-    const withItem = (set: GearSelection[], id: number, slot: string) => {
-      const clears = new Set([slot, ...(HAND_SLOT_CONFLICTS[slot] ?? [])]);
-      return [...set.filter((g) => !clears.has(g.slot)), { slot, gear_item_id: id, tier: 1 }];
-    };
+
     let set: GearSelection[] = [];
     let cur = over(hitsOf(set));
     for (let step = 0; step < 10 && cur > 0; step++) {
       let best: { set: GearSelection[]; left: number; score: number; price: number } | null = null;
       for (const { item, price } of items) {
-        if (set.some((g) => g.gear_item_id === item.id)) continue;
-        const next = withItem(set, item.id, item.slot);
-        const left = over(hitsOf(next));
-        if (left >= cur) continue;
-        const cost = price ?? UNPRICED;
-        // Finishing beats progress; then gain per gold; ties → cheaper.
-        const score = (left === 0 ? 1e20 / cost : 0) + (cur - left) / cost;
-        if (!best || score > best.score || (score === best.score && cost < best.price)) best = { set: next, left, score, price: cost };
+        for (const slot of selectionSlotsFor(item.slot)) {
+          if (set.some((g) => g.slot === slot && g.gear_item_id === item.id)) continue;
+          if (slot === 'offhand_dagger' && !set.some((g) => g.slot === 'dagger')) continue;
+          const next = equipGear(set, slot, item.id);
+          const left = over(hitsOf(next));
+          if (left >= cur) continue;
+          const cost = price ?? UNPRICED;
+          // Finishing beats progress; then gain per gold; ties → cheaper.
+          const score = (left === 0 ? 1e20 / cost : 0) + (cur - left) / cost;
+          if (!best || score > best.score || (score === best.score && cost < best.price)) best = { set: next, left, score, price: cost };
+        }
       }
       if (!best) break;
       set = best.set;
@@ -748,7 +753,8 @@ export function buildRosterRow(r: RosterSnapshot, ctx: RosterRowContext): Roster
       // Prune: most expensive first, drop anything not needed.
       const priceOfId = (id: number) => items.find((x) => x.item.id === id)?.price ?? UNPRICED;
       for (const g of [...set].sort((a, b) => priceOfId(b.gear_item_id) - priceOfId(a.gear_item_id))) {
-        const without = set.filter((x) => x.slot !== g.slot);
+        if (!set.some((x) => x.slot === g.slot)) continue;
+        const without = equipGear(set, g.slot, null);
         if (over(hitsOf(without)) === 0) set = without;
       }
     }

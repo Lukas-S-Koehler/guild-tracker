@@ -3,7 +3,7 @@
  * owner's editor on /assault/eligibility. One validation, one write path.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { GEAR_SLOTS, HAND_SLOT_CONFLICTS, MAX_TIER, type GearSelection } from '@/lib/combat/character-stats';
+import { GEAR_SLOTS, HAND_SLOT_CONFLICTS, MAX_TIER, itemSlotOf, type GearSelection } from '@/lib/combat/character-stats';
 
 /** Known slots, one item per slot, item fits the slot, tier in range, no hand-slot clashes. */
 export async function validateGear(
@@ -19,7 +19,7 @@ export async function validateGear(
   const gear: GearSelection[] = [];
   for (const g of input) {
     const item = itemById.get(Number(g.gear_item_id));
-    if (!slots.has(g.slot) || !item || item.slot !== g.slot) return { ok: false, error: `Bad item for ${g.slot}` };
+    if (!slots.has(g.slot) || !item || item.slot !== itemSlotOf(g.slot)) return { ok: false, error: `Bad item for ${g.slot}` };
     if (gear.some((x) => x.slot === g.slot)) return { ok: false, error: `Two items in ${g.slot}` };
     const maxTier = item.max_tier ?? MAX_TIER[item.quality] ?? 16;
     const tier = Math.round(Number(g.tier));
@@ -29,6 +29,10 @@ export async function validateGear(
   for (const g of gear) {
     const clash = (HAND_SLOT_CONFLICTS[g.slot] ?? []).find((s) => gear.some((x) => x.slot === s));
     if (clash) return { ok: false, error: `${g.slot} can't be worn with ${clash}` };
+  }
+  // A lone off-hand dagger is a main-hand dagger.
+  if (!gear.some((g) => g.slot === 'dagger')) {
+    for (const g of gear) if (g.slot === 'offhand_dagger') g.slot = 'dagger';
   }
   return { ok: true, gear };
 }

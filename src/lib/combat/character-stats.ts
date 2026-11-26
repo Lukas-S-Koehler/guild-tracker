@@ -62,24 +62,65 @@ export interface PetConfig {
 }
 
 export const GEAR_SLOTS = [
-  { key: 'sword', label: 'Sword' },
-  { key: 'dagger', label: 'Dagger' },
-  { key: 'bow', label: 'Bow' },
-  { key: 'shield', label: 'Shield' },
-  { key: 'helmet', label: 'Helmet' },
-  { key: 'chestplate', label: 'Chestplate' },
-  { key: 'gauntlets', label: 'Gauntlets' },
-  { key: 'greaves', label: 'Greaves' },
-  { key: 'boots', label: 'Boots' },
+  { key: 'sword', label: 'Sword', itemSlot: 'sword' },
+  { key: 'dagger', label: 'Dagger', itemSlot: 'dagger' },
+  { key: 'offhand_dagger', label: 'Off-hand dagger', itemSlot: 'dagger' },
+  { key: 'bow', label: 'Bow', itemSlot: 'bow' },
+  { key: 'shield', label: 'Shield', itemSlot: 'shield' },
+  { key: 'helmet', label: 'Helmet', itemSlot: 'helmet' },
+  { key: 'chestplate', label: 'Chestplate', itemSlot: 'chestplate' },
+  { key: 'gauntlets', label: 'Gauntlets', itemSlot: 'gauntlets' },
+  { key: 'greaves', label: 'Greaves', itemSlot: 'greaves' },
+  { key: 'boots', label: 'Boots', itemSlot: 'boots' },
 ] as const;
 
-/** Equipping one of these clears the listed slots. */
+export function slotLabelOf(slot: string): string {
+  return GEAR_SLOTS.find((s) => s.key === slot)?.label ?? slot;
+}
+
+/** Catalog item slot (gear_items.slot) a selection slot takes: both dagger slots take daggers. */
+export function itemSlotOf(selectionSlot: string): string {
+  return GEAR_SLOTS.find((s) => s.key === selectionSlot)?.itemSlot ?? selectionSlot;
+}
+
+/** Selection slots a catalog item can go in (a dagger: main hand or off hand). */
+export function selectionSlotsFor(itemSlot: string): string[] {
+  return GEAR_SLOTS.filter((s) => s.itemSlot === itemSlot).map((s) => s.key);
+}
+
+/**
+ * Hands: sword + shield, dagger + dagger, dagger + shield, or a bow (two-handed).
+ * Equipping one of these clears the listed slots.
+ */
 export const HAND_SLOT_CONFLICTS: Record<string, string[]> = {
-  sword: ['dagger', 'bow'],
-  shield: ['dagger', 'bow'],
-  dagger: ['sword', 'shield', 'bow'],
-  bow: ['sword', 'shield', 'dagger'],
+  sword: ['dagger', 'offhand_dagger', 'bow'],
+  dagger: ['sword', 'bow'],
+  shield: ['offhand_dagger', 'bow'],
+  offhand_dagger: ['sword', 'shield', 'bow'],
+  bow: ['sword', 'dagger', 'offhand_dagger', 'shield'],
 };
+
+/** The off-hand dagger only shows once a main-hand dagger is on (or one is already there). */
+export function slotVisible(slot: string, gear: Pick<GearSelection, 'slot'>[]): boolean {
+  if (slot !== 'offhand_dagger') return true;
+  return gear.some((g) => g.slot === 'dagger' || g.slot === 'offhand_dagger');
+}
+
+/**
+ * Put an item in a slot (null = take it off), clearing hand slots it can't be worn with.
+ * Taking off the main dagger moves the off-hand one into the main hand.
+ */
+export function equipGear(gear: GearSelection[], slot: string, itemId: number | null, tier = 1): GearSelection[] {
+  let next = gear.filter((g) => g.slot !== slot);
+  if (itemId) {
+    const conflicts = HAND_SLOT_CONFLICTS[slot] ?? [];
+    next = next.filter((g) => !conflicts.includes(g.slot));
+    next.push({ slot, gear_item_id: itemId, tier });
+  } else if (slot === 'dagger') {
+    next = next.map((g) => (g.slot === 'offhand_dagger' ? { ...g, slot: 'dagger' } : g));
+  }
+  return next;
+}
 
 export const MAX_TIER: Record<string, number> = { legendary: 16, mythic: 35 };
 
