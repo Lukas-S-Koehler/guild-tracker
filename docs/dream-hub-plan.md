@@ -70,7 +70,7 @@ schedule message) and F5 (calendar). `raid_reminders` could get a `raid_key` col
 | 16b | Party members are characters: alts of one person can share a party, one open party per character; `ign:` on create/invite/kick/rank/leave. Migration `database/party-characters.sql` (backfills single-character users) | built (run migration before deploy, register-hub) |
 | 17 | Discord **`/achievements [ign] [user] [category]`** (F9): private card with 📢 Share. Overview = unlocked/total, Dream XP rank + next, title, count per tier, progress bar per category, 🎯 closest to unlock (top 5 by % done), 🆕 latest 5. Category = full list (✅ + date, or progress bar value / threshold; locked hidden ones masked). A select menu switches category in place (`hubach:<ign>`, deferred update). `src/lib/achievements-discord-cmd.ts` on `accountProgress` | built (register-hub) |
 
-**Not now (user, 2026-11-26):** F8 DM digest (skipped for good), F6 mentors, website `/parties`. Next = Phase 3.
+**Not now (user, 2026-11-26):** F8 DM digest (skipped for good), F6 mentors, website `/parties`. Phase 3 on hold: leadership decides first whether they want a crystal economy at all.
 
 - **D1/D2 Achievements + badges:** `achievements` (key, category, name, desc, tier, threshold, metric, xp) + `user_achievements` (member_id, achievement_key, unlocked_at). Daily evaluator cron. ~60–80 tiered achievements: contribution, streak, assault, challenges, loyalty, level, community (bumps), journey.
 - **D3** unlock posts to #hall-of-fame. **D4** achievement/rank Discord roles. **D5** selectable title.
@@ -82,6 +82,8 @@ schedule message) and F5 (calendar). `raid_reminders` could get a `raid_key` col
 - **F8** weekly DM digest (opt-in). **F9** + `/profile`, `/achievements`, `/leaderboard network`, `/party`, `/kudos`.
 
 ## Phase 3: Dream Crystals economy
+
+**On hold (2026-11-26):** waiting for a leadership decision on whether to do this at all.
 
 - **E1** `shard_ledger`-style ledger for crystals (member_id, delta, reason, ref, at); balance = sum.
 - **E2** `reward_tiers` + `reward_claims` (claimed → fulfilled/rejected), staff fulfilment queue in admin, bot pings staff.
