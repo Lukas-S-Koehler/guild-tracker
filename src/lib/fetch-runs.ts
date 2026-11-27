@@ -149,8 +149,9 @@ export async function runFetchWatchdog(supabase: SupabaseClient, now = new Date(
     const stale = !lastOk || now.getTime() - Date.parse(lastOk.run_at) > 50 * 3600_000;
     if (latest.ok && !stale) continue;
     const err = String(latest.error ?? '');
-    const why = /\b403\b|unauthori/i.test(err)
-      ? 'the API key was rejected (403). A leader of the guild needs to set a new key in Admin → Guilds.'
+    const authCode = err.match(/\b(401|403)\b/)?.[1] ?? (/unauthori/i.test(err) ? '401' : null);
+    const why = authCode
+      ? `the API key was rejected (${authCode}). A leader of the guild needs to set a new key in Admin → Guilds.`
       : err
         ? `the last fetch failed: \`${err.slice(0, 200)}\``
         : 'no successful fetch in over 2 days.';

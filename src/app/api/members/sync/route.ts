@@ -24,16 +24,21 @@ export async function POST(req: NextRequest) {
 
   const supabase = createServerClient(req);
 
-  // Get the member's personal API key
-  const apiKey = await getMemberApiKey(supabase, user.id, guildId);
+  // Guild key first: Admin → Guilds says the key there is used for member sync. Personal key is the fallback.
+  const { data: cfg } = await createAdminClient()
+    .from('guild_config')
+    .select('api_key')
+    .eq('guild_id', guildId)
+    .maybeSingle();
+  const guildKey = cfg?.api_key && cfg.api_key !== 'placeholder' ? cfg.api_key : null;
+  const apiKey = guildKey ?? await getMemberApiKey(supabase, user.id, guildId);
 
-  console.log("MEMBER API KEY EXISTS:", !!apiKey);
+  console.log("SYNC KEY SOURCE:", guildKey ? 'guild' : apiKey ? 'personal' : 'none');
   console.log("SYNCING GUILD ID:", guildId);
 
   if (!apiKey) {
-    console.log("❌ No API key found for member");
     return NextResponse.json(
-      { error: 'API key not configured. Go to Settings to add your IdleMMO API key.' },
+      { error: 'No API key: set the guild key in Admin → Guilds or your own key in Settings.' },
       { status: 400 }
     );
   }
@@ -73,8 +78,10 @@ export async function POST(req: NextRequest) {
 
   if (!res.ok) {
     console.log("❌ IdleMMO API error");
+    let detail = raw.slice(0, 200);
+    try { detail = JSON.parse(raw)?.message ?? detail; } catch { /* not JSON */ }
     return NextResponse.json(
-      { error: 'IdleMMO API error', details: raw },
+      { error: `IdleMMO API error (${res.status}, ${guildKey ? 'guild' : 'personal'} key): ${detail}`, details: raw },
       { status: 500 }
     );
   }
