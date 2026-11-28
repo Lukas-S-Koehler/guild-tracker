@@ -112,6 +112,9 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
   const [syncing, setSyncing] = useState(false);
   const [backfillingBank, setBackfillingBank] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [keyCheck, setKeyCheck] = useState<{ ok: boolean; text: string } | null>(null);
+  const [checkingKey, setCheckingKey] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -123,6 +126,7 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
         ]);
         if (configRes.ok) {
           const data = await configRes.json();
+          setSavedAt(data.updated_at ?? null);
           setSettings({
             api_key: data.api_key || '',
             donation_requirement: data.donation_requirement ?? 5000,
@@ -148,9 +152,28 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
     load();
   }, [api, guildId]);
 
+  // Errors stay until the next action, so a refused save is not missed.
   const showMsg = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
-    setTimeout(() => setMessage(null), 4000);
+    if (type === 'success') setTimeout(() => setMessage((m) => (m?.text === text ? null : m)), 4000);
+  };
+
+  const handleCheckKey = async () => {
+    setCheckingKey(true);
+    setKeyCheck(null);
+    try {
+      const res = await api.post('/api/config/check-key', { api_key: settings.api_key }, { guildId });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Check failed');
+      const who = data.character ? ` (character ${data.character}${data.keyName ? `, key "${data.keyName}"` : ''})` : '';
+      setKeyCheck(data.ok
+        ? { ok: true, text: `Key works${who}.${data.saved ? '' : ' Not saved yet, press Save.'}` }
+        : { ok: false, text: data.reason });
+    } catch (err) {
+      setKeyCheck({ ok: false, text: err instanceof Error ? err.message : 'Check failed' });
+    } finally {
+      setCheckingKey(false);
+    }
   };
   const set = <K extends keyof GuildSettings>(k: K, v: GuildSettings[K]) => setSettings((prev) => ({ ...prev, [k]: v }));
 
@@ -177,9 +200,11 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
         }, { guildId }),
         api.patch('/api/admin/guild-meta', { guild_id: guildId, min_level: minLevel, is_active: isActive, is_assault: isAssault }, { guildId }),
       ]);
-      if (!configRes.ok) throw new Error((await configRes.json()).error || 'Failed to save config');
+      const configData = await configRes.json();
+      if (!configRes.ok) throw new Error(configData.error || 'Failed to save config');
       if (!metaRes.ok) throw new Error((await metaRes.json()).error || 'Failed to save guild meta');
-      showMsg('success', 'Settings saved');
+      if (configData.updated_at) setSavedAt(configData.updated_at);
+      showMsg('success', configData.key_owner ? `Settings saved. New key checked: character ${configData.key_owner}.` : 'Settings saved');
       onSaved();
     } catch (err) {
       showMsg('error', err instanceof Error ? err.message : 'Failed to save');
@@ -321,11 +346,27 @@ function GuildSettingsSection({ guildId, guildName, currentMinLevel, currentIsAc
 
         {isLeaderOfThisGuild && (
           <Section title="IdleMMO API key" desc="Used for the daily activity fetch, member sync and the guild hall post. Leader only.">
-            <Input type="password" value={settings.api_key} onChange={(e) => set('api_key', e.target.value)} placeholder="Enter API key..." />
-            <Button size="sm" variant="outline" onClick={handleSyncMembers} disabled={syncing}>
-              {syncing ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
-              Sync members now
-            </Button>
+            <Input type="password" value={settings.api_key} onChange={(e) => { set('api_key', e.target.value); setKeyCheck(null); }} placeholder="Enter API key..." />
+            <p className="text-xs text-muted-foreground">
+              Create the key in IdleMMO while playing the guild leader or an officer of this guild.
+              {savedAt && <> Settings last saved {new Date(savedAt).toLocaleString()}.</>}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={handleCheckKey} disabled={checkingKey || !settings.api_key}>
+                {checkingKey ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Check className="h-3 w-3 mr-1" />}
+                Test key
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleSyncMembers} disabled={syncing}>
+                {syncing ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+                Sync members now
+              </Button>
+            </div>
+            {keyCheck && (
+              <p className={`text-xs flex items-start gap-1.5 ${keyCheck.ok ? 'text-green-500' : 'text-destructive'}`}>
+                {keyCheck.ok ? <Check className="h-3.5 w-3.5 mt-px shrink-0" /> : <AlertCircle className="h-3.5 w-3.5 mt-px shrink-0" />}
+                {keyCheck.text}
+              </p>
+            )}
           </Section>
         )}
       </div>
