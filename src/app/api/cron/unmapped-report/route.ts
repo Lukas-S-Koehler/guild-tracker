@@ -27,6 +27,7 @@ export async function POST(req: NextRequest) {
     .from('members')
     .select('ign, current_guild_id')
     .is('discord_id', null)
+    .eq('no_discord', false)
     .eq('is_active', true)
     .order('current_guild_id')
     .order('ign');
@@ -98,7 +99,7 @@ export async function POST(req: NextRequest) {
 
   await postToChannel(
     UNMAPPED_CHANNEL_ID,
-    `Respective guild leaders, please use the \`/map\` command to map these members to their Discord accounts.`
+    `Respective guild leaders, please use the \`/map\` command to map these members to their Discord accounts. If someone has no Discord, use \`/map ign:<name> no_discord:True\` to drop them from this report.`
   );
 
   return NextResponse.json({ ok: true, total: filtered.length, results });

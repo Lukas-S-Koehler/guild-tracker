@@ -872,7 +872,13 @@ export async function registerMapCommand(): Promise<{ ok: boolean; error?: strin
         name: 'user',
         type: 6, // USER type
         description: 'Discord user to link',
-        required: true,
+        required: false,
+      },
+      {
+        name: 'no_discord',
+        type: 5, // BOOLEAN type
+        description: 'True: member has no Discord (hide from unmapped report). False: undo.',
+        required: false,
       },
     ],
   };

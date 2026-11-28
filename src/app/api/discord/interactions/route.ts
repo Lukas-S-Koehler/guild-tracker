@@ -428,14 +428,17 @@ async function handleMapAutocomplete(interaction: {
 
   const { data: members } = await supabase
     .from('members')
-    .select('ign')
+    .select('ign, no_discord')
     .is('discord_id', null)
     .eq('is_active', true)
     .ilike('ign', `%${query}%`)
     .order('ign', { ascending: true })
     .limit(25);
 
-  const choices = (members ?? []).map((m) => ({ name: m.ign, value: m.ign }));
+  const choices = (members ?? []).map((m) => ({
+    name: m.no_discord ? `${m.ign} (no Discord)` : m.ign,
+    value: m.ign,
+  }));
 
   return NextResponse.json({ type: 8, data: { choices } });
 }
@@ -526,7 +529,7 @@ async function handleWhipCommand(interaction: {
 async function handleMapCommand(interaction: {
   member?: { roles?: string[] };
   data: {
-    options?: Array<{ name: string; value: string }>;
+    options?: Array<{ name: string; value: string | boolean }>;
     resolved?: { users?: Record<string, { username: string; global_name?: string }> };
   };
 }) {
@@ -536,18 +539,22 @@ async function handleMapCommand(interaction: {
   const supabase = createAdminClient();
 
   const options = interaction.data?.options ?? [];
-  const targetDiscordId = options.find((o) => o.name === 'user')?.value as string;
+  const targetDiscordId = options.find((o) => o.name === 'user')?.value as string | undefined;
   const ign = options.find((o) => o.name === 'ign')?.value as string;
+  const noDiscordOpt = options.find((o) => o.name === 'no_discord')?.value as boolean | undefined;
 
-  if (!targetDiscordId || !ign) {
+  if (!ign || (!targetDiscordId && noDiscordOpt === undefined)) {
     return NextResponse.json({
       type: 4,
-      data: { content: 'Missing required arguments.', flags: 64 },
+      data: { content: 'Pick a `user` to map, or set `no_discord` for a member without Discord.', flags: 64 },
     });
   }
-
-  const resolvedUser = interaction.data?.resolved?.users?.[targetDiscordId];
-  const discordUsername = resolvedUser?.global_name ?? resolvedUser?.username ?? null;
+  if (targetDiscordId && noDiscordOpt === true) {
+    return NextResponse.json({
+      type: 4,
+      data: { content: 'Choose either a `user` or `no_discord: True`, not both.', flags: 64 },
+    });
+  }
 
   const { data: member } = await supabase
     .from('members')
@@ -562,6 +569,36 @@ async function handleMapCommand(interaction: {
       data: { content: `No active member found with IGN **${ign}**.`, flags: 64 },
     });
   }
+
+  // No-Discord flag only: hides the member (and their unmapped alts) from the unmapped report.
+  if (!targetDiscordId) {
+    if (noDiscordOpt && member.discord_id) {
+      return NextResponse.json({
+        type: 4,
+        data: { content: `**${member.ign}** is already mapped to <@${member.discord_id}>.`, flags: 64 },
+      });
+    }
+    const { getAccountMemberIds } = await import('@/lib/alt-graph');
+    const accountIds = Array.from(await getAccountMemberIds(supabase, [member.id]));
+    const { data: flagged, error: flagErr } = await supabase
+      .from('members')
+      .update({ no_discord: noDiscordOpt === true })
+      .in('id', accountIds)
+      .is('discord_id', null)
+      .select('id');
+    if (flagErr) {
+      return NextResponse.json({ type: 4, data: { content: `DB error: ${flagErr.message}`, flags: 64 } });
+    }
+    const altCount = Math.max(0, (flagged?.length ?? 1) - 1);
+    const altNote = altCount > 0 ? ` (+ ${altCount} alt${altCount > 1 ? 's' : ''})` : '';
+    const msg = noDiscordOpt
+      ? `🚫 Marked **${member.ign}**${altNote} as **no Discord** — hidden from the unmapped report. Still mappable with \`/map\` if they join later.`
+      : `↩️ Cleared **no Discord** for **${member.ign}**${altNote} — back in the unmapped report.`;
+    return NextResponse.json({ type: 4, data: { content: msg, flags: 64 } });
+  }
+
+  const resolvedUser = interaction.data?.resolved?.users?.[targetDiscordId];
+  const discordUsername = resolvedUser?.global_name ?? resolvedUser?.username ?? null;
 
   // Update the member
   const { error } = await supabase
